@@ -94,6 +94,9 @@ private fun SettingsScreen() {
     val context = LocalContext.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
+    var agentRowKeyIds by remember { mutableStateOf(KeyboardSettings.readAgentRowKeyIds(context)) }
+    var emojiSkinTone by remember { mutableStateOf(KeyboardSettings.readEmojiSkinTone(context)) }
+    var recentEmojiRows by remember { mutableStateOf(KeyboardSettings.readRecentEmojiRows(context)) }
     var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
     var autocompletePlusEnabled by remember { mutableStateOf(KeyboardSettings.readAutocompletePlusEnabled(context)) }
     var agentProviderType by remember { mutableStateOf(KeyboardSettings.readAgentProviderType(context)) }
@@ -109,6 +112,12 @@ private fun SettingsScreen() {
         val normalizedKeyIds = KeyboardSettings.normalizeUpperRowKeyIds(keyIds)
         upperRowKeyIds = normalizedKeyIds
         KeyboardSettings.saveUpperRowKeyIds(context, normalizedKeyIds)
+    }
+
+    fun updateAgentRowKeyIds(keyIds: List<String>) {
+        val normalizedKeyIds = KeyboardSettings.normalizeAgentRowKeyIds(keyIds)
+        agentRowKeyIds = normalizedKeyIds
+        KeyboardSettings.saveAgentRowKeyIds(context, normalizedKeyIds)
     }
 
     Scaffold(
@@ -243,9 +252,141 @@ private fun SettingsScreen() {
                 }
             }
 
+            EmojiPreferencesSection(
+                skinTone = emojiSkinTone,
+                recentEmojiRows = recentEmojiRows,
+                onSkinToneChange = {
+                    emojiSkinTone = it
+                    KeyboardSettings.saveEmojiSkinTone(context, it)
+                },
+                onRecentEmojiRowsChange = {
+                    val rows = EmojiCatalog.normalizeRecentRowCount(it)
+                    recentEmojiRows = rows
+                    KeyboardSettings.saveRecentEmojiRows(context, rows)
+                },
+            )
+
             UpperRowKeysSection(
-                upperRowKeyIds = upperRowKeyIds,
-                onUpperRowKeyIdsChange = ::updateUpperRowKeyIds,
+                title = "Agent row buttons",
+                keyIds = agentRowKeyIds,
+                maxKeys = KeyboardSettings.MAX_AGENT_ROW_KEYS,
+                defaultKeyIds = KeyboardSettings.DEFAULT_AGENT_ROW_KEY_IDS,
+                onKeyIdsChange = ::updateAgentRowKeyIds,
+            )
+
+            UpperRowKeysSection(
+                title = "Upper row keys",
+                keyIds = upperRowKeyIds,
+                maxKeys = KeyboardSettings.MAX_UPPER_ROW_KEYS,
+                defaultKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
+                onKeyIdsChange = ::updateUpperRowKeyIds,
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmojiPreferencesSection(
+    skinTone: EmojiSkinTone,
+    recentEmojiRows: Int,
+    onSkinToneChange: (EmojiSkinTone) -> Unit,
+    onRecentEmojiRowsChange: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Emoji",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+                ) {
+                    Text(
+                        text = skinTone.sample,
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalAlignment = Alignment.Start,
+                    ) {
+                        Text(
+                            text = "Default tone",
+                            color = ZnKeyboardColors.Muted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Text(
+                            text = skinTone.label,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                    Text(
+                        text = "Change",
+                        color = ZnKeyboardColors.Accent,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+
+                FloatingPickerMenu(
+                    expanded = expanded,
+                    items = EmojiSkinTone.entries.map { option ->
+                        PickerItem(
+                            id = option.id,
+                            title = "${option.sample}  ${option.label}",
+                        )
+                    },
+                    onDismissRequest = { expanded = false },
+                    onItemSelected = { item ->
+                        expanded = false
+                        EmojiSkinTone.entries.firstOrNull { it.id == item.id }
+                            ?.let(onSkinToneChange)
+                    },
+                    maxHeight = SKIN_TONE_PICKER_MAX_HEIGHT,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Recent rows",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "$recentEmojiRows",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            Slider(
+                value = recentEmojiRows.toFloat(),
+                onValueChange = { value ->
+                    onRecentEmojiRowsChange(value.roundToInt())
+                },
+                valueRange = EmojiCatalog.MIN_RECENT_ROW_COUNT.toFloat()..EmojiCatalog.MAX_RECENT_ROW_COUNT.toFloat(),
+                steps = EmojiCatalog.MAX_RECENT_ROW_COUNT - EmojiCatalog.MIN_RECENT_ROW_COUNT - 1,
             )
         }
     }
@@ -821,8 +962,11 @@ private fun ReasoningControls(
 
 @Composable
 private fun UpperRowKeysSection(
-    upperRowKeyIds: List<String>,
-    onUpperRowKeyIdsChange: (List<String>) -> Unit,
+    title: String,
+    keyIds: List<String>,
+    maxKeys: Int,
+    defaultKeyIds: List<String>,
+    onKeyIdsChange: (List<String>) -> Unit,
 ) {
     Surface(
         color = ZnKeyboardColors.Surface,
@@ -847,19 +991,19 @@ private fun UpperRowKeysSection(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        text = "Upper row keys",
+                        text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
                 Text(
-                    text = "${upperRowKeyIds.size}/${KeyboardSettings.MAX_UPPER_ROW_KEYS}",
+                    text = "${keyIds.size}/$maxKeys",
                     color = ZnKeyboardColors.Muted,
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
 
-            if (upperRowKeyIds.isEmpty()) {
+            if (keyIds.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -876,20 +1020,20 @@ private fun UpperRowKeysSection(
                 }
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    upperRowKeyIds.forEachIndexed { index, keyId ->
+                    keyIds.forEachIndexed { index, keyId ->
                         UpperRowKeyEditor(
                             index = index,
                             keyId = keyId,
                             onKeyChange = { nextKeyId ->
-                                onUpperRowKeyIdsChange(
-                                    upperRowKeyIds.toMutableList().apply {
+                                onKeyIdsChange(
+                                    keyIds.toMutableList().apply {
                                         set(index, nextKeyId)
                                     },
                                 )
                             },
                             onRemove = {
-                                onUpperRowKeyIdsChange(
-                                    upperRowKeyIds.toMutableList().apply {
+                                onKeyIdsChange(
+                                    keyIds.toMutableList().apply {
                                         removeAt(index)
                                     },
                                 )
@@ -905,9 +1049,9 @@ private fun UpperRowKeysSection(
             ) {
                 Button(
                     onClick = {
-                        onUpperRowKeyIdsChange(upperRowKeyIds + nextUpperRowKeyId(upperRowKeyIds))
+                        onKeyIdsChange(keyIds + nextUpperRowKeyId(keyIds, defaultKeyIds))
                     },
-                    enabled = upperRowKeyIds.size < KeyboardSettings.MAX_UPPER_ROW_KEYS,
+                    enabled = keyIds.size < maxKeys,
                     modifier = Modifier.weight(1f),
                 ) {
                     Icon(
@@ -920,8 +1064,8 @@ private fun UpperRowKeysSection(
                 }
 
                 OutlinedButton(
-                    onClick = { onUpperRowKeyIdsChange(KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS) },
-                    enabled = upperRowKeyIds != KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
+                    onClick = { onKeyIdsChange(defaultKeyIds) },
+                    enabled = keyIds != defaultKeyIds,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
                 ) {
@@ -1039,8 +1183,8 @@ private fun SystemSetupActions() {
     }
 }
 
-private fun nextUpperRowKeyId(currentKeyIds: List<String>): String {
-    return KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS.firstOrNull { it !in currentKeyIds }
+private fun nextUpperRowKeyId(currentKeyIds: List<String>, preferredKeyIds: List<String>): String {
+    return preferredKeyIds.firstOrNull { it !in currentKeyIds }
         ?: KeyboardSettings.UPPER_ROW_KEY_OPTIONS.first().id
 }
 
@@ -1129,6 +1273,7 @@ private val PICKER_MENU_WIDTH = 320.dp
 private val PICKER_MAX_HEIGHT = 280.dp
 private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp
 private val REASONING_PICKER_MAX_HEIGHT = 260.dp
+private val SKIN_TONE_PICKER_MAX_HEIGHT = 260.dp
 private val PICKER_CORNER_RADIUS = 10.dp
 
 @Composable

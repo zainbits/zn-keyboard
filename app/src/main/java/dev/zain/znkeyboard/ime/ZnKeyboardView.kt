@@ -6,12 +6,15 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.os.Handler
+import android.os.Looper
 import android.util.AttributeSet
 import android.util.SparseArray
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import dev.zain.znkeyboard.KeyboardSettings
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -22,6 +25,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 ) : View(context, attrs) {
     interface Callback {
         fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState)
+        fun onEmojiPanelRequested()
     }
 
     var callback: Callback? = null
@@ -52,13 +56,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
-        val resourceId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        val navigationBarHeightPx = if (resourceId != 0) resources.getDimension(resourceId) else 0f
-        navigationBarHeightPx.coerceAtLeast(dp(MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP)) * BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER
+        ImeLayout.bottomSystemControlGapPx(context)
     }
     private val activeTouches = SparseArray<ActiveTouch>()
     private val pointerQueue = mutableListOf<Int>()
     private var hitTargets: List<KeyHit> = emptyList()
+    private val longPressHandler = Handler(Looper.getMainLooper())
+    private var pendingLongPressPointerId: Int? = null
+    private var pendingLongPressRunnable: Runnable? = null
 
     init {
         isHapticFeedbackEnabled = false
@@ -102,7 +107,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
+        val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
             .roundToInt()
         val width = MeasureSpec.getSize(widthMeasureSpec)
         setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
@@ -179,6 +184,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         activeTouches.put(pointerId, ActiveTouch(hit?.key))
         pointerQueue.remove(pointerId)
         pointerQueue.add(pointerId)
+        if (hit?.key?.id == "comma") {
+            scheduleCommaLongPress(pointerId)
+        }
     }
 
     private fun updateActiveTouches(event: MotionEvent): Boolean {
@@ -189,6 +197,9 @@ class ZnKeyboardView @JvmOverloads constructor(
             val key = findHit(event.getX(pointerIndex), event.getY(pointerIndex))?.key
             if (touch.currentKey?.id != key?.id) {
                 touch.currentKey = key
+                if (pendingLongPressPointerId == pointerId && key?.id != "comma") {
+                    cancelPendingLongPress()
+                }
                 changed = true
             }
         }
@@ -200,17 +211,53 @@ class ZnKeyboardView @JvmOverloads constructor(
             val nextPointerId = pointerQueue.removeAt(0)
             val touch = activeTouches.get(nextPointerId)
             activeTouches.remove(nextPointerId)
-            touch?.currentKey?.let(::handleKey)
+            cancelLongPressFor(nextPointerId)
+            if (touch?.longPressConsumed != true) {
+                touch?.currentKey?.let(::handleKey)
+            }
             if (nextPointerId == pointerId) {
                 return
             }
         }
         activeTouches.remove(pointerId)
+        cancelLongPressFor(pointerId)
     }
 
     private fun cancelActiveTouches() {
+        cancelPendingLongPress()
         activeTouches.clear()
         pointerQueue.clear()
+    }
+
+    private fun scheduleCommaLongPress(pointerId: Int) {
+        cancelPendingLongPress()
+        pendingLongPressPointerId = pointerId
+        pendingLongPressRunnable = Runnable {
+            val touch = activeTouches.get(pointerId) ?: return@Runnable
+            if (touch.currentKey?.id != "comma") return@Runnable
+
+            touch.longPressConsumed = true
+            touch.currentKey = null
+            pointerQueue.remove(pointerId)
+            pendingLongPressPointerId = null
+            pendingLongPressRunnable = null
+            callback?.onEmojiPanelRequested()
+            invalidate()
+        }.also { runnable ->
+            longPressHandler.postDelayed(runnable, ViewConfiguration.getLongPressTimeout().toLong())
+        }
+    }
+
+    private fun cancelLongPressFor(pointerId: Int) {
+        if (pendingLongPressPointerId == pointerId) {
+            cancelPendingLongPress()
+        }
+    }
+
+    private fun cancelPendingLongPress() {
+        pendingLongPressRunnable?.let(longPressHandler::removeCallbacks)
+        pendingLongPressRunnable = null
+        pendingLongPressPointerId = null
     }
 
     private fun drawKey(canvas: Canvas, hit: KeyHit) {
@@ -261,7 +308,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         canvas.save()
         canvas.translate(left, top)
-        canvas.scale(iconSize / ICON_VIEWPORT, iconSize / ICON_VIEWPORT)
+        canvas.scale(iconSize / ImeLayout.ICON_VIEWPORT, iconSize / ImeLayout.ICON_VIEWPORT)
         when (icon) {
             KeyIcon.ArrowLeft -> drawArrowIcon(canvas, ArrowDirection.Left)
             KeyIcon.ArrowUp -> drawArrowIcon(canvas, ArrowDirection.Up)
@@ -426,11 +473,11 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun layoutKeys(totalWidth: Float, totalHeight: Float): List<KeyHit> {
         val rows = rows()
-        val horizontalPadding = dp(6f)
-        val topPadding = dp(6f)
-        val bottomPadding = dp(BASE_BOTTOM_PADDING_DP) + bottomSystemControlGapPx
-        val keyGap = dp(5f)
-        val rowGap = dp(6f)
+        val horizontalPadding = dp(ImeLayout.HORIZONTAL_PADDING_DP.toFloat())
+        val topPadding = dp(ImeLayout.TOP_PADDING_DP.toFloat())
+        val bottomPadding = dp(ImeLayout.BASE_BOTTOM_PADDING_DP.toFloat()) + bottomSystemControlGapPx
+        val keyGap = dp(ImeLayout.KEY_GAP_DP.toFloat())
+        val rowGap = dp(ImeLayout.ROW_GAP_DP.toFloat())
         val rowWeightSum = rows.fold(0f) { total, row -> total + row.heightWeight }
         val usableHeight = totalHeight - topPadding - bottomPadding - rowGap * (rows.size - 1)
         val unitHeight = usableHeight / rowWeightSum
@@ -521,7 +568,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 weight = upperRowKeyWeight(index, upperRowKeyIds.lastIndex),
             )
         }
-        return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = 0.78f) }
+        return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT) }
     }
 
     private fun upperRowKeyWeight(index: Int, lastIndex: Int): Float {
@@ -716,6 +763,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private data class ActiveTouch(
         var currentKey: KeySpec?,
+        var longPressConsumed: Boolean = false,
     )
 
     private sealed class KeyIntent {
@@ -735,14 +783,6 @@ class ZnKeyboardView @JvmOverloads constructor(
         val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
-    }
-
-    private companion object {
-        const val BASE_HEIGHT_DP = 282f
-        const val BASE_BOTTOM_PADDING_DP = 8f
-        const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = 16f
-        const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = 1.5f
-        const val ICON_VIEWPORT = 24f
     }
 }
 

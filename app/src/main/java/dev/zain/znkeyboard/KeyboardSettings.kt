@@ -21,11 +21,16 @@ object KeyboardSettings {
     const val OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
     const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
     const val MAX_UPPER_ROW_KEYS = 9
+    const val MAX_AGENT_ROW_KEYS = 5
 
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
+    private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
+    private const val KEY_RECENT_EMOJIS = "recent_emojis"
+    private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
+    private const val KEY_EMOJI_SKIN_TONE = "emoji_skin_tone"
     private const val KEY_AGENT_MODE_ENABLED = "agent_mode_enabled"
     private const val KEY_AUTOCOMPLETE_PLUS_ENABLED = "autocomplete_plus_enabled"
     private const val KEY_AGENT_PROVIDER_TYPE = "agent_provider_type"
@@ -44,6 +49,7 @@ object KeyboardSettings {
     private const val GCM_TAG_LENGTH_BITS = 128
 
     val DEFAULT_UPPER_ROW_KEY_IDS = listOf("ctrl", "tab", "pipe", "slash", "left", "up", "down", "right", "esc")
+    val DEFAULT_AGENT_ROW_KEY_IDS = listOf("left", "right", "backspace")
 
     val UPPER_ROW_KEY_OPTIONS = listOf(
         UpperRowKeyOption("ctrl", "Ctrl"),
@@ -123,6 +129,71 @@ object KeyboardSettings {
 
     fun labelForUpperRowKey(keyId: String): String {
         return UPPER_ROW_KEY_OPTIONS.firstOrNull { it.id == keyId }?.label.orEmpty()
+    }
+
+    fun readAgentRowKeyIds(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_AGENT_ROW_KEYS, null) ?: return DEFAULT_AGENT_ROW_KEY_IDS
+        return parseAgentRowKeyIds(stored) ?: DEFAULT_AGENT_ROW_KEY_IDS
+    }
+
+    fun saveAgentRowKeyIds(context: Context, keyIds: List<String>) {
+        val keys = normalizeAgentRowKeyIds(keyIds)
+        val encoded = JSONArray().apply {
+            keys.forEach(::put)
+        }.toString()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_AGENT_ROW_KEYS, encoded).apply()
+    }
+
+    fun normalizeAgentRowKeyIds(keyIds: List<String>): List<String> {
+        return keyIds
+            .filter { it in upperRowKeyOptionIds }
+            .take(MAX_AGENT_ROW_KEYS)
+    }
+
+    fun readRecentEmojis(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_RECENT_EMOJIS, null) ?: return emptyList()
+        return parseStringArray(stored)
+            ?.let(EmojiCatalog::normalizeRecentEmojis)
+            ?: emptyList()
+    }
+
+    fun saveRecentEmojis(context: Context, emojis: List<String>) {
+        val encoded = JSONArray().apply {
+            EmojiCatalog.normalizeRecentEmojis(emojis).forEach(::put)
+        }.toString()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_RECENT_EMOJIS, encoded)
+            .apply()
+    }
+
+    fun readRecentEmojiRows(context: Context): Int {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_RECENT_EMOJI_ROWS, EmojiCatalog.DEFAULT_RECENT_ROW_COUNT)
+            .let(EmojiCatalog::normalizeRecentRowCount)
+    }
+
+    fun saveRecentEmojiRows(context: Context, rowCount: Int) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_RECENT_EMOJI_ROWS, EmojiCatalog.normalizeRecentRowCount(rowCount))
+            .apply()
+    }
+
+    fun readEmojiSkinTone(context: Context): EmojiSkinTone {
+        val stored = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_EMOJI_SKIN_TONE, null)
+        return EmojiSkinTone.entries.firstOrNull { it.id == stored } ?: EmojiSkinTone.Default
+    }
+
+    fun saveEmojiSkinTone(context: Context, skinTone: EmojiSkinTone) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_EMOJI_SKIN_TONE, skinTone.id)
+            .apply()
     }
 
     fun readAgentModeEnabled(context: Context): Boolean {
@@ -338,13 +409,21 @@ object KeyboardSettings {
     }
 
     private fun parseUpperRowKeyIds(stored: String): List<String>? {
+        return parseStringArray(stored)?.let(::normalizeUpperRowKeyIds)
+    }
+
+    private fun parseAgentRowKeyIds(stored: String): List<String>? {
+        return parseStringArray(stored)?.let(::normalizeAgentRowKeyIds)
+    }
+
+    private fun parseStringArray(stored: String): List<String>? {
         return try {
             val array = JSONArray(stored)
             buildList {
                 for (index in 0 until array.length()) {
                     add(array.optString(index))
                 }
-            }.let(::normalizeUpperRowKeyIds)
+            }
         } catch (_: JSONException) {
             null
         }

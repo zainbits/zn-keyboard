@@ -8,9 +8,14 @@ import android.text.InputType
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.ExtractedTextRequest
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
+import dev.zain.znkeyboard.EmojiCatalog
+import dev.zain.znkeyboard.EmojiSkinTone
 import dev.zain.znkeyboard.KeyboardSettings
 import org.json.JSONArray
 import org.json.JSONException
@@ -22,12 +27,24 @@ import java.util.Locale
 
 class ZnKeyboardInputMethodService : InputMethodService(),
     ZnKeyboardView.Callback,
-    AgentAssistStripView.Callback {
+    EmojiPanelView.Callback,
+    AgentAssistStripView.Callback,
+    AgentReviewView.Callback,
+    AgentHistoryView.Callback {
     private var keyboardView: ZnKeyboardView? = null
+    private var keyboardContainer: FrameLayout? = null
+    private var emojiPanelView: EmojiPanelView? = null
+    private var agentReviewView: AgentReviewView? = null
+    private var agentHistoryView: AgentHistoryView? = null
     private var agentStripView: AgentAssistStripView? = null
     private var currentEditorInfo: EditorInfo? = null
+    private var recentEmojis: List<String> = emptyList()
+    private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
+    private var defaultEmojiSkinTone = EmojiSkinTone.Default
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var draftState: DraftState? = null
+    private var activeSurface = KeyboardSurface.Keyboard
+    private var activeRequestTarget: AgentEditTarget? = null
+    private var activeReview: AgentReview? = null
     private var agentError: String? = null
     private var agentLoading = false
     private var requestGeneration = 0
@@ -35,6 +52,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var lastAutocompleteInput: String? = null
 
     override fun onCreateInputView(): View {
+        recentEmojis = KeyboardSettings.readRecentEmojis(this)
+        recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
+        defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
         val agentStrip = AgentAssistStripView(this).also { view ->
             agentStripView = view
             view.callback = this
@@ -43,17 +63,27 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             keyboardView = view
             view.callback = this
         }
+        val keyboardSlot = FrameLayout(this).also { container ->
+            keyboardContainer = container
+            container.addView(
+                keyboard,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+        }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(
                 agentStrip,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
-                    dp(56),
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
                 ),
             )
             addView(
-                keyboard,
+                keyboardSlot,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -68,14 +98,14 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         currentEditorInfo = attribute
-        resetAgentDraft()
+        resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         currentEditorInfo = info
-        resetAgentDraft()
+        resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         keyboardView?.setEnterLabel(resolveEnterLabel(info))
         renderAgentStrip()
@@ -83,8 +113,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboardView?.clearLatchedModifiers()
-        resetAgentDraft()
-        cancelAutocomplete()
+        resetAgentState(returnToKeyboard = true)
         super.onFinishInputView(finishingInput)
     }
 
@@ -95,114 +124,187 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState) {
-        if (handleAgentDraftKeyboardAction(action, modifiers)) {
-            return
-        }
-
         when (action) {
             KeyboardAction.Backspace -> handleBackspace()
             KeyboardAction.Enter -> handleEnter(modifiers)
             is KeyboardAction.KeyCode -> {
+                cancelActiveAgentForEditorChange()
                 sendKey(action.keyCode, modifiers)
-                resetAgentDraft()
             }
             is KeyboardAction.Text -> handleText(action.value, modifiers)
         }
     }
 
-    override fun onAgentDraftEdited(text: String) {
-        cancelAutocomplete()
-        requestGeneration++
-        agentError = null
-        agentLoading = false
-        val previous = draftState
-        draftState = text.takeIf { it.isNotEmpty() }?.let {
-            when {
-                previous == null -> DraftState(
-                    originalText = it,
-                    draftText = it,
-                    source = DraftSource.Manual,
-                    editorAnchorText = null,
-                )
-                previous.source == DraftSource.Manual &&
-                    previous.editorAnchorText == null &&
-                    previous.originalText == previous.draftText -> DraftState(
-                        originalText = it,
-                        draftText = it,
-                        source = DraftSource.Manual,
-                        editorAnchorText = null,
-                    )
-                else -> previous.copy(
-                    draftText = it,
-                    source = DraftSource.Manual,
-                )
-            }
-        }
-        renderAgentStrip()
+    override fun onEmojiPanelRequested() {
+        showEmojiPanel()
+    }
+
+    override fun onEmojiSelected(emoji: String, updatedRecentEmojis: List<String>) {
+        handleText(emoji, ModifierState(ctrl = false, alt = false))
+        persistRecentEmojis(updatedRecentEmojis)
+    }
+
+    override fun onEmojiPanelClosed() {
+        showKeyboardPanel()
+    }
+
+    override fun onEmojiBackspace() {
+        handleBackspace()
+    }
+
+    override fun onEmojiSpace() {
+        handleText(" ", ModifierState(ctrl = false, alt = false))
     }
 
     override fun onAgentRewriteRequested() {
-        val state = draftState ?: return
-        startLlmRequest(
-            kind = LlmRequestKind.Rewrite,
-            sourceText = state.originalText,
-            draftText = state.draftText,
-        )
+        startRewriteFromCurrentEditor()
     }
 
-    override fun onAgentApplyRequested() {
-        applyAgentDraft()
+    override fun onAgentHistoryRequested() {
+        showAgentHistoryPanel()
+    }
+
+    override fun onAgentRowAction(action: KeyboardAction, modifiers: ModifierState) {
+        onKeyboardAction(action, modifiers)
+    }
+
+    override fun onAgentReviewApply() {
+        applyAgentReview()
+    }
+
+    override fun onAgentReviewCancel() {
+        cancelAgentReview()
+    }
+
+    override fun onAgentHistoryClosed() {
+        showKeyboardPanel()
     }
 
     private fun applyKeyboardSettings() {
+        val heightScale = KeyboardSettings.readHeightScale(this)
+        recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
+        defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
         keyboardView?.let { view ->
-            view.setHeightScale(KeyboardSettings.readHeightScale(this))
+            view.setHeightScale(heightScale)
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
         }
+        agentStripView?.setHeightScale(heightScale)
+        agentStripView?.setAgentRowKeyIds(KeyboardSettings.readAgentRowKeyIds(this))
+        emojiPanelView?.let { view ->
+            view.setHeightScale(heightScale)
+            view.setRecentEmojis(recentEmojis)
+            view.setRecentRowCount(recentEmojiRows)
+            view.setDefaultSkinTone(defaultEmojiSkinTone)
+        }
+        agentReviewView?.setHeightScale(heightScale)
+        agentHistoryView?.setHeightScale(heightScale)
         renderAgentStrip()
     }
 
-    private fun handleAgentDraftKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
-        val strip = agentStripView ?: return false
-        if (!strip.isDraftFieldFocused || modifiers.hasHardwareMeta) return false
+    private fun showEmojiPanel() {
+        val panel = emojiPanelView ?: EmojiPanelView(this).also { view ->
+            emojiPanelView = view
+            view.callback = this
+        }
+        recentEmojis = KeyboardSettings.readRecentEmojis(this)
+        recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
+        defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        panel.setHeightScale(KeyboardSettings.readHeightScale(this))
+        panel.setRecentEmojis(recentEmojis)
+        panel.setRecentRowCount(recentEmojiRows)
+        panel.setDefaultSkinTone(defaultEmojiSkinTone)
+        activeSurface = KeyboardSurface.Emoji
+        swapKeyboardSurface(panel)
+        renderAgentStrip()
+    }
 
-        return when (action) {
-            KeyboardAction.Backspace -> strip.deleteDraftTextBeforeCursor()
-            KeyboardAction.Enter -> strip.commitDraftText("\n")
-            is KeyboardAction.Text -> strip.commitDraftText(action.value)
-            is KeyboardAction.KeyCode -> strip.handleDraftKeyCode(action.keyCode)
+    private fun showKeyboardPanel() {
+        activeSurface = KeyboardSurface.Keyboard
+        val keyboard = keyboardView ?: run {
+            renderAgentStrip()
+            return
+        }
+        swapKeyboardSurface(keyboard)
+        renderAgentStrip()
+    }
+
+    private fun showAgentReviewPanel(review: AgentReview) {
+        val reviewView = agentReviewView ?: AgentReviewView(this).also { view ->
+            agentReviewView = view
+            view.callback = this
+        }
+        reviewView.setHeightScale(KeyboardSettings.readHeightScale(this))
+        reviewView.render(review.replacementText)
+        activeSurface = KeyboardSurface.Review
+        swapKeyboardSurface(reviewView)
+        renderAgentStrip()
+    }
+
+    private fun showAgentHistoryPanel() {
+        val historyView = agentHistoryView ?: AgentHistoryView(this).also { view ->
+            agentHistoryView = view
+            view.callback = this
+        }
+        historyView.setHeightScale(KeyboardSettings.readHeightScale(this))
+        historyView.submitHistory(AgentRewriteHistoryStore.read(this))
+        activeSurface = KeyboardSurface.History
+        swapKeyboardSurface(historyView)
+        renderAgentStrip()
+    }
+
+    private fun swapKeyboardSurface(surface: View) {
+        val container = keyboardContainer ?: return
+        (surface.parent as? ViewGroup)?.removeView(surface)
+        container.removeAllViews()
+        container.addView(
+            surface,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+    }
+
+    private fun persistRecentEmojis(emojis: List<String>) {
+        val normalizedEmojis = EmojiCatalog.normalizeRecentEmojis(emojis)
+        recentEmojis = normalizedEmojis
+        emojiPanelView?.setRecentEmojis(normalizedEmojis)
+        mainHandler.post {
+            KeyboardSettings.saveRecentEmojis(this, normalizedEmojis)
         }
     }
 
     private fun handleText(value: String, modifiers: ModifierState) {
         val inputConnection = currentInputConnection ?: return
+        cancelActiveAgentForEditorChange()
         if (modifiers.hasHardwareMeta && value.length == 1) {
             val keyCode = keyCodeFor(value[0])
             if (keyCode != null) {
                 sendKey(keyCode, modifiers)
-                resetAgentDraft()
                 return
             }
         }
         inputConnection.commitText(value, 1)
-        refreshDraftFromEditor()
         scheduleAutocomplete()
     }
 
     private fun handleBackspace() {
         val inputConnection = currentInputConnection ?: return
+        cancelActiveAgentForEditorChange()
         val selectedText = inputConnection.getSelectedText(0)
         if (!selectedText.isNullOrEmpty()) {
             inputConnection.commitText("", 1)
         } else {
-            inputConnection.deleteSurroundingText(1, 0)
+            if (!inputConnection.deleteSurroundingTextInCodePoints(1, 0)) {
+                inputConnection.deleteSurroundingText(1, 0)
+            }
         }
-        refreshDraftFromEditor()
         scheduleAutocomplete()
     }
 
     private fun handleEnter(modifiers: ModifierState) {
         val inputConnection = currentInputConnection ?: return
+        cancelActiveAgentForEditorChange()
         val info = currentEditorInfo
         val imeOptions = info?.imeOptions ?: 0
         val action = imeOptions and EditorInfo.IME_MASK_ACTION
@@ -213,7 +315,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         } else {
             sendKey(KeyEvent.KEYCODE_ENTER, modifiers)
         }
-        resetAgentDraft()
     }
 
     private fun sendKey(keyCode: Int, modifiers: ModifierState) {
@@ -224,99 +325,90 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         inputConnection.sendKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0, metaState))
     }
 
-    private fun refreshDraftFromEditor() {
-        if (!isAgentStripAvailable()) {
-            resetAgentDraft()
-            return
-        }
-        if (agentStripView?.isDraftFieldFocused == true) {
-            return
-        }
-        val inputConnection = currentInputConnection ?: return
-        val beforeCursor = inputConnection.getTextBeforeCursor(MAX_CONTEXT_CHARS, 0)?.toString().orEmpty()
-        val segment = extractCurrentSegment(beforeCursor)
-        if (segment.isBlank()) {
-            resetAgentDraft()
-            return
-        }
-
-        val previous = draftState
-        if (previous?.originalText != segment || previous.source == DraftSource.Mirror) {
-            requestGeneration++
-            agentError = null
-            agentLoading = false
-            draftState = DraftState(
-                originalText = segment,
-                draftText = segment,
-                source = DraftSource.Mirror,
-                editorAnchorText = segment,
-            )
-        }
-        renderAgentStrip()
-    }
-
     private fun extractCurrentSegment(beforeCursor: String): String {
         val currentLine = beforeCursor.substringAfterLast('\n')
-        return if (currentLine.length > MAX_DRAFT_CHARS) {
-            currentLine.takeLast(MAX_DRAFT_CHARS)
+        return if (currentLine.length > MAX_AUTOCOMPLETE_SOURCE_CHARS) {
+            currentLine.takeLast(MAX_AUTOCOMPLETE_SOURCE_CHARS)
         } else {
             currentLine
         }
     }
 
-    private fun applyAgentDraft() {
-        val state = draftState ?: return
-        if (state.draftText.isBlank() || state.draftText == state.originalText) return
+    private fun startRewriteFromCurrentEditor() {
+        val target = captureRewriteTarget() ?: return
+        startLlmRequest(
+            kind = LlmRequestKind.Rewrite,
+            target = target,
+            requestText = target.originalText,
+            selectTargetForRequest = true,
+        )
+    }
 
+    private fun applyAgentReview() {
+        val review = activeReview ?: return
         val inputConnection = currentInputConnection ?: return
-        val editorAnchorText = state.editorAnchorText
-        if (editorAnchorText != null) {
-            val beforeCursor = inputConnection.getTextBeforeCursor(MAX_CONTEXT_CHARS, 0)?.toString().orEmpty()
-            if (!beforeCursor.endsWith(editorAnchorText)) {
-                showAgentError("Move the cursor back to the text to apply this.")
-                return
-            }
+
+        if (!isTargetStillCurrent(review.target)) {
+            activeReview = null
+            showKeyboardPanel()
+            showAgentError("Text changed. Run rewrite again.")
+            return
         }
 
+        var committed = false
         inputConnection.beginBatchEdit()
         try {
-            if (editorAnchorText != null) {
-                inputConnection.deleteSurroundingText(editorAnchorText.length, 0)
+            if (!inputConnection.setSelection(review.target.replaceStart, review.target.replaceEnd)) {
+                showAgentError("Couldn't select the original text.")
+                return
             }
-            inputConnection.commitText(state.draftText, 1)
+            committed = inputConnection.commitText(review.replacementText, 1)
         } finally {
             inputConnection.endBatchEdit()
         }
 
+        if (!committed) {
+            showAgentError("Couldn't apply the rewrite.")
+            return
+        }
+
+        AgentRewriteHistoryStore.recordReplacement(this, review.target.originalText)
         cancelAutocomplete()
-        lastAutocompleteInput = state.draftText
+        requestGeneration++
+        lastAutocompleteInput = review.replacementText.trim()
         agentError = null
         agentLoading = false
-        draftState = DraftState(
-            originalText = state.draftText,
-            draftText = state.draftText,
-            source = DraftSource.Mirror,
-            editorAnchorText = state.draftText,
-        )
-        agentStripView?.clearDraftFocus()
-        renderAgentStrip()
+        activeRequestTarget = null
+        activeReview = null
+        showKeyboardPanel()
+    }
+
+    private fun cancelAgentReview() {
+        activeReview?.target?.let(::restoreSelectionIfNeeded)
+        activeReview = null
+        activeRequestTarget = null
+        agentError = null
+        agentLoading = false
+        showKeyboardPanel()
     }
 
     private fun scheduleAutocomplete() {
         cancelAutocomplete()
-        if (!isAgentStripAvailable() || !KeyboardSettings.readAutocompletePlusEnabled(this)) return
-        if (!KeyboardSettings.readAgentProviderSettings(this).isConfigured) return
+        if (!isAgentStripAvailable() || activeSurface != KeyboardSurface.Keyboard) return
+        if (!KeyboardSettings.readAutocompletePlusEnabled(this)) return
 
-        val state = draftState ?: return
-        val input = state.originalText.trim()
+        val target = captureAutocompleteTarget() ?: return
+        val input = target.originalText.trim()
         if (input.length < MIN_AUTOCOMPLETE_CHARS || input == lastAutocompleteInput) return
 
         autocompleteRunnable = Runnable {
+            if (!KeyboardSettings.readAgentProviderSettings(this).isConfigured) return@Runnable
             lastAutocompleteInput = input
             startLlmRequest(
                 kind = LlmRequestKind.Autocomplete,
-                sourceText = state.originalText,
-                draftText = state.originalText,
+                target = target,
+                requestText = target.originalText,
+                selectTargetForRequest = false,
             )
         }.also { runnable ->
             mainHandler.postDelayed(runnable, AUTOCOMPLETE_DEBOUNCE_MS)
@@ -328,10 +420,132 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         autocompleteRunnable = null
     }
 
+    private fun captureRewriteTarget(): AgentEditTarget? {
+        val snapshot = captureEditorSnapshot(MAX_REWRITE_SOURCE_CHARS + 1) ?: run {
+            showAgentError("Couldn't read the current field.")
+            return null
+        }
+        if (snapshot.textStartOffset != 0) {
+            showAgentError("Couldn't read the full field.")
+            return null
+        }
+        if (snapshot.text.length > MAX_REWRITE_SOURCE_CHARS) {
+            showAgentError("Text is too long to rewrite.")
+            return null
+        }
+        if (snapshot.text.isBlank()) {
+            showAgentError("No text to rewrite.")
+            return null
+        }
+
+        return AgentEditTarget(
+            originalText = snapshot.text,
+            replaceStart = snapshot.textStartOffset,
+            replaceEnd = snapshot.textStartOffset + snapshot.text.length,
+            restoreSelectionStart = snapshot.selectionStart,
+            restoreSelectionEnd = snapshot.selectionEnd,
+            selectionWasChangedForRequest = true,
+        )
+    }
+
+    private fun captureAutocompleteTarget(): AgentEditTarget? {
+        val snapshot = captureEditorSnapshot(MAX_AUTOCOMPLETE_CONTEXT_CHARS) ?: return null
+        val selectionStart = minOf(snapshot.selectionStart, snapshot.selectionEnd)
+        val selectionEnd = maxOf(snapshot.selectionStart, snapshot.selectionEnd)
+        if (selectionStart != selectionEnd) return null
+
+        val localCursor = (selectionEnd - snapshot.textStartOffset).coerceIn(0, snapshot.text.length)
+        val segment = extractCurrentSegment(snapshot.text.take(localCursor))
+        if (segment.isBlank()) return null
+
+        return AgentEditTarget(
+            originalText = segment,
+            replaceStart = selectionEnd - segment.length,
+            replaceEnd = selectionEnd,
+            restoreSelectionStart = selectionEnd,
+            restoreSelectionEnd = selectionEnd,
+            selectionWasChangedForRequest = false,
+        )
+    }
+
+    private fun captureEditorSnapshot(maxChars: Int): EditorSnapshot? {
+        val inputConnection = currentInputConnection ?: return null
+        val extracted = inputConnection.getExtractedText(
+            ExtractedTextRequest().apply {
+                hintMaxChars = maxChars
+            },
+            0,
+        ) ?: return null
+        val text = extracted.text?.toString() ?: return null
+        val textStartOffset = extracted.startOffset.coerceAtLeast(0)
+        return EditorSnapshot(
+            text = text,
+            textStartOffset = textStartOffset,
+            selectionStart = absoluteExtractedOffset(extracted.selectionStart, textStartOffset, text.length),
+            selectionEnd = absoluteExtractedOffset(extracted.selectionEnd, textStartOffset, text.length),
+        )
+    }
+
+    private fun absoluteExtractedOffset(offset: Int, textStartOffset: Int, textLength: Int): Int {
+        if (offset < 0) return textStartOffset + textLength
+        val textEndOffset = textStartOffset + textLength
+        return when (offset) {
+            in textStartOffset..textEndOffset -> offset
+            else -> textStartOffset + offset.coerceIn(0, textLength)
+        }
+    }
+
+    private fun selectTargetText(target: AgentEditTarget): Boolean {
+        val inputConnection = currentInputConnection ?: return false
+        return inputConnection.setSelection(target.replaceStart, target.replaceEnd)
+    }
+
+    private fun restoreSelectionIfNeeded(target: AgentEditTarget) {
+        if (!target.selectionWasChangedForRequest) return
+        val inputConnection = currentInputConnection ?: return
+        val snapshot = captureEditorSnapshot(MAX_REWRITE_SOURCE_CHARS + 1)
+        val maxOffset = snapshot?.let { it.textStartOffset + it.text.length } ?: target.replaceEnd
+        val start = target.restoreSelectionStart.coerceIn(0, maxOffset)
+        val end = target.restoreSelectionEnd.coerceIn(0, maxOffset)
+        inputConnection.setSelection(start, end)
+    }
+
+    private fun isTargetStillCurrent(target: AgentEditTarget): Boolean {
+        val snapshot = captureEditorSnapshot(MAX_REWRITE_SOURCE_CHARS + 1) ?: return true
+        val localStart = target.replaceStart - snapshot.textStartOffset
+        val localEnd = target.replaceEnd - snapshot.textStartOffset
+        if (localStart < 0 || localEnd > snapshot.text.length || localStart > localEnd) {
+            return false
+        }
+        return snapshot.text.substring(localStart, localEnd) == target.originalText
+    }
+
+    private fun cancelActiveAgentForEditorChange() {
+        if (!agentLoading && activeRequestTarget == null && activeReview == null) {
+            if (agentError != null) {
+                agentError = null
+                renderAgentStrip()
+            }
+            return
+        }
+        cancelAutocomplete()
+        requestGeneration++
+        activeRequestTarget = null
+        activeReview = null
+        agentError = null
+        agentLoading = false
+        if (activeSurface == KeyboardSurface.Review) {
+            showKeyboardPanel()
+        } else {
+            renderAgentStrip()
+        }
+    }
+
     private fun startLlmRequest(
         kind: LlmRequestKind,
-        sourceText: String,
-        draftText: String,
+        target: AgentEditTarget,
+        requestText: String,
+        selectTargetForRequest: Boolean,
     ) {
         if (!isAgentStripAvailable()) return
         val providerSettings = KeyboardSettings.readAgentProviderSettings(this)
@@ -339,12 +553,17 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             showAgentError("Add API settings first.")
             return
         }
+        if (selectTargetForRequest && !selectTargetText(target)) {
+            showAgentError("Couldn't select the current text.")
+            return
+        }
 
         cancelAutocomplete()
         val generation = ++requestGeneration
         agentError = null
         agentLoading = true
-        Log.d(TAG, "Starting $kind request for ${draftText.length} chars")
+        activeRequestTarget = target
+        Log.d(TAG, "Starting $kind request for ${requestText.length} chars")
         renderAgentStrip()
 
         Thread {
@@ -352,18 +571,20 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 requestChatCompletion(
                     providerSettings = providerSettings,
                     kind = kind,
-                    text = draftText,
+                    text = requestText,
                 )
             }
 
             mainHandler.post {
                 if (generation != requestGeneration || !isAgentStripAvailable()) return@post
                 agentLoading = false
+                activeRequestTarget = null
                 result
                     .onSuccess { content ->
-                        applyLlmResult(kind, sourceText, content)
+                        applyLlmResult(kind, target, content)
                     }
                     .onFailure { error ->
+                        restoreSelectionIfNeeded(target)
                         showAgentError(error.message ?: "LLM request failed.")
                     }
                 renderAgentStrip()
@@ -717,29 +938,29 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }.trim()
     }
 
-    private fun applyLlmResult(kind: LlmRequestKind, sourceText: String, content: String) {
+    private fun applyLlmResult(kind: LlmRequestKind, target: AgentEditTarget, content: String) {
         val normalized = AsciiTextSanitizer.toAscii(content).trim()
         if (normalized.isBlank() || normalized.equals("null", ignoreCase = true)) {
             showAgentError("No suggestion returned.")
             return
         }
 
-        val current = draftState ?: return
-        if (current.originalText != sourceText) return
-
-        if (kind == LlmRequestKind.Autocomplete && normalized == sourceText.trim()) {
+        if (kind == LlmRequestKind.Autocomplete && normalized == target.originalText.trim()) {
             agentError = null
+            return
+        }
+        if (kind == LlmRequestKind.Rewrite && normalized == target.originalText.trim()) {
+            restoreSelectionIfNeeded(target)
+            showAgentError("No changes returned.")
             return
         }
 
         agentError = null
-        draftState = current.copy(
-            draftText = normalized,
-            source = when (kind) {
-                LlmRequestKind.Rewrite -> DraftSource.Rewrite
-                LlmRequestKind.Autocomplete -> DraftSource.Suggestion
-            },
+        activeReview = AgentReview(
+            target = target,
+            replacementText = normalized,
         )
+        activeReview?.let(::showAgentReviewPanel)
     }
 
     private fun showAgentError(message: String) {
@@ -750,33 +971,32 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderAgentStrip()
     }
 
-    private fun resetAgentDraft() {
+    private fun resetAgentState(returnToKeyboard: Boolean = false) {
+        cancelAutocomplete()
         requestGeneration++
-        draftState = null
+        activeRequestTarget = null
+        activeReview = null
         agentError = null
         agentLoading = false
-        renderAgentStrip()
+        if (returnToKeyboard) {
+            showKeyboardPanel()
+        } else {
+            renderAgentStrip()
+        }
     }
 
     private fun renderAgentStrip() {
-        val visible = isAgentStripAvailable()
+        val visible = isAgentStripAvailable() &&
+            activeSurface != KeyboardSurface.Review &&
+            activeSurface != KeyboardSurface.History
         val providerConfigured = KeyboardSettings.readAgentProviderSettings(this).isConfigured
-        val state = draftState
-        val placeholder = when {
-            !providerConfigured -> "Add API settings to use agent mode"
-            KeyboardSettings.readAutocompletePlusEnabled(this) -> "Type or paste text here for AI suggestions"
-            else -> "Type or paste text here to rewrite"
-        }
 
         agentStripView?.render(
             AgentAssistStripView.State(
                 visible = visible,
-                text = state?.draftText.orEmpty(),
-                placeholder = placeholder,
-                errorText = agentError,
                 loading = agentLoading,
-                rewriteEnabled = visible && providerConfigured && !state?.draftText.isNullOrBlank(),
-                applyEnabled = visible && state != null && state.draftText.isNotBlank() && state.draftText != state.originalText,
+                rewriteEnabled = visible && providerConfigured,
+                historyEnabled = visible,
             ),
         )
     }
@@ -850,18 +1070,32 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         return (value * resources.displayMetrics.density).toInt()
     }
 
-    private data class DraftState(
-        val originalText: String,
-        val draftText: String,
-        val source: DraftSource,
-        val editorAnchorText: String?,
+    private data class EditorSnapshot(
+        val text: String,
+        val textStartOffset: Int,
+        val selectionStart: Int,
+        val selectionEnd: Int,
     )
 
-    private enum class DraftSource {
-        Mirror,
-        Manual,
-        Suggestion,
-        Rewrite,
+    private data class AgentEditTarget(
+        val originalText: String,
+        val replaceStart: Int,
+        val replaceEnd: Int,
+        val restoreSelectionStart: Int,
+        val restoreSelectionEnd: Int,
+        val selectionWasChangedForRequest: Boolean,
+    )
+
+    private data class AgentReview(
+        val target: AgentEditTarget,
+        val replacementText: String,
+    )
+
+    private enum class KeyboardSurface {
+        Keyboard,
+        Emoji,
+        Review,
+        History,
     }
 
     private class LlmHttpException(
@@ -895,8 +1129,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private companion object {
         const val TAG = "ZnKeyboardAgent"
-        const val MAX_CONTEXT_CHARS = 800
-        const val MAX_DRAFT_CHARS = 600
+        const val MAX_AUTOCOMPLETE_CONTEXT_CHARS = 800
+        const val MAX_AUTOCOMPLETE_SOURCE_CHARS = 600
+        const val MAX_REWRITE_SOURCE_CHARS = 12_000
         const val MIN_AUTOCOMPLETE_CHARS = 8
         const val AUTOCOMPLETE_DEBOUNCE_MS = 900L
         const val REQUEST_TIMEOUT_MS = 30_000

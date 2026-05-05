@@ -1,6 +1,7 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
@@ -10,219 +11,283 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
-import android.text.Editable
-import android.text.InputType
-import android.text.TextWatcher
+import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
-import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.TextView
+import dev.zain.znkeyboard.KeyboardSettings
 
 class AgentAssistStripView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
 ) : LinearLayout(context, attrs) {
     interface Callback {
-        fun onAgentDraftEdited(text: String)
         fun onAgentRewriteRequested()
-        fun onAgentApplyRequested()
+        fun onAgentHistoryRequested()
+        fun onAgentRowAction(action: KeyboardAction, modifiers: ModifierState)
     }
 
     var callback: Callback? = null
-    val isDraftFieldFocused: Boolean
-        get() = draftText.hasFocus()
-
-    private val rewriteButton = Button(context).apply {
-        text = "Rewrite"
-        isAllCaps = false
-        minHeight = 0
-        minWidth = 0
-        isFocusable = false
-        setPadding(dp(10), 0, dp(10), 0)
-        setOnClickListener { callback?.onAgentRewriteRequested() }
-    }
-    private var updatingDraftText = false
-    private val draftText = EditText(context).apply {
-        setTextColor(TEXT_COLOR)
-        setHintTextColor(HINT_COLOR)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_FLAG_MULTI_LINE or
-            InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-        setSingleLine(false)
-        maxLines = 2
-        gravity = Gravity.CENTER_VERTICAL
-        isFocusable = true
-        isFocusableInTouchMode = true
-        showSoftInputOnFocus = false
-        setPadding(dp(12), 0, dp(12), 0)
-        background = fieldBackground(FieldStatus.Neutral)
-        importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
-        addTextChangedListener(
-            object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!updatingDraftText) {
-                        callback?.onAgentDraftEdited(s?.toString().orEmpty())
-                    }
-                }
-
-                override fun afterTextChanged(s: Editable?) = Unit
-            },
-        )
-    }
-    private val applyButton = Button(context).apply {
-        text = "Apply"
-        isAllCaps = false
-        minHeight = 0
-        minWidth = 0
-        isFocusable = false
-        setPadding(dp(12), 0, dp(12), 0)
-        setOnClickListener { callback?.onAgentApplyRequested() }
-    }
+    private var state = State(visible = false)
+    private var agentRowKeyIds = KeyboardSettings.DEFAULT_AGENT_ROW_KEY_IDS
+    private var ctrl = false
+    private var alt = false
+    private var heightScale = 1f
 
     init {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         isFocusable = false
         isFocusableInTouchMode = false
-        setPadding(dp(8), dp(6), dp(8), dp(6))
-        setBackgroundColor(BACKGROUND_COLOR)
+        setPadding(dp(ImeLayout.HORIZONTAL_PADDING_DP), dp(ImeLayout.TOP_PADDING_DP), dp(ImeLayout.HORIZONTAL_PADDING_DP), 0)
+        setBackgroundColor(PALETTE.background)
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
         visibility = GONE
+        rebuildRow()
+    }
+
+    fun setAgentRowKeyIds(keyIds: List<String>) {
+        val normalized = KeyboardSettings.normalizeAgentRowKeyIds(keyIds)
+        if (agentRowKeyIds != normalized) {
+            agentRowKeyIds = normalized
+            rebuildRow()
+        }
+    }
+
+    fun setHeightScale(scale: Float) {
+        if (heightScale != scale) {
+            heightScale = scale
+            requestLayout()
+        }
+    }
+
+    fun render(nextState: State) {
+        val loadingChanged = state.loading != nextState.loading
+        val availabilityChanged = state.rewriteEnabled != nextState.rewriteEnabled ||
+            state.historyEnabled != nextState.historyEnabled
+        state = nextState
+        visibility = if (state.visible) VISIBLE else GONE
+        if (loadingChanged || availabilityChanged) {
+            rebuildRow()
+        }
+    }
+
+    private fun rebuildRow() {
+        removeAllViews()
+        addKey(
+            label = "Rewrite",
+            weight = END_KEY_WEIGHT,
+            role = KeyRole.Action,
+            status = if (state.loading) FieldStatus.Loading else FieldStatus.Neutral,
+            enabled = state.rewriteEnabled && !state.loading,
+            emphasizedWhenDisabled = state.loading,
+            onClick = { callback?.onAgentRewriteRequested() },
+        )
+
+        agentRowKeyIds.forEach { keyId ->
+            addAgentKey(keyId)
+        }
+
+        addKey(
+            label = "History",
+            weight = END_KEY_WEIGHT,
+            role = KeyRole.Function,
+            enabled = state.historyEnabled && !state.loading,
+            onClick = { callback?.onAgentHistoryRequested() },
+        )
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val desiredHeight = ImeLayout.compactAgentRowHeightPx(context, heightScale)
+        val exactHeightSpec = MeasureSpec.makeMeasureSpec(resolveSize(desiredHeight, heightMeasureSpec), MeasureSpec.EXACTLY)
+        super.onMeasure(widthMeasureSpec, exactHeightSpec)
+    }
+
+    private fun addAgentKey(keyId: String) {
+        val label = KeyboardSettings.labelForUpperRowKey(keyId).ifBlank { keyId }
+        val active = (keyId == "ctrl" && ctrl) || (keyId == "alt" && alt)
+        addKey(
+            label = label,
+            weight = 1f,
+            role = roleForKeyId(keyId),
+            active = active,
+            enabled = !state.loading,
+            onClick = { handleAgentKey(keyId) },
+        )
+    }
+
+    private fun addKey(
+        label: String,
+        weight: Float,
+        role: KeyRole,
+        status: FieldStatus = FieldStatus.Neutral,
+        active: Boolean = false,
+        enabled: Boolean = true,
+        emphasizedWhenDisabled: Boolean = false,
+        onClick: () -> Unit,
+    ) {
+        val view = TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+            setTextColor(if (role == KeyRole.Character || active) PALETTE.text else PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (role == KeyRole.Character) 18f else 13f)
+            setPadding(dp(4), 0, dp(4), 0)
+            background = keyBackground(status = status, role = role, active = active)
+            isClickable = enabled
+            isFocusable = false
+            alpha = if (enabled || emphasizedWhenDisabled) 1f else DISABLED_ALPHA
+            if (enabled) {
+                setOnClickListener { onClick() }
+            }
+        }
 
         addView(
-            rewriteButton,
-            LayoutParams(dp(82), LayoutParams.MATCH_PARENT),
-        )
-        addView(
-            draftText,
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply {
-                marginStart = dp(8)
-                marginEnd = dp(8)
+            view,
+            LayoutParams(0, LayoutParams.MATCH_PARENT, weight).apply {
+                if (childCount > 0) marginStart = dp(ImeLayout.KEY_GAP_DP)
             },
         )
-        addView(
-            applyButton,
-            LayoutParams(dp(72), LayoutParams.MATCH_PARENT),
+    }
+
+    private fun handleAgentKey(keyId: String) {
+        when (keyId) {
+            "ctrl" -> {
+                ctrl = !ctrl
+                rebuildRow()
+            }
+            "alt" -> {
+                alt = !alt
+                rebuildRow()
+            }
+            else -> {
+                actionForKeyId(keyId)?.let { action ->
+                    callback?.onAgentRowAction(action, ModifierState(ctrl = ctrl, alt = alt))
+                    if (ctrl || alt) {
+                        ctrl = false
+                        alt = false
+                        rebuildRow()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun actionForKeyId(keyId: String): KeyboardAction? {
+        return when (keyId) {
+            "tab" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_TAB)
+            "esc" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_ESCAPE)
+            "left" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_LEFT)
+            "up" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_UP)
+            "down" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_DOWN)
+            "right" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_RIGHT)
+            "home" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_HOME)
+            "end" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_END)
+            "page_up" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_UP)
+            "page_down" -> KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_DOWN)
+            "backspace" -> KeyboardAction.Backspace
+            "pipe" -> KeyboardAction.Text("|")
+            "slash" -> KeyboardAction.Text("/")
+            "backslash" -> KeyboardAction.Text("\\")
+            "minus" -> KeyboardAction.Text("-")
+            "equals" -> KeyboardAction.Text("=")
+            "underscore" -> KeyboardAction.Text("_")
+            "plus" -> KeyboardAction.Text("+")
+            "colon" -> KeyboardAction.Text(":")
+            "semicolon" -> KeyboardAction.Text(";")
+            "quote" -> KeyboardAction.Text("\"")
+            "apostrophe" -> KeyboardAction.Text("'")
+            "backtick" -> KeyboardAction.Text("`")
+            "at" -> KeyboardAction.Text("@")
+            "hash" -> KeyboardAction.Text("#")
+            "dollar" -> KeyboardAction.Text("$")
+            "ampersand" -> KeyboardAction.Text("&")
+            "star" -> KeyboardAction.Text("*")
+            "left_paren" -> KeyboardAction.Text("(")
+            "right_paren" -> KeyboardAction.Text(")")
+            "left_bracket" -> KeyboardAction.Text("[")
+            "right_bracket" -> KeyboardAction.Text("]")
+            "left_brace" -> KeyboardAction.Text("{")
+            "right_brace" -> KeyboardAction.Text("}")
+            "less_than" -> KeyboardAction.Text("<")
+            "greater_than" -> KeyboardAction.Text(">")
+            else -> null
+        }
+    }
+
+    private fun roleForKeyId(keyId: String): KeyRole {
+        return when (keyId) {
+            "pipe",
+            "slash",
+            "backslash",
+            "minus",
+            "equals",
+            "underscore",
+            "plus",
+            "colon",
+            "semicolon",
+            "quote",
+            "apostrophe",
+            "backtick",
+            "at",
+            "hash",
+            "dollar",
+            "ampersand",
+            "star",
+            "left_paren",
+            "right_paren",
+            "left_bracket",
+            "right_bracket",
+            "left_brace",
+            "right_brace",
+            "less_than",
+            "greater_than",
+            -> KeyRole.Character
+            "esc" -> KeyRole.Action
+            else -> KeyRole.Function
+        }
+    }
+
+    private fun keyBackground(status: FieldStatus, role: KeyRole, active: Boolean): Drawable {
+        val fillColor = when {
+            active -> PALETTE.accent
+            role == KeyRole.Action -> PALETTE.action
+            role == KeyRole.Function -> PALETTE.function
+            else -> PALETTE.key
+        }
+        return FieldBackgroundDrawable(
+            fillColor = fillColor,
+            radius = dp(ImeLayout.KEY_RADIUS_DP).toFloat(),
+            glowWidth = dp(9).toFloat(),
+            strokeWidth = dp(2).toFloat(),
+            borderWidth = dp(1).toFloat(),
+            borderColor = if (active) Color.TRANSPARENT else PALETTE.border,
+            colors = status.colors,
+            animated = status.animated,
         )
-    }
-
-    fun commitDraftText(value: String): Boolean {
-        val editable = draftText.text ?: return false
-        val start = draftText.selectionStart.coerceIn(0, editable.length)
-        val end = draftText.selectionEnd.coerceIn(0, editable.length)
-        editable.replace(minOf(start, end), maxOf(start, end), value)
-        return true
-    }
-
-    fun deleteDraftTextBeforeCursor(): Boolean {
-        val editable = draftText.text ?: return false
-        val start = draftText.selectionStart.coerceIn(0, editable.length)
-        val end = draftText.selectionEnd.coerceIn(0, editable.length)
-        return when {
-            start != end -> {
-                editable.delete(minOf(start, end), maxOf(start, end))
-                true
-            }
-            start > 0 -> {
-                editable.delete(start - 1, start)
-                true
-            }
-            else -> false
-        }
-    }
-
-    fun handleDraftKeyCode(keyCode: Int): Boolean {
-        val editable = draftText.text ?: return false
-        val start = draftText.selectionStart.coerceIn(0, editable.length)
-        val end = draftText.selectionEnd.coerceIn(0, editable.length)
-        val selectionStart = minOf(start, end)
-        val selectionEnd = maxOf(start, end)
-        return when (keyCode) {
-            KeyEvent.KEYCODE_ESCAPE -> {
-                clearDraftFocus()
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_LEFT -> {
-                draftText.setSelection(if (selectionStart != selectionEnd) selectionStart else (selectionStart - 1).coerceAtLeast(0))
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                draftText.setSelection(if (selectionStart != selectionEnd) selectionEnd else (selectionEnd + 1).coerceAtMost(editable.length))
-                true
-            }
-            KeyEvent.KEYCODE_MOVE_HOME -> {
-                draftText.setSelection(0)
-                true
-            }
-            KeyEvent.KEYCODE_MOVE_END -> {
-                draftText.setSelection(editable.length)
-                true
-            }
-            KeyEvent.KEYCODE_TAB -> commitDraftText("\t")
-            else -> false
-        }
-    }
-
-    fun clearDraftFocus() {
-        draftText.clearFocus()
-    }
-
-    fun render(state: State) {
-        visibility = if (state.visible) VISIBLE else GONE
-        draftText.hint = state.errorText ?: state.placeholder
-        draftText.setHintTextColor(if (state.errorText != null) ERROR_COLOR else HINT_COLOR)
-        draftText.background = fieldBackground(state.fieldStatus())
-        draftText.setPadding(dp(12), 0, dp(12), 0)
-        if (draftText.text?.toString() != state.text) {
-            val selection = if (draftText.hasFocus()) draftText.selectionStart else state.text.length
-            updatingDraftText = true
-            draftText.setText(state.text)
-            draftText.setSelection(selection.coerceIn(0, state.text.length))
-            updatingDraftText = false
-        }
-        rewriteButton.isEnabled = state.rewriteEnabled && !state.loading
-        applyButton.isEnabled = state.applyEnabled && !state.loading
     }
 
     private fun dp(value: Int): Int {
         return (value * resources.displayMetrics.density).toInt()
     }
 
-    private fun fieldBackground(status: FieldStatus): Drawable {
-        return FieldBackgroundDrawable(
-            fillColor = FIELD_COLOR,
-            radius = dp(10).toFloat(),
-            glowWidth = dp(9).toFloat(),
-            strokeWidth = dp(2).toFloat(),
-            colors = status.colors,
-            animated = status.animated,
-        )
-    }
-
-    private fun State.fieldStatus(): FieldStatus {
-        return when {
-            loading -> FieldStatus.Loading
-            errorText != null -> FieldStatus.Error
-            applyEnabled -> FieldStatus.Success
-            else -> FieldStatus.Neutral
-        }
-    }
-
     data class State(
         val visible: Boolean,
-        val text: String = "",
-        val placeholder: String = "Agent mode ready",
-        val errorText: String? = null,
         val loading: Boolean = false,
         val rewriteEnabled: Boolean = false,
-        val applyEnabled: Boolean = false,
+        val historyEnabled: Boolean = false,
     )
+
+    private enum class KeyRole {
+        Character,
+        Function,
+        Action,
+    }
 
     private enum class FieldStatus(
         val colors: IntArray,
@@ -240,24 +305,6 @@ class AgentAssistStripView @JvmOverloads constructor(
             ),
             animated = true,
         ),
-        Success(
-            intArrayOf(
-                Color.rgb(52, 211, 153),
-                Color.rgb(163, 230, 53),
-                Color.rgb(34, 197, 94),
-                Color.rgb(45, 212, 191),
-                Color.rgb(52, 211, 153),
-            ),
-        ),
-        Error(
-            intArrayOf(
-                Color.rgb(248, 113, 113),
-                Color.rgb(236, 72, 153),
-                Color.rgb(251, 146, 60),
-                Color.rgb(239, 68, 68),
-                Color.rgb(248, 113, 113),
-            ),
-        ),
     }
 
     private class FieldBackgroundDrawable(
@@ -265,6 +312,8 @@ class AgentAssistStripView @JvmOverloads constructor(
         private val radius: Float,
         private val glowWidth: Float,
         private val strokeWidth: Float,
+        private val borderWidth: Float,
+        private val borderColor: Int,
         private val colors: IntArray,
         private val animated: Boolean,
     ) : Drawable() {
@@ -273,7 +322,17 @@ class AgentAssistStripView @JvmOverloads constructor(
             style = Paint.Style.FILL
             color = fillColor
         }
+        private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            color = borderColor
+            strokeWidth = borderWidth
+        }
         private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
@@ -283,21 +342,21 @@ class AgentAssistStripView @JvmOverloads constructor(
             phase = (phase + 0.025f) % 1f
             invalidateSelf()
         }
-        private val strokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.STROKE
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-        }
 
-        override fun draw(canvas: android.graphics.Canvas) {
+        override fun draw(canvas: Canvas) {
             rect.set(bounds)
             canvas.drawRoundRect(rect, radius, radius, fillPaint)
 
-            if (colors.isEmpty()) return
+            if (colors.isEmpty()) {
+                if (borderColor != Color.TRANSPARENT && borderWidth > 0f) {
+                    rect.inset(borderWidth / 2f, borderWidth / 2f)
+                    canvas.drawRoundRect(rect, radius, radius, borderPaint)
+                }
+                return
+            }
 
             rect.inset(glowWidth / 2f, glowWidth / 2f)
             val offset = if (animated) rect.width() * phase else 0f
-
             val shader = LinearGradient(
                 rect.left - rect.width() + offset,
                 rect.centerY(),
@@ -329,12 +388,14 @@ class AgentAssistStripView @JvmOverloads constructor(
 
         override fun setAlpha(alpha: Int) {
             fillPaint.alpha = alpha
+            borderPaint.alpha = alpha
             glowPaint.alpha = alpha
             strokePaint.alpha = alpha
         }
 
         override fun setColorFilter(colorFilter: ColorFilter?) {
             fillPaint.colorFilter = colorFilter
+            borderPaint.colorFilter = colorFilter
             glowPaint.colorFilter = colorFilter
             strokePaint.colorFilter = colorFilter
         }
@@ -345,12 +406,20 @@ class AgentAssistStripView @JvmOverloads constructor(
         }
     }
 
+    private object PALETTE {
+        val background = Color.rgb(34, 34, 34)
+        val key = Color.rgb(42, 42, 42)
+        val function = Color.rgb(50, 50, 50)
+        val action = Color.rgb(42, 42, 42)
+        val accent = Color.rgb(48, 172, 226)
+        val border = Color.rgb(62, 62, 62)
+        const val text = Color.WHITE
+        val mutedText = Color.rgb(230, 230, 230)
+    }
+
     private companion object {
-        val BACKGROUND_COLOR = Color.rgb(34, 34, 34)
-        val FIELD_COLOR = Color.rgb(42, 42, 42)
-        const val TEXT_COLOR = Color.WHITE
-        val HINT_COLOR = Color.rgb(180, 180, 180)
-        val ERROR_COLOR = Color.rgb(255, 183, 77)
+        const val END_KEY_WEIGHT = 1.4f
+        const val DISABLED_ALPHA = 0.46f
         const val ANIMATION_FRAME_MS = 32L
     }
 }
