@@ -48,7 +48,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private var layoutMode = LayoutMode.Letters
-    private var shift = false
+    private var shiftState = ShiftState.Off
     private var ctrl = false
     private var alt = false
     private var enterLabel = "Enter"
@@ -286,15 +286,18 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         key.icon?.let {
             drawIcon(canvas, it, bounds, contentColor)
-            return
+        } ?: run {
+            val textSize = fitTextSize(key.label, bounds, key.role)
+            textPaint.textSize = textSize
+            textPaint.color = contentColor
+            val metrics = textPaint.fontMetrics
+            val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
+            canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
         }
 
-        val textSize = fitTextSize(key.label, bounds, key.role)
-        textPaint.textSize = textSize
-        textPaint.color = contentColor
-        val metrics = textPaint.fontMetrics
-        val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
+        if (key.id == "shift" && shiftState == ShiftState.Locked) {
+            drawShiftLockIndicator(canvas, bounds, contentColor)
+        }
     }
 
     private fun drawIcon(canvas: Canvas, icon: KeyIcon, bounds: RectF, color: Int) {
@@ -369,6 +372,16 @@ class ZnKeyboardView @JvmOverloads constructor(
             close()
         }
         canvas.drawPath(path, iconPaint)
+    }
+
+    private fun drawShiftLockIndicator(canvas: Canvas, bounds: RectF, color: Int) {
+        val dashWidth = min(bounds.width() * 0.32f, dp(18f))
+        val centerX = bounds.centerX()
+        val y = bounds.bottom - dp(7f)
+        iconPaint.color = color
+        iconPaint.strokeWidth = dp(2f)
+        iconPaint.style = Paint.Style.STROKE
+        canvas.drawLine(centerX - dashWidth / 2f, y, centerX + dashWidth / 2f, y, iconPaint)
     }
 
     private fun drawDeleteIcon(canvas: Canvas) {
@@ -447,15 +460,22 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun handleKey(key: KeySpec) {
         when (val intent = key.intent) {
-            KeyIntent.Shift -> shift = !shift
+            KeyIntent.Shift -> shiftState = when (shiftState) {
+                ShiftState.Off -> ShiftState.OneShot
+                ShiftState.OneShot -> ShiftState.Locked
+                ShiftState.Locked -> ShiftState.Off
+            }
             KeyIntent.SwitchMode -> {
                 layoutMode = if (layoutMode == LayoutMode.Letters) LayoutMode.Symbols else LayoutMode.Letters
-                shift = false
+                shiftState = ShiftState.Off
             }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
             is KeyIntent.Dispatch -> {
                 callback?.onKeyboardAction(intent.action, ModifierState(ctrl = ctrl, alt = alt))
+                if (shiftState == ShiftState.OneShot && key.consumesOneShotShift) {
+                    shiftState = ShiftState.Off
+                }
                 if (ctrl || alt) {
                     ctrl = false
                     alt = false
@@ -632,7 +652,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun letterBottomRow(): RowSpec {
         val keys = mutableListOf<KeySpec>()
-        keys += KeySpec("shift", "Shift", KeyIntent.Shift, 1.35f, KeyRole.Function, shift, KeyIcon.Shift)
+        keys += KeySpec("shift", "Shift", KeyIntent.Shift, 1.35f, KeyRole.Function, shiftState != ShiftState.Off, KeyIcon.Shift)
         keys += chars("zxcvbnm")
         keys += KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete)
         return RowSpec(keys, 1f)
@@ -670,12 +690,13 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun chars(source: String): List<KeySpec> {
         return source.map { char ->
-            val label = if (shift) char.uppercaseChar().toString() else char.toString()
+            val label = if (shiftState != ShiftState.Off) char.uppercaseChar().toString() else char.toString()
             KeySpec(
                 id = "char_$char",
                 label = label,
                 intent = KeyIntent.Dispatch(KeyboardAction.Text(label)),
                 role = KeyRole.Character,
+                consumesOneShotShift = true,
             )
         }
     }
@@ -708,6 +729,12 @@ class ZnKeyboardView @JvmOverloads constructor(
     private enum class LayoutMode {
         Letters,
         Symbols,
+    }
+
+    private enum class ShiftState {
+        Off,
+        OneShot,
+        Locked,
     }
 
     private enum class KeyRole {
@@ -748,6 +775,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val role: KeyRole = KeyRole.Character,
         val active: Boolean = false,
         val icon: KeyIcon? = null,
+        val consumesOneShotShift: Boolean = false,
     )
 
     private data class KeyHit(

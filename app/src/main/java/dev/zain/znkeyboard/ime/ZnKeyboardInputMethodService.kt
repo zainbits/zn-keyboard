@@ -6,6 +6,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
+import android.view.KeyCharacterMap
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -125,7 +126,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState) {
         when (action) {
-            KeyboardAction.Backspace -> handleBackspace()
+            KeyboardAction.Backspace -> handleBackspace(modifiers)
             KeyboardAction.Enter -> handleEnter(modifiers)
             is KeyboardAction.KeyCode -> {
                 cancelActiveAgentForEditorChange()
@@ -149,7 +150,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onEmojiBackspace() {
-        handleBackspace()
+        handleBackspace(ModifierState(ctrl = false, alt = false))
     }
 
     override fun onEmojiSpace() {
@@ -288,15 +289,24 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         scheduleAutocomplete()
     }
 
-    private fun handleBackspace() {
+    private fun handleBackspace(modifiers: ModifierState) {
         val inputConnection = currentInputConnection ?: return
         cancelActiveAgentForEditorChange()
+        // TYPE_NULL editors such as terminals expect raw key events, not surrounding-text edits.
+        if (isRawKeyEventEditor(currentEditorInfo)) {
+            sendKey(KeyEvent.KEYCODE_DEL, modifiers)
+            scheduleAutocomplete()
+            return
+        }
+
         val selectedText = inputConnection.getSelectedText(0)
         if (!selectedText.isNullOrEmpty()) {
             inputConnection.commitText("", 1)
         } else {
             if (!inputConnection.deleteSurroundingTextInCodePoints(1, 0)) {
-                inputConnection.deleteSurroundingText(1, 0)
+                if (!inputConnection.deleteSurroundingText(1, 0)) {
+                    sendKey(KeyEvent.KEYCODE_DEL, modifiers)
+                }
             }
         }
         scheduleAutocomplete()
@@ -321,8 +331,33 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val inputConnection = currentInputConnection ?: return
         val downTime = SystemClock.uptimeMillis()
         val metaState = modifiers.toMetaState()
-        inputConnection.sendKeyEvent(KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0, metaState))
-        inputConnection.sendKeyEvent(KeyEvent(downTime, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, keyCode, 0, metaState))
+        val flags = KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
+        inputConnection.sendKeyEvent(
+            KeyEvent(
+                downTime,
+                downTime,
+                KeyEvent.ACTION_DOWN,
+                keyCode,
+                0,
+                metaState,
+                KeyCharacterMap.VIRTUAL_KEYBOARD,
+                0,
+                flags,
+            ),
+        )
+        inputConnection.sendKeyEvent(
+            KeyEvent(
+                downTime,
+                SystemClock.uptimeMillis(),
+                KeyEvent.ACTION_UP,
+                keyCode,
+                0,
+                metaState,
+                KeyCharacterMap.VIRTUAL_KEYBOARD,
+                0,
+                flags,
+            ),
+        )
     }
 
     private fun extractCurrentSegment(beforeCursor: String): String {
@@ -1003,6 +1038,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun isAgentStripAvailable(): Boolean {
         return KeyboardSettings.readAgentModeEnabled(this) && !isSensitiveEditor(currentEditorInfo)
+    }
+
+    private fun isRawKeyEventEditor(info: EditorInfo?): Boolean {
+        val inputType = info?.inputType ?: return false
+        return (inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL
     }
 
     private fun isSensitiveEditor(info: EditorInfo?): Boolean {
