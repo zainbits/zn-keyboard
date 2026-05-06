@@ -26,6 +26,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     interface Callback {
         fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState)
         fun onEmojiPanelRequested()
+        fun onSnippetPanelRequested()
     }
 
     var callback: Callback? = null
@@ -35,11 +36,6 @@ class ZnKeyboardView @JvmOverloads constructor(
         color = PALETTE.text
         textAlign = Paint.Align.CENTER
         typeface = android.graphics.Typeface.create(android.graphics.Typeface.SANS_SERIF, android.graphics.Typeface.NORMAL)
-    }
-    private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = PALETTE.border
-        style = Paint.Style.STROKE
-        strokeWidth = dp(1f)
     }
     private val iconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
@@ -63,7 +59,12 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var hitTargets: List<KeyHit> = emptyList()
     private val longPressHandler = Handler(Looper.getMainLooper())
     private var pendingLongPressPointerId: Int? = null
+    private var pendingLongPressKeyId: String? = null
     private var pendingLongPressRunnable: Runnable? = null
+    private val backspaceRepeatRunnable = Runnable { repeatBackspace() }
+    private var repeatingBackspacePointerId: Int? = null
+    private var repeatingBackspaceKeyId: String? = null
+    private var backspaceRepeatCount = 0
 
     init {
         isHapticFeedbackEnabled = false
@@ -130,6 +131,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         refreshHitTargets()
     }
 
+    override fun onDetachedFromWindow() {
+        cancelActiveTouches()
+        super.onDetachedFromWindow()
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
@@ -184,8 +190,16 @@ class ZnKeyboardView @JvmOverloads constructor(
         activeTouches.put(pointerId, ActiveTouch(hit?.key))
         pointerQueue.remove(pointerId)
         pointerQueue.add(pointerId)
-        if (hit?.key?.id == "comma") {
-            scheduleCommaLongPress(pointerId)
+        when (hit?.key?.id) {
+            "comma" -> scheduleLongPress(pointerId, "comma") {
+                callback?.onEmojiPanelRequested()
+            }
+            "period" -> scheduleLongPress(pointerId, "period") {
+                callback?.onSnippetPanelRequested()
+            }
+        }
+        hit?.key?.takeIf(::isBackspaceKey)?.let { key ->
+            scheduleBackspaceRepeat(pointerId, key)
         }
     }
 
@@ -197,8 +211,16 @@ class ZnKeyboardView @JvmOverloads constructor(
             val key = findHit(event.getX(pointerIndex), event.getY(pointerIndex))?.key
             if (touch.currentKey?.id != key?.id) {
                 touch.currentKey = key
-                if (pendingLongPressPointerId == pointerId && key?.id != "comma") {
+                if (pendingLongPressPointerId == pointerId && key?.id != pendingLongPressKeyId) {
                     cancelPendingLongPress()
+                }
+                when {
+                    repeatingBackspacePointerId == pointerId && key?.id != repeatingBackspaceKeyId -> {
+                        cancelBackspaceRepeat()
+                    }
+                    repeatingBackspacePointerId != pointerId && key?.let(::isBackspaceKey) == true -> {
+                        scheduleBackspaceRepeat(pointerId, key)
+                    }
                 }
                 changed = true
             }
@@ -212,7 +234,8 @@ class ZnKeyboardView @JvmOverloads constructor(
             val touch = activeTouches.get(nextPointerId)
             activeTouches.remove(nextPointerId)
             cancelLongPressFor(nextPointerId)
-            if (touch?.longPressConsumed != true) {
+            cancelBackspaceRepeatFor(nextPointerId)
+            if (touch?.longPressConsumed != true && touch?.repeatConsumed != true) {
                 touch?.currentKey?.let(::handleKey)
             }
             if (nextPointerId == pointerId) {
@@ -221,27 +244,35 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
         activeTouches.remove(pointerId)
         cancelLongPressFor(pointerId)
+        cancelBackspaceRepeatFor(pointerId)
     }
 
     private fun cancelActiveTouches() {
         cancelPendingLongPress()
+        cancelBackspaceRepeat()
         activeTouches.clear()
         pointerQueue.clear()
     }
 
-    private fun scheduleCommaLongPress(pointerId: Int) {
+    private fun scheduleLongPress(
+        pointerId: Int,
+        keyId: String,
+        onLongPress: () -> Unit,
+    ) {
         cancelPendingLongPress()
         pendingLongPressPointerId = pointerId
+        pendingLongPressKeyId = keyId
         pendingLongPressRunnable = Runnable {
             val touch = activeTouches.get(pointerId) ?: return@Runnable
-            if (touch.currentKey?.id != "comma") return@Runnable
+            if (touch.currentKey?.id != keyId) return@Runnable
 
             touch.longPressConsumed = true
             touch.currentKey = null
             pointerQueue.remove(pointerId)
             pendingLongPressPointerId = null
+            pendingLongPressKeyId = null
             pendingLongPressRunnable = null
-            callback?.onEmojiPanelRequested()
+            onLongPress()
             invalidate()
         }.also { runnable ->
             longPressHandler.postDelayed(runnable, ViewConfiguration.getLongPressTimeout().toLong())
@@ -258,6 +289,58 @@ class ZnKeyboardView @JvmOverloads constructor(
         pendingLongPressRunnable?.let(longPressHandler::removeCallbacks)
         pendingLongPressRunnable = null
         pendingLongPressPointerId = null
+        pendingLongPressKeyId = null
+    }
+
+    private fun scheduleBackspaceRepeat(pointerId: Int, key: KeySpec) {
+        cancelBackspaceRepeat()
+        repeatingBackspacePointerId = pointerId
+        repeatingBackspaceKeyId = key.id
+        backspaceRepeatCount = 0
+        longPressHandler.postDelayed(
+            backspaceRepeatRunnable,
+            BackspaceRepeatTiming.startDelayMillis(),
+        )
+    }
+
+    private fun repeatBackspace() {
+        val pointerId = repeatingBackspacePointerId ?: return
+        val keyId = repeatingBackspaceKeyId ?: return
+        val touch = activeTouches.get(pointerId) ?: run {
+            cancelBackspaceRepeat()
+            return
+        }
+        val key = touch.currentKey
+        if (key?.id != keyId || !isBackspaceKey(key)) {
+            cancelBackspaceRepeat()
+            return
+        }
+
+        touch.repeatConsumed = true
+        backspaceRepeatCount += 1
+        handleKey(key)
+        invalidate()
+        longPressHandler.postDelayed(
+            backspaceRepeatRunnable,
+            BackspaceRepeatTiming.repeatDelayMillis(backspaceRepeatCount),
+        )
+    }
+
+    private fun cancelBackspaceRepeatFor(pointerId: Int) {
+        if (repeatingBackspacePointerId == pointerId) {
+            cancelBackspaceRepeat()
+        }
+    }
+
+    private fun cancelBackspaceRepeat() {
+        longPressHandler.removeCallbacks(backspaceRepeatRunnable)
+        repeatingBackspacePointerId = null
+        repeatingBackspaceKeyId = null
+        backspaceRepeatCount = 0
+    }
+
+    private fun isBackspaceKey(key: KeySpec): Boolean {
+        return (key.intent as? KeyIntent.Dispatch)?.action == KeyboardAction.Backspace
     }
 
     private fun drawKey(canvas: Canvas, hit: KeyHit) {
@@ -274,9 +357,6 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         val radius = dp(5f)
         canvas.drawRoundRect(bounds, radius, radius, keyPaint)
-        if (!active) {
-            canvas.drawRoundRect(bounds, radius, radius, borderPaint)
-        }
 
         val contentColor = when {
             active -> PALETTE.text
@@ -792,6 +872,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private data class ActiveTouch(
         var currentKey: KeySpec?,
         var longPressConsumed: Boolean = false,
+        var repeatConsumed: Boolean = false,
     )
 
     private sealed class KeyIntent {
@@ -803,12 +884,11 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.rgb(34, 34, 34)
+        val background = Color.BLACK
         val key = Color.rgb(42, 42, 42)
         val function = Color.rgb(50, 50, 50)
         val action = Color.rgb(42, 42, 42)
         val accent = Color.rgb(48, 172, 226)
-        val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
     }

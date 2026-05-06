@@ -22,17 +22,19 @@ object KeyboardSettings {
     const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
     const val MAX_UPPER_ROW_KEYS = 9
     const val MAX_AGENT_ROW_KEYS = 5
+    const val MAX_TEXT_SNIPPETS = 60
+    const val MAX_TEXT_SNIPPET_CHARS = 2_000
 
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
+    private const val KEY_TEXT_SNIPPETS = "text_snippets"
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
     private const val KEY_EMOJI_SKIN_TONE = "emoji_skin_tone"
     private const val KEY_AGENT_MODE_ENABLED = "agent_mode_enabled"
-    private const val KEY_AUTOCOMPLETE_PLUS_ENABLED = "autocomplete_plus_enabled"
     private const val KEY_AGENT_PROVIDER_TYPE = "agent_provider_type"
     private const val KEY_AGENT_API_BASE_URL = "agent_api_base_url"
     private const val KEY_AGENT_MODEL = "agent_model"
@@ -152,6 +154,32 @@ object KeyboardSettings {
             .take(MAX_AGENT_ROW_KEYS)
     }
 
+    fun readTextSnippets(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_TEXT_SNIPPETS, null) ?: return emptyList()
+        return parseStringArray(stored)
+            ?.let(::normalizeTextSnippets)
+            ?: emptyList()
+    }
+
+    fun saveTextSnippets(context: Context, snippets: List<String>) {
+        val encoded = JSONArray().apply {
+            normalizeTextSnippets(snippets).forEach(::put)
+        }.toString()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_TEXT_SNIPPETS, encoded)
+            .apply()
+    }
+
+    fun normalizeTextSnippets(snippets: List<String>): List<String> {
+        return snippets
+            .map { it.trim().take(MAX_TEXT_SNIPPET_CHARS) }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .take(MAX_TEXT_SNIPPETS)
+    }
+
     fun readRecentEmojis(context: Context): List<String> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val stored = prefs.getString(KEY_RECENT_EMOJIS, null) ?: return emptyList()
@@ -205,18 +233,6 @@ object KeyboardSettings {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_AGENT_MODE_ENABLED, enabled)
-            .apply()
-    }
-
-    fun readAutocompletePlusEnabled(context: Context): Boolean {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getBoolean(KEY_AUTOCOMPLETE_PLUS_ENABLED, false)
-    }
-
-    fun saveAutocompletePlusEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putBoolean(KEY_AUTOCOMPLETE_PLUS_ENABLED, enabled)
             .apply()
     }
 
@@ -543,7 +559,7 @@ object KeyboardSettings {
         Off(
             id = "off",
             label = "Off",
-            description = "Do not request reasoning. Safest for fast rewrite/autocomplete.",
+            description = "Do not request reasoning. Safest for fast rewrites.",
             effort = null,
         ),
         Auto(

@@ -133,7 +133,7 @@ class AgentReviewView @JvmOverloads constructor(
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
     private object PALETTE {
-        val background = Color.rgb(34, 34, 34)
+        val background = Color.BLACK
         val field = Color.rgb(42, 42, 42)
         val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE

@@ -98,7 +98,6 @@ private fun SettingsScreen() {
     var emojiSkinTone by remember { mutableStateOf(KeyboardSettings.readEmojiSkinTone(context)) }
     var recentEmojiRows by remember { mutableStateOf(KeyboardSettings.readRecentEmojiRows(context)) }
     var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
-    var autocompletePlusEnabled by remember { mutableStateOf(KeyboardSettings.readAutocompletePlusEnabled(context)) }
     var agentProviderType by remember { mutableStateOf(KeyboardSettings.readAgentProviderType(context)) }
     var agentApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readAgentApiBaseUrl(context)) }
     var agentModel by remember { mutableStateOf(KeyboardSettings.readAgentModel(context)) }
@@ -107,6 +106,7 @@ private fun SettingsScreen() {
     var agentReasoningTextEnabled by remember { mutableStateOf(KeyboardSettings.readAgentReasoningTextEnabled(context)) }
     var agentApiKey by remember { mutableStateOf(KeyboardSettings.readAgentApiKey(context, agentProviderType)) }
     var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
+    var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
 
     fun updateUpperRowKeyIds(keyIds: List<String>) {
         val normalizedKeyIds = KeyboardSettings.normalizeUpperRowKeyIds(keyIds)
@@ -118,6 +118,12 @@ private fun SettingsScreen() {
         val normalizedKeyIds = KeyboardSettings.normalizeAgentRowKeyIds(keyIds)
         agentRowKeyIds = normalizedKeyIds
         KeyboardSettings.saveAgentRowKeyIds(context, normalizedKeyIds)
+    }
+
+    fun updateTextSnippets(snippets: List<String>) {
+        val normalizedSnippets = KeyboardSettings.normalizeTextSnippets(snippets)
+        textSnippets = normalizedSnippets
+        KeyboardSettings.saveTextSnippets(context, normalizedSnippets)
     }
 
     Scaffold(
@@ -147,9 +153,13 @@ private fun SettingsScreen() {
         ) {
             SystemSetupActions()
 
+            TextSnippetsSection(
+                snippets = textSnippets,
+                onSnippetsChange = ::updateTextSnippets,
+            )
+
             AgentModeSection(
                 agentModeEnabled = agentModeEnabled,
-                autocompletePlusEnabled = autocompletePlusEnabled,
                 agentProviderType = agentProviderType,
                 agentApiBaseUrl = agentApiBaseUrl,
                 agentModel = agentModel,
@@ -161,10 +171,6 @@ private fun SettingsScreen() {
                 onAgentModeEnabledChange = {
                     agentModeEnabled = it
                     KeyboardSettings.saveAgentModeEnabled(context, it)
-                },
-                onAutocompletePlusEnabledChange = {
-                    autocompletePlusEnabled = it
-                    KeyboardSettings.saveAutocompletePlusEnabled(context, it)
                 },
                 onAgentProviderTypeChange = {
                     agentProviderType = it
@@ -286,6 +292,144 @@ private fun SettingsScreen() {
 }
 
 @Composable
+private fun TextSnippetsSection(
+    snippets: List<String>,
+    onSnippetsChange: (List<String>) -> Unit,
+) {
+    var draft by remember { mutableStateOf("") }
+    val normalizedDraft = KeyboardSettings.normalizeTextSnippets(listOf(draft)).firstOrNull().orEmpty()
+    val canAddSnippet = normalizedDraft.isNotBlank() &&
+        normalizedDraft !in snippets &&
+        snippets.size < KeyboardSettings.MAX_TEXT_SNIPPETS
+
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(8.dp),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Text snippets",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${snippets.size}/${KeyboardSettings.MAX_TEXT_SNIPPETS}",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it.take(KeyboardSettings.MAX_TEXT_SNIPPET_CHARS) },
+                label = { Text("Snippet") },
+                minLines = 2,
+                maxLines = 4,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Button(
+                onClick = {
+                    onSnippetsChange(snippets + normalizedDraft)
+                    draft = ""
+                },
+                enabled = canAddSnippet,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Add")
+            }
+
+            if (snippets.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(ZnKeyboardColors.Key),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No snippets",
+                        color = ZnKeyboardColors.Muted,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    snippets.forEachIndexed { index, snippet ->
+                        TextSnippetEditorRow(
+                            snippet = snippet,
+                            onRemove = {
+                                onSnippetsChange(
+                                    snippets.toMutableList().apply {
+                                        removeAt(index)
+                                    },
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextSnippetEditorRow(
+    snippet: String,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = ZnKeyboardColors.Key,
+            shape = RoundedCornerShape(6.dp),
+            tonalElevation = 0.dp,
+            modifier = Modifier.weight(1f),
+        ) {
+            Text(
+                text = snippet,
+                color = ZnKeyboardColors.OnSurface,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(44.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_delete_24),
+                contentDescription = "Remove snippet",
+                tint = ZnKeyboardColors.Muted,
+            )
+        }
+    }
+}
+
+@Composable
 private fun EmojiPreferencesSection(
     skinTone: EmojiSkinTone,
     recentEmojiRows: Int,
@@ -395,7 +539,6 @@ private fun EmojiPreferencesSection(
 @Composable
 private fun AgentModeSection(
     agentModeEnabled: Boolean,
-    autocompletePlusEnabled: Boolean,
     agentProviderType: KeyboardSettings.AgentProviderType,
     agentApiBaseUrl: String,
     agentModel: String,
@@ -405,7 +548,6 @@ private fun AgentModeSection(
     agentApiKey: String,
     agentApiKeyLocked: Boolean,
     onAgentModeEnabledChange: (Boolean) -> Unit,
-    onAutocompletePlusEnabledChange: (Boolean) -> Unit,
     onAgentProviderTypeChange: (KeyboardSettings.AgentProviderType) -> Unit,
     onAgentApiBaseUrlChange: (String) -> Unit,
     onAgentModelChange: (String) -> Unit,
@@ -437,7 +579,7 @@ private fun AgentModeSection(
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Shows an LLM rewrite and autocomplete strip above the keyboard.",
+                        text = "Shows LLM rewrite controls above the keyboard.",
                         color = ZnKeyboardColors.Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -445,30 +587,6 @@ private fun AgentModeSection(
                 Switch(
                     checked = agentModeEnabled,
                     onCheckedChange = onAgentModeEnabledChange,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Autocomplete+",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Suggests typo fixes after you pause typing. Suggestions are never auto-applied.",
-                        color = ZnKeyboardColors.Muted,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                Switch(
-                    checked = autocompletePlusEnabled,
-                    onCheckedChange = onAutocompletePlusEnabledChange,
-                    enabled = agentModeEnabled,
                 )
             }
 
@@ -1294,7 +1412,7 @@ private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
 }
 
 private object ZnKeyboardColors {
-    val Background = Color(0xFF151515)
+    val Background = Color.Black
     val Surface = Color(0xFF222222)
     val Key = Color(0xFF2A2A2A)
     val FunctionKey = Color(0xFF323232)

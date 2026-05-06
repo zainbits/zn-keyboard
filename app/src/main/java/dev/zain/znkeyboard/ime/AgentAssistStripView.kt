@@ -10,12 +10,16 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.zain.znkeyboard.KeyboardSettings
@@ -36,6 +40,11 @@ class AgentAssistStripView @JvmOverloads constructor(
     private var ctrl = false
     private var alt = false
     private var heightScale = 1f
+    private val repeatHandler = Handler(Looper.getMainLooper())
+    private val backspaceRepeatRunnable = Runnable { repeatBackspace() }
+    private var repeatingBackspaceKeyId: String? = null
+    private var backspaceRepeatCount = 0
+    private var backspaceRepeatConsumed = false
 
     init {
         orientation = HORIZONTAL
@@ -76,6 +85,7 @@ class AgentAssistStripView @JvmOverloads constructor(
     }
 
     private fun rebuildRow() {
+        cancelBackspaceRepeat(clearConsumed = false)
         removeAllViews()
         addKey(
             label = "Rewrite",
@@ -116,7 +126,13 @@ class AgentAssistStripView @JvmOverloads constructor(
             active = active,
             enabled = !state.loading,
             onClick = { handleAgentKey(keyId) },
+            repeatOnHold = keyId == "backspace",
         )
+    }
+
+    override fun onDetachedFromWindow() {
+        cancelBackspaceRepeat(clearConsumed = true)
+        super.onDetachedFromWindow()
     }
 
     private fun addKey(
@@ -127,6 +143,7 @@ class AgentAssistStripView @JvmOverloads constructor(
         active: Boolean = false,
         enabled: Boolean = true,
         emphasizedWhenDisabled: Boolean = false,
+        repeatOnHold: Boolean = false,
         onClick: () -> Unit,
     ) {
         val view = TextView(context).apply {
@@ -144,6 +161,11 @@ class AgentAssistStripView @JvmOverloads constructor(
             alpha = if (enabled || emphasizedWhenDisabled) 1f else DISABLED_ALPHA
             if (enabled) {
                 setOnClickListener { onClick() }
+                if (repeatOnHold) {
+                    setOnTouchListener { touchedView, event ->
+                        handleRepeatableBackspaceTouch(touchedView, event)
+                    }
+                }
             }
         }
 
@@ -220,6 +242,79 @@ class AgentAssistStripView @JvmOverloads constructor(
         }
     }
 
+    private fun handleRepeatableBackspaceTouch(
+        touchedView: View,
+        event: MotionEvent,
+    ): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchedView.isPressed = true
+                scheduleBackspaceRepeat()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val inside = event.x in 0f..touchedView.width.toFloat() &&
+                    event.y in 0f..touchedView.height.toFloat()
+                if (inside) {
+                    touchedView.isPressed = true
+                    if (repeatingBackspaceKeyId == null && !backspaceRepeatConsumed) {
+                        scheduleBackspaceRepeat()
+                    }
+                } else {
+                    touchedView.isPressed = false
+                    cancelBackspaceRepeat(clearConsumed = false)
+                }
+            }
+            MotionEvent.ACTION_UP -> {
+                val consumed = backspaceRepeatConsumed
+                touchedView.isPressed = false
+                cancelBackspaceRepeat(clearConsumed = true)
+                val inside = event.x in 0f..touchedView.width.toFloat() &&
+                    event.y in 0f..touchedView.height.toFloat()
+                if (!consumed && inside) {
+                    touchedView.performClick()
+                }
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                touchedView.isPressed = false
+                cancelBackspaceRepeat(clearConsumed = true)
+            }
+        }
+        return true
+    }
+
+    private fun scheduleBackspaceRepeat() {
+        cancelBackspaceRepeat(clearConsumed = true)
+        repeatingBackspaceKeyId = "backspace"
+        backspaceRepeatCount = 0
+        backspaceRepeatConsumed = false
+        repeatHandler.postDelayed(
+            backspaceRepeatRunnable,
+            BackspaceRepeatTiming.startDelayMillis(),
+        )
+    }
+
+    private fun repeatBackspace() {
+        val keyId = repeatingBackspaceKeyId ?: return
+        backspaceRepeatConsumed = true
+        backspaceRepeatCount += 1
+        handleAgentKey(keyId)
+        if (repeatingBackspaceKeyId != null) {
+            repeatHandler.postDelayed(
+                backspaceRepeatRunnable,
+                BackspaceRepeatTiming.repeatDelayMillis(backspaceRepeatCount),
+            )
+        }
+    }
+
+    private fun cancelBackspaceRepeat(clearConsumed: Boolean) {
+        repeatHandler.removeCallbacks(backspaceRepeatRunnable)
+        repeatingBackspaceKeyId = null
+        backspaceRepeatCount = 0
+        if (clearConsumed) {
+            backspaceRepeatConsumed = false
+        }
+    }
+
     private fun roleForKeyId(keyId: String): KeyRole {
         return when (keyId) {
             "pipe",
@@ -265,8 +360,8 @@ class AgentAssistStripView @JvmOverloads constructor(
             radius = dp(ImeLayout.KEY_RADIUS_DP).toFloat(),
             glowWidth = dp(9).toFloat(),
             strokeWidth = dp(2).toFloat(),
-            borderWidth = dp(1).toFloat(),
-            borderColor = if (active) Color.TRANSPARENT else PALETTE.border,
+            borderWidth = 0f,
+            borderColor = Color.TRANSPARENT,
             colors = status.colors,
             animated = status.animated,
         )
@@ -407,12 +502,11 @@ class AgentAssistStripView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.rgb(34, 34, 34)
+        val background = Color.BLACK
         val key = Color.rgb(42, 42, 42)
         val function = Color.rgb(50, 50, 50)
         val action = Color.rgb(42, 42, 42)
         val accent = Color.rgb(48, 172, 226)
-        val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
     }

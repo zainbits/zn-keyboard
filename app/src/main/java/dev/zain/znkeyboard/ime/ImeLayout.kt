@@ -12,7 +12,7 @@ internal object ImeLayout {
     const val ROW_GAP_DP = 6
     const val KEY_RADIUS_DP = 5
     const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = 16
-    const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = 1.5f
+    const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = 2.0f
     const val ICON_VIEWPORT = 24f
 
     const val COMPACT_ROW_WEIGHT = 0.78f

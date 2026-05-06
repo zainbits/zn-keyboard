@@ -460,9 +460,6 @@ class EmojiPanelView @JvmOverloads constructor(
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dp(5).toFloat()
             setColor(color)
-            if (!active) {
-                setStroke(dp(1), PALETTE.border)
-            }
         }
     }
 
@@ -543,11 +540,10 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.rgb(34, 34, 34)
+        val background = Color.BLACK
         val key = Color.rgb(42, 42, 42)
         val function = Color.rgb(50, 50, 50)
         val accent = Color.rgb(48, 172, 226)
-        val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
     }

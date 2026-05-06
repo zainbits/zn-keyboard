@@ -210,7 +210,7 @@ class AgentHistoryView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.rgb(34, 34, 34)
+        val background = Color.BLACK
         val divider = Color.rgb(58, 58, 58)
         const val text = Color.WHITE
         val mutedText = Color.rgb(170, 170, 170)

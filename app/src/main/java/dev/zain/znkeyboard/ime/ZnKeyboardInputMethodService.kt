@@ -29,12 +29,14 @@ import java.util.Locale
 class ZnKeyboardInputMethodService : InputMethodService(),
     ZnKeyboardView.Callback,
     EmojiPanelView.Callback,
+    SnippetPanelView.Callback,
     AgentAssistStripView.Callback,
     AgentReviewView.Callback,
     AgentHistoryView.Callback {
     private var keyboardView: ZnKeyboardView? = null
     private var keyboardContainer: FrameLayout? = null
     private var emojiPanelView: EmojiPanelView? = null
+    private var snippetPanelView: SnippetPanelView? = null
     private var agentReviewView: AgentReviewView? = null
     private var agentHistoryView: AgentHistoryView? = null
     private var agentStripView: AgentAssistStripView? = null
@@ -49,8 +51,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var agentError: String? = null
     private var agentLoading = false
     private var requestGeneration = 0
-    private var autocompleteRunnable: Runnable? = null
-    private var lastAutocompleteInput: String? = null
 
     override fun onCreateInputView(): View {
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
@@ -119,7 +119,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onDestroy() {
-        cancelAutocomplete()
         requestGeneration++
         super.onDestroy()
     }
@@ -140,6 +139,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showEmojiPanel()
     }
 
+    override fun onSnippetPanelRequested() {
+        showSnippetPanel()
+    }
+
     override fun onEmojiSelected(emoji: String, updatedRecentEmojis: List<String>) {
         handleText(emoji, ModifierState(ctrl = false, alt = false))
         persistRecentEmojis(updatedRecentEmojis)
@@ -154,6 +157,23 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onEmojiSpace() {
+        handleText(" ", ModifierState(ctrl = false, alt = false))
+    }
+
+    override fun onSnippetSelected(snippet: String) {
+        handleText(snippet, ModifierState(ctrl = false, alt = false))
+        showKeyboardPanel()
+    }
+
+    override fun onSnippetPanelClosed() {
+        showKeyboardPanel()
+    }
+
+    override fun onSnippetBackspace() {
+        handleBackspace(ModifierState(ctrl = false, alt = false))
+    }
+
+    override fun onSnippetSpace() {
         handleText(" ", ModifierState(ctrl = false, alt = false))
     }
 
@@ -197,6 +217,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setRecentRowCount(recentEmojiRows)
             view.setDefaultSkinTone(defaultEmojiSkinTone)
         }
+        snippetPanelView?.let { view ->
+            view.setHeightScale(heightScale)
+            view.setSnippets(KeyboardSettings.readTextSnippets(this))
+        }
         agentReviewView?.setHeightScale(heightScale)
         agentHistoryView?.setHeightScale(heightScale)
         renderAgentStrip()
@@ -215,6 +239,18 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         panel.setRecentRowCount(recentEmojiRows)
         panel.setDefaultSkinTone(defaultEmojiSkinTone)
         activeSurface = KeyboardSurface.Emoji
+        swapKeyboardSurface(panel)
+        renderAgentStrip()
+    }
+
+    private fun showSnippetPanel() {
+        val panel = snippetPanelView ?: SnippetPanelView(this).also { view ->
+            snippetPanelView = view
+            view.callback = this
+        }
+        panel.setHeightScale(KeyboardSettings.readHeightScale(this))
+        panel.setSnippets(KeyboardSettings.readTextSnippets(this))
+        activeSurface = KeyboardSurface.Snippets
         swapKeyboardSurface(panel)
         renderAgentStrip()
     }
@@ -286,7 +322,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
         }
         inputConnection.commitText(value, 1)
-        scheduleAutocomplete()
     }
 
     private fun handleBackspace(modifiers: ModifierState) {
@@ -295,7 +330,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         // TYPE_NULL editors such as terminals expect raw key events, not surrounding-text edits.
         if (isRawKeyEventEditor(currentEditorInfo)) {
             sendKey(KeyEvent.KEYCODE_DEL, modifiers)
-            scheduleAutocomplete()
             return
         }
 
@@ -309,7 +343,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 }
             }
         }
-        scheduleAutocomplete()
     }
 
     private fun handleEnter(modifiers: ModifierState) {
@@ -360,19 +393,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         )
     }
 
-    private fun extractCurrentSegment(beforeCursor: String): String {
-        val currentLine = beforeCursor.substringAfterLast('\n')
-        return if (currentLine.length > MAX_AUTOCOMPLETE_SOURCE_CHARS) {
-            currentLine.takeLast(MAX_AUTOCOMPLETE_SOURCE_CHARS)
-        } else {
-            currentLine
-        }
-    }
-
     private fun startRewriteFromCurrentEditor() {
         val target = captureRewriteTarget() ?: return
         startLlmRequest(
-            kind = LlmRequestKind.Rewrite,
             target = target,
             requestText = target.originalText,
             selectTargetForRequest = true,
@@ -408,9 +431,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
 
         AgentRewriteHistoryStore.recordReplacement(this, review.target.originalText)
-        cancelAutocomplete()
         requestGeneration++
-        lastAutocompleteInput = review.replacementText.trim()
         agentError = null
         agentLoading = false
         activeRequestTarget = null
@@ -425,34 +446,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentError = null
         agentLoading = false
         showKeyboardPanel()
-    }
-
-    private fun scheduleAutocomplete() {
-        cancelAutocomplete()
-        if (!isAgentStripAvailable() || activeSurface != KeyboardSurface.Keyboard) return
-        if (!KeyboardSettings.readAutocompletePlusEnabled(this)) return
-
-        val target = captureAutocompleteTarget() ?: return
-        val input = target.originalText.trim()
-        if (input.length < MIN_AUTOCOMPLETE_CHARS || input == lastAutocompleteInput) return
-
-        autocompleteRunnable = Runnable {
-            if (!KeyboardSettings.readAgentProviderSettings(this).isConfigured) return@Runnable
-            lastAutocompleteInput = input
-            startLlmRequest(
-                kind = LlmRequestKind.Autocomplete,
-                target = target,
-                requestText = target.originalText,
-                selectTargetForRequest = false,
-            )
-        }.also { runnable ->
-            mainHandler.postDelayed(runnable, AUTOCOMPLETE_DEBOUNCE_MS)
-        }
-    }
-
-    private fun cancelAutocomplete() {
-        autocompleteRunnable?.let(mainHandler::removeCallbacks)
-        autocompleteRunnable = null
     }
 
     private fun captureRewriteTarget(): AgentEditTarget? {
@@ -480,26 +473,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             restoreSelectionStart = snapshot.selectionStart,
             restoreSelectionEnd = snapshot.selectionEnd,
             selectionWasChangedForRequest = true,
-        )
-    }
-
-    private fun captureAutocompleteTarget(): AgentEditTarget? {
-        val snapshot = captureEditorSnapshot(MAX_AUTOCOMPLETE_CONTEXT_CHARS) ?: return null
-        val selectionStart = minOf(snapshot.selectionStart, snapshot.selectionEnd)
-        val selectionEnd = maxOf(snapshot.selectionStart, snapshot.selectionEnd)
-        if (selectionStart != selectionEnd) return null
-
-        val localCursor = (selectionEnd - snapshot.textStartOffset).coerceIn(0, snapshot.text.length)
-        val segment = extractCurrentSegment(snapshot.text.take(localCursor))
-        if (segment.isBlank()) return null
-
-        return AgentEditTarget(
-            originalText = segment,
-            replaceStart = selectionEnd - segment.length,
-            replaceEnd = selectionEnd,
-            restoreSelectionStart = selectionEnd,
-            restoreSelectionEnd = selectionEnd,
-            selectionWasChangedForRequest = false,
         )
     }
 
@@ -563,7 +536,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
             return
         }
-        cancelAutocomplete()
         requestGeneration++
         activeRequestTarget = null
         activeReview = null
@@ -577,7 +549,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun startLlmRequest(
-        kind: LlmRequestKind,
         target: AgentEditTarget,
         requestText: String,
         selectTargetForRequest: Boolean,
@@ -593,19 +564,17 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             return
         }
 
-        cancelAutocomplete()
         val generation = ++requestGeneration
         agentError = null
         agentLoading = true
         activeRequestTarget = target
-        Log.d(TAG, "Starting $kind request for ${requestText.length} chars")
+        Log.d(TAG, "Starting rewrite request for ${requestText.length} chars")
         renderAgentStrip()
 
         Thread {
             val result = runCatching {
                 requestChatCompletion(
                     providerSettings = providerSettings,
-                    kind = kind,
                     text = requestText,
                 )
             }
@@ -616,7 +585,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 activeRequestTarget = null
                 result
                     .onSuccess { content ->
-                        applyLlmResult(kind, target, content)
+                        applyLlmResult(target, content)
                     }
                     .onFailure { error ->
                         restoreSelectionIfNeeded(target)
@@ -632,7 +601,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun requestChatCompletion(
         providerSettings: KeyboardSettings.AgentProviderSettings,
-        kind: LlmRequestKind,
         text: String,
     ): String {
         val endpoint = buildChatCompletionsUrl(providerSettings)
@@ -643,7 +611,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 return executeChatCompletionRequest(
                     endpoint = endpoint,
                     providerSettings = providerSettings,
-                    kind = kind,
                     text = text,
                     outputMode = outputMode,
                 )
@@ -663,7 +630,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun executeChatCompletionRequest(
         endpoint: URL,
         providerSettings: KeyboardSettings.AgentProviderSettings,
-        kind: LlmRequestKind,
         text: String,
         outputMode: StructuredOutputMode,
     ): String {
@@ -682,12 +648,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             .put(
                 "messages",
                 JSONArray()
-                    .put(JSONObject().put("role", "system").put("content", systemPromptFor(kind)))
+                    .put(JSONObject().put("role", "system").put("content", rewriteSystemPrompt()))
                     .put(JSONObject().put("role", "user").put("content", text)),
             )
-            .put("temperature", if (kind == LlmRequestKind.Rewrite) 0.4 else 0.1)
-            .put("max_tokens", maxTokensFor(kind, text))
-            .put("response_format", structuredResponseFormatFor(kind, outputMode))
+            .put("temperature", 0.4)
+            .put("max_tokens", maxTokensFor(text))
+            .put("response_format", structuredResponseFormatFor(outputMode))
             .applyOpenRouterProviderPreferences(providerSettings, outputMode)
             .applyReasoningSettings(providerSettings)
 
@@ -801,22 +767,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
     }
 
-    private fun maxTokensFor(kind: LlmRequestKind, text: String): Int {
-        if (kind == LlmRequestKind.Autocomplete) return MAX_AUTOCOMPLETE_LLM_TOKENS
-
+    private fun maxTokensFor(text: String): Int {
         val estimatedOutputTokens = (text.length / CHARS_PER_OUTPUT_TOKEN_ESTIMATE)
             .coerceAtLeast(MIN_REWRITE_LLM_TOKENS)
         return estimatedOutputTokens.coerceAtMost(MAX_REWRITE_LLM_TOKENS)
     }
 
-    private fun structuredResponseFormatFor(kind: LlmRequestKind, outputMode: StructuredOutputMode): JSONObject {
+    private fun structuredResponseFormatFor(outputMode: StructuredOutputMode): JSONObject {
         if (outputMode == StructuredOutputMode.JsonObject) {
             return JSONObject().put("type", "json_object")
-        }
-
-        val textDescription = when (kind) {
-            LlmRequestKind.Rewrite -> "The final rewritten text only, without labels, explanations, or prefaces."
-            LlmRequestKind.Autocomplete -> "The final corrected text only, without labels, explanations, or prefaces."
         }
 
         return JSONObject()
@@ -824,7 +783,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             .put(
                 "json_schema",
                 JSONObject()
-                    .put("name", "znkeyboard_${kind.schemaName}_response")
+                    .put("name", "znkeyboard_rewrite_response")
                     .put("strict", true)
                     .put(
                         "schema",
@@ -838,7 +797,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                                         STRUCTURED_OUTPUT_TEXT_FIELD,
                                         JSONObject()
                                             .put("type", "string")
-                                            .put("description", textDescription),
+                                            .put(
+                                                "description",
+                                                "The final rewritten text only, without labels, explanations, or prefaces.",
+                                            ),
                                     ),
                             )
                             .put("required", JSONArray().put(STRUCTURED_OUTPUT_TEXT_FIELD)),
@@ -933,16 +895,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         return endpoint
     }
 
-    private fun systemPromptFor(kind: LlmRequestKind): String {
-        return when (kind) {
-            LlmRequestKind.Rewrite -> rewriteSystemPrompt()
-            LlmRequestKind.Autocomplete -> loadPromptAsset(
-                AUTOCOMPLETE_PROMPT_ASSET,
-                FALLBACK_AUTOCOMPLETE_PROMPT,
-            )
-        }
-    }
-
     private fun rewriteSystemPrompt(): String {
         return buildList {
             add(loadPromptAsset(REWRITE_BASE_PROMPT_ASSET, FALLBACK_REWRITE_PROMPT))
@@ -973,18 +925,14 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }.trim()
     }
 
-    private fun applyLlmResult(kind: LlmRequestKind, target: AgentEditTarget, content: String) {
+    private fun applyLlmResult(target: AgentEditTarget, content: String) {
         val normalized = AsciiTextSanitizer.toAscii(content).trim()
         if (normalized.isBlank() || normalized.equals("null", ignoreCase = true)) {
-            showAgentError("No suggestion returned.")
+            showAgentError("No rewrite returned.")
             return
         }
 
-        if (kind == LlmRequestKind.Autocomplete && normalized == target.originalText.trim()) {
-            agentError = null
-            return
-        }
-        if (kind == LlmRequestKind.Rewrite && normalized == target.originalText.trim()) {
+        if (normalized == target.originalText.trim()) {
             restoreSelectionIfNeeded(target)
             showAgentError("No changes returned.")
             return
@@ -1007,7 +955,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun resetAgentState(returnToKeyboard: Boolean = false) {
-        cancelAutocomplete()
         requestGeneration++
         activeRequestTarget = null
         activeReview = null
@@ -1134,6 +1081,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private enum class KeyboardSurface {
         Keyboard,
         Emoji,
+        Snippets,
         Review,
         History,
     }
@@ -1160,28 +1108,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         JsonObject,
     }
 
-    private enum class LlmRequestKind(
-        val schemaName: String,
-    ) {
-        Rewrite("rewrite"),
-        Autocomplete("autocomplete"),
-    }
-
     private companion object {
         const val TAG = "ZnKeyboardAgent"
-        const val MAX_AUTOCOMPLETE_CONTEXT_CHARS = 800
-        const val MAX_AUTOCOMPLETE_SOURCE_CHARS = 600
         const val MAX_REWRITE_SOURCE_CHARS = 12_000
-        const val MIN_AUTOCOMPLETE_CHARS = 8
-        const val AUTOCOMPLETE_DEBOUNCE_MS = 900L
         const val REQUEST_TIMEOUT_MS = 30_000
-        const val MAX_AUTOCOMPLETE_LLM_TOKENS = 500
         const val MIN_REWRITE_LLM_TOKENS = 2_000
         const val MAX_REWRITE_LLM_TOKENS = 6_000
         const val CHARS_PER_OUTPUT_TOKEN_ESTIMATE = 2
         const val ERROR_PREVIEW_CHARS = 160
         const val STRUCTURED_OUTPUT_TEXT_FIELD = "text"
-        const val AUTOCOMPLETE_PROMPT_ASSET = "prompts/autocomplete.md"
         const val REWRITE_BASE_PROMPT_ASSET = "prompts/rewrite_base.md"
         const val WHATSAPP_PROMPT_ASSET = "prompts/apps/whatsapp.md"
         const val WHATSAPP_PACKAGE_NAME = "com.whatsapp"
@@ -1191,11 +1126,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val FALLBACK_REWRITE_PROMPT = """
             Improve or rewrite the user's text while preserving the original meaning and tone.
             Return a valid JSON object with exactly one field, text, containing only the rewritten text. Do not include labels, explanations, or prefaces in text.
-        """.trimIndent()
-        val FALLBACK_AUTOCOMPLETE_PROMPT = """
-            Correct typos and light grammar in the user's current text while preserving meaning and style.
-            If it is already good, return it unchanged.
-            Return a valid JSON object with exactly one field, text, containing only the corrected text. Do not include labels, explanations, or prefaces in text.
         """.trimIndent()
     }
 }
