@@ -213,7 +213,7 @@ private fun SettingsScreen() {
 
             Surface(
                 color = ZnKeyboardColors.Surface,
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
                 tonalElevation = 0.dp,
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -304,7 +304,7 @@ private fun TextSnippetsSection(
 
     Surface(
         color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -360,7 +360,7 @@ private fun TextSnippetsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
                         .background(ZnKeyboardColors.Key),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -402,7 +402,7 @@ private fun TextSnippetEditorRow(
     ) {
         Surface(
             color = ZnKeyboardColors.Key,
-            shape = RoundedCornerShape(6.dp),
+            shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
             tonalElevation = 0.dp,
             modifier = Modifier.weight(1f),
         ) {
@@ -440,7 +440,7 @@ private fun EmojiPreferencesSection(
 
     Surface(
         color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -559,7 +559,7 @@ private fun AgentModeSection(
 ) {
     Surface(
         color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -801,7 +801,7 @@ private fun ModelSelectorField(
         if (fieldFocused && suggestionsExpanded && modelOptions.isNotEmpty() && debouncedQuery.isNotBlank() && filteredOptions.isEmpty()) {
             Surface(
                 color = ZnKeyboardColors.Key,
-                shape = RoundedCornerShape(8.dp),
+                shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
@@ -1088,7 +1088,7 @@ private fun UpperRowKeysSection(
 ) {
     Surface(
         color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(8.dp),
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
         tonalElevation = 0.dp,
         modifier = Modifier.fillMaxWidth(),
     ) {
@@ -1126,7 +1126,7 @@ private fun UpperRowKeysSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(44.dp)
-                        .clip(RoundedCornerShape(6.dp))
+                        .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
                         .background(ZnKeyboardColors.Key),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -1392,6 +1392,8 @@ private val PICKER_MAX_HEIGHT = 280.dp
 private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp
 private val REASONING_PICKER_MAX_HEIGHT = 260.dp
 private val SKIN_TONE_PICKER_MAX_HEIGHT = 260.dp
+private val SECTION_CORNER_RADIUS = 8.dp
+private val COMPACT_ITEM_CORNER_RADIUS = 6.dp
 private val PICKER_CORNER_RADIUS = 10.dp
 
 @Composable

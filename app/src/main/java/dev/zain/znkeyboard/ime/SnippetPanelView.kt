@@ -211,7 +211,7 @@ class SnippetPanelView @JvmOverloads constructor(
         }
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(5).toFloat()
+            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
             setColor(color)
         }
     }

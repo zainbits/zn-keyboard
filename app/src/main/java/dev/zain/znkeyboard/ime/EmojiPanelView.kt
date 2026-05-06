@@ -458,7 +458,7 @@ class EmojiPanelView @JvmOverloads constructor(
         }
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(5).toFloat()
+            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
             setColor(color)
         }
     }
@@ -525,7 +525,7 @@ class EmojiPanelView @JvmOverloads constructor(
                 minHeight = dp(42)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(5).toFloat()
+                    cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
                     setColor(PALETTE.key)
                 }
             }

@@ -355,7 +355,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             else -> PALETTE.key
         }
 
-        val radius = dp(5f)
+        val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
         canvas.drawRoundRect(bounds, radius, radius, keyPaint)
 
         val contentColor = when {
