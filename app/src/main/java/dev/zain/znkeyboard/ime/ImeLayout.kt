@@ -5,6 +5,7 @@ import kotlin.math.roundToInt
 
 internal object ImeLayout {
     const val BASE_HEIGHT_DP = 282f
+    const val EMOJI_PANEL_EXTRA_HEIGHT_DP = 224f
     const val HORIZONTAL_PADDING_DP = 6
     const val TOP_PADDING_DP = 6
     const val BASE_BOTTOM_PADDING_DP = 8

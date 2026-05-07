@@ -29,6 +29,7 @@ import java.util.Locale
 class ZnKeyboardInputMethodService : InputMethodService(),
     ZnKeyboardView.Callback,
     EmojiPanelView.Callback,
+    EmojiSearchView.Callback,
     SnippetPanelView.Callback,
     AgentAssistStripView.Callback,
     AgentReviewView.Callback,
@@ -36,6 +37,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var keyboardView: ZnKeyboardView? = null
     private var keyboardContainer: FrameLayout? = null
     private var emojiPanelView: EmojiPanelView? = null
+    private var emojiSearchView: EmojiSearchView? = null
     private var snippetPanelView: SnippetPanelView? = null
     private var agentReviewView: AgentReviewView? = null
     private var agentHistoryView: AgentHistoryView? = null
@@ -64,6 +66,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             keyboardView = view
             view.callback = this
         }
+        val emojiSearch = EmojiSearchView(this).also { view ->
+            emojiSearchView = view
+            view.callback = this
+        }
         val keyboardSlot = FrameLayout(this).also { container ->
             keyboardContainer = container
             container.addView(
@@ -78,6 +84,13 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             orientation = LinearLayout.VERTICAL
             addView(
                 agentStrip,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                emojiSearch,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -124,6 +137,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState) {
+        if (activeSurface == KeyboardSurface.EmojiSearch && handleEmojiSearchKeyboardAction(action, modifiers)) {
+            return
+        }
         when (action) {
             KeyboardAction.Backspace -> handleBackspace(modifiers)
             KeyboardAction.Enter -> handleEnter(modifiers)
@@ -148,6 +164,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         persistRecentEmojis(updatedRecentEmojis)
     }
 
+    override fun onEmojiSearchRequested() {
+        showEmojiSearchPanel()
+    }
+
     override fun onEmojiPanelClosed() {
         showKeyboardPanel()
     }
@@ -158,6 +178,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onEmojiSpace() {
         handleText(" ", ModifierState(ctrl = false, alt = false))
+    }
+
+    override fun onEmojiSearchClosed() {
+        showEmojiPanel()
+    }
+
+    override fun onEmojiSearchEmojiSelected(emoji: String, updatedRecentEmojis: List<String>) {
+        handleText(emoji, ModifierState(ctrl = false, alt = false))
+        persistRecentEmojis(updatedRecentEmojis)
     }
 
     override fun onSnippetSelected(snippet: String) {
@@ -217,6 +246,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setRecentRowCount(recentEmojiRows)
             view.setDefaultSkinTone(defaultEmojiSkinTone)
         }
+        emojiSearchView?.let { view ->
+            view.setRecentEmojis(recentEmojis)
+            view.setDefaultSkinTone(defaultEmojiSkinTone)
+        }
         snippetPanelView?.let { view ->
             view.setHeightScale(heightScale)
             view.setSnippets(KeyboardSettings.readTextSnippets(this))
@@ -227,6 +260,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun showEmojiPanel() {
+        hideEmojiSearchView()
         val panel = emojiPanelView ?: EmojiPanelView(this).also { view ->
             emojiPanelView = view
             view.callback = this
@@ -243,7 +277,23 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderAgentStrip()
     }
 
+    private fun showEmojiSearchPanel() {
+        val keyboard = keyboardView ?: return
+        val search = emojiSearchView ?: return
+        recentEmojis = KeyboardSettings.readRecentEmojis(this)
+        defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        search.setRecentEmojis(recentEmojis)
+        search.setDefaultSkinTone(defaultEmojiSkinTone)
+        search.clearSearch()
+        search.visibility = View.VISIBLE
+        keyboard.setEnterLabel("Search")
+        activeSurface = KeyboardSurface.EmojiSearch
+        swapKeyboardSurface(keyboard)
+        renderAgentStrip()
+    }
+
     private fun showSnippetPanel() {
+        hideEmojiSearchView()
         val panel = snippetPanelView ?: SnippetPanelView(this).also { view ->
             snippetPanelView = view
             view.callback = this
@@ -256,16 +306,19 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun showKeyboardPanel() {
+        hideEmojiSearchView()
         activeSurface = KeyboardSurface.Keyboard
         val keyboard = keyboardView ?: run {
             renderAgentStrip()
             return
         }
+        keyboard.setEnterLabel(resolveEnterLabel(currentEditorInfo))
         swapKeyboardSurface(keyboard)
         renderAgentStrip()
     }
 
     private fun showAgentReviewPanel(review: AgentReview) {
+        hideEmojiSearchView()
         val reviewView = agentReviewView ?: AgentReviewView(this).also { view ->
             agentReviewView = view
             view.callback = this
@@ -278,6 +331,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun showAgentHistoryPanel() {
+        hideEmojiSearchView()
         val historyView = agentHistoryView ?: AgentHistoryView(this).also { view ->
             agentHistoryView = view
             view.callback = this
@@ -302,13 +356,41 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         )
     }
 
+    private fun hideEmojiSearchView() {
+        emojiSearchView?.let { view ->
+            if (view.visibility != View.GONE) {
+                view.visibility = View.GONE
+            }
+            view.clearSearch()
+        }
+    }
+
     private fun persistRecentEmojis(emojis: List<String>) {
         val normalizedEmojis = EmojiCatalog.normalizeRecentEmojis(emojis)
         recentEmojis = normalizedEmojis
         emojiPanelView?.setRecentEmojis(normalizedEmojis)
+        emojiSearchView?.setRecentEmojis(normalizedEmojis)
         mainHandler.post {
             KeyboardSettings.saveRecentEmojis(this, normalizedEmojis)
         }
+    }
+
+    private fun handleEmojiSearchKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
+        if (modifiers.hasHardwareMeta) {
+            return true
+        }
+        val searchView = emojiSearchView ?: return true
+        when (action) {
+            KeyboardAction.Backspace -> searchView.deleteQueryCharacter()
+            KeyboardAction.Enter -> Unit
+            is KeyboardAction.KeyCode -> {
+                if (action.keyCode == KeyEvent.KEYCODE_DEL) {
+                    searchView.deleteQueryCharacter()
+                }
+            }
+            is KeyboardAction.Text -> searchView.appendQueryText(action.value)
+        }
+        return true
     }
 
     private fun handleText(value: String, modifiers: ModifierState) {
@@ -969,6 +1051,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun renderAgentStrip() {
         val visible = isAgentStripAvailable() &&
+            activeSurface != KeyboardSurface.Emoji &&
+            activeSurface != KeyboardSurface.EmojiSearch &&
             activeSurface != KeyboardSurface.Review &&
             activeSurface != KeyboardSurface.History
         val providerConfigured = KeyboardSettings.readAgentProviderSettings(this).isConfigured
@@ -1081,6 +1165,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private enum class KeyboardSurface {
         Keyboard,
         Emoji,
+        EmojiSearch,
         Snippets,
         Review,
         History,

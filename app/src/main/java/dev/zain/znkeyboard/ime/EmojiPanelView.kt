@@ -10,11 +10,11 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
+import android.widget.AbsListView
 import android.widget.BaseAdapter
-import android.widget.GridView
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.PopupWindow
 import android.widget.TextView
 import dev.zain.znkeyboard.EmojiCatalog
@@ -29,6 +29,7 @@ class EmojiPanelView @JvmOverloads constructor(
 ) : LinearLayout(context, attrs) {
     interface Callback {
         fun onEmojiSelected(emoji: String, updatedRecentEmojis: List<String>)
+        fun onEmojiSearchRequested()
         fun onEmojiPanelClosed()
         fun onEmojiBackspace()
         fun onEmojiSpace()
@@ -36,52 +37,45 @@ class EmojiPanelView @JvmOverloads constructor(
 
     var callback: Callback? = null
 
-    private lateinit var recentTabButton: TextView
-    private val categoryButtons = mutableMapOf<EmojiCategory, TextView>()
-    private val adapter = EmojiGridAdapter(context)
-    private val searchHeader = LinearLayout(context).apply {
-        orientation = HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        visibility = GONE
-    }
-    private val searchText = TextView(context)
-    private val categoryStrip = HorizontalScrollView(context).apply {
-        isHorizontalScrollBarEnabled = false
-        overScrollMode = OVER_SCROLL_NEVER
-    }
-    private val categoryRow = LinearLayout(context).apply {
-        orientation = HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-    }
-    private val emojiGrid = GridView(context).apply {
-        adapter = this@EmojiPanelView.adapter
-        numColumns = EmojiCatalog.RECENT_COLUMN_COUNT
-        stretchMode = GridView.STRETCH_COLUMN_WIDTH
-        gravity = Gravity.CENTER
-        horizontalSpacing = dp(4)
-        verticalSpacing = dp(4)
-        clipToPadding = false
-        cacheColorHint = Color.TRANSPARENT
-        selector = keyBackground(active = true, role = KeyRole.Character)
-    }
-    private val browseActionRow = LinearLayout(context).apply {
-        orientation = HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-    }
-    private val searchKeyboard = LinearLayout(context).apply {
-        orientation = VERTICAL
-        visibility = GONE
-    }
-
-    private var selectedTab = EmojiTab.Recent
-    private var selectedCategory = EmojiCategory.SmileysEmotion
     private var recentEmojis = emptyList<String>()
     private var recentRowCount = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
     private var defaultSkinTone = EmojiSkinTone.Default
-    private var searchActive = false
-    private var searchQuery = ""
     private var heightScale = 1f
     private var variantPopup: PopupWindow? = null
+    private var selectedSection: EmojiSectionKey = EmojiSectionKey.Recent
+
+    private lateinit var recentShortcutButton: TextView
+    private val categoryButtons = mutableMapOf<EmojiCategory, TextView>()
+    private val sectionPositions = mutableMapOf<EmojiSectionKey, Int>()
+
+    private val adapter = EmojiListAdapter(
+        context = context,
+        displayEmoji = ::displayEmoji,
+        onEmojiClick = ::selectEmoji,
+        onEmojiLongClick = ::showVariantPopup,
+    )
+    private val browseHeaderStrip = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_NEVER
+        isFillViewport = false
+    }
+    private val browseHeaderRow = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    private val emojiList = ListView(context).apply {
+        adapter = this@EmojiPanelView.adapter
+        divider = null
+        cacheColorHint = Color.TRANSPARENT
+        selector = ColorDrawable(Color.TRANSPARENT)
+        clipToPadding = false
+        overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
+        setPadding(0, dp(6), 0, dp(18))
+    }
+    private val bottomToolbar = LinearLayout(context).apply {
+        orientation = HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
 
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -99,30 +93,36 @@ class EmojiPanelView @JvmOverloads constructor(
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
         isClickable = true
 
-        buildSearchHeader()
-        buildCategoryStrip()
-        buildBrowseActions()
-        buildSearchKeyboard()
+        buildBrowseHeader()
+        buildBottomToolbar()
 
-        addView(searchHeader, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
-        addView(categoryStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(40)))
+        addView(browseHeaderStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
         addView(
-            emojiGrid,
-            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f),
+            emojiList,
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 4, bottom = 4),
         )
-        addView(browseActionRow, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
-        addView(searchKeyboard)
+        addView(bottomToolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(48)))
 
-        emojiGrid.onItemClickListener = AdapterView.OnItemClickListener { _, _, position, _ ->
-            adapter.displayEmojiAt(position)?.let(::selectEmoji)
-        }
-        emojiGrid.onItemLongClickListener = AdapterView.OnItemLongClickListener { _, view, position, _ ->
-            adapter.getItem(position)?.let { entry ->
-                showVariantPopup(entry, view)
-            } ?: false
-        }
+        emojiList.setOnScrollListener(object : AbsListView.OnScrollListener {
+            override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) = Unit
 
-        updateMode()
+            override fun onScroll(
+                view: AbsListView?,
+                firstVisibleItem: Int,
+                visibleItemCount: Int,
+                totalItemCount: Int,
+            ) {
+                if (totalItemCount == 0) return
+                adapter.sectionForPosition(firstVisibleItem)?.let { section ->
+                    if (selectedSection != section) {
+                        selectedSection = section
+                        updateCategoryButtons()
+                    }
+                }
+            }
+        })
+
+        updateMode(resetScroll = true)
     }
 
     fun setHeightScale(scale: Float) {
@@ -136,9 +136,7 @@ class EmojiPanelView @JvmOverloads constructor(
         val normalized = EmojiCatalog.normalizeRecentEmojis(emojis)
         if (recentEmojis != normalized) {
             recentEmojis = normalized
-            if ((!searchActive && selectedTab == EmojiTab.Recent) || (searchActive && searchQuery.isBlank())) {
-                updateGridEntries()
-            }
+            updateListRows(keepScroll = true)
         }
     }
 
@@ -146,192 +144,160 @@ class EmojiPanelView @JvmOverloads constructor(
         val normalizedRowCount = EmojiCatalog.normalizeRecentRowCount(rowCount)
         if (recentRowCount != normalizedRowCount) {
             recentRowCount = normalizedRowCount
-            if (!searchActive && selectedTab == EmojiTab.Recent) {
-                updateGridEntries()
-            }
+            updateListRows(keepScroll = true)
         }
     }
 
     fun setDefaultSkinTone(skinTone: EmojiSkinTone) {
         if (defaultSkinTone != skinTone) {
             defaultSkinTone = skinTone
-            adapter.defaultSkinTone = skinTone
-            updateGridEntries()
+            adapter.notifyDataSetChanged()
         }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
+        val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EMOJI_PANEL_EXTRA_HEIGHT_DP) *
+            heightScale *
+            resources.displayMetrics.density +
+            bottomSystemControlGapPx)
             .roundToInt()
         val exactHeightSpec = MeasureSpec.makeMeasureSpec(resolveSize(desiredHeight, heightMeasureSpec), MeasureSpec.EXACTLY)
         super.onMeasure(widthMeasureSpec, exactHeightSpec)
     }
 
-    private fun buildSearchHeader() {
-        searchHeader.addView(
-            textKey("ABC", KeyRole.Function) { closePanel() },
-            LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+    private fun buildBrowseHeader() {
+        browseHeaderRow.addView(
+            textKey("‹", KeyRole.Function) { closePanel() }.apply {
+                contentDescription = "Back to keyboard"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+            },
+            LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
         )
-        searchText.apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setTextColor(PALETTE.text)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            includeFontPadding = false
-            setPadding(dp(12), 0, dp(12), 0)
-            background = keyBackground(active = false, role = KeyRole.Function)
-        }
-        searchHeader.addView(
-            searchText,
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-        )
-        searchHeader.addView(
-            textKey("Del", KeyRole.Function) { deleteSearchCharacter() },
-            LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
-        )
-    }
 
-    private fun buildCategoryStrip() {
-        recentTabButton = textKey(RECENT_TAB_ICON, KeyRole.Character) {
-            selectedTab = EmojiTab.Recent
-            updateMode()
-        }.apply {
-            contentDescription = "Recently used"
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+        browseHeaderRow.addView(
+            textKey("Search", KeyRole.Function) {
+                callback?.onEmojiSearchRequested()
+            }.apply {
+                gravity = Gravity.CENTER_VERTICAL
+                contentDescription = "Search emoji"
+                setPadding(dp(14), 0, dp(16), 0)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                background = pillBackground(active = false)
+            },
+            LayoutParams(dp(124), LayoutParams.MATCH_PARENT).withMargins(end = 6),
+        )
+
+        recentShortcutButton = categoryShortcut(RECENT_TAB_ICON, "Recently used") {
+            scrollToSection(EmojiSectionKey.Recent)
         }
-        categoryRow.addView(
-            recentTabButton,
-            LayoutParams(dp(46), LayoutParams.MATCH_PARENT).withMargins(horizontal = 2),
+        browseHeaderRow.addView(
+            recentShortcutButton,
+            LayoutParams(dp(40), LayoutParams.MATCH_PARENT).withMargins(horizontal = 1),
         )
 
         EmojiCatalog.categories.forEach { category ->
-            val button = textKey(category.icon, KeyRole.Character) {
-                selectedTab = EmojiTab.Category
-                selectedCategory = category
-                updateMode()
-            }.apply {
-                contentDescription = category.title
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+            val button = categoryShortcut(category.icon, category.title) {
+                scrollToSection(EmojiSectionKey.Category(category))
             }
             categoryButtons[category] = button
-            categoryRow.addView(
+            browseHeaderRow.addView(
                 button,
-                LayoutParams(dp(46), LayoutParams.MATCH_PARENT).withMargins(horizontal = 2),
+                LayoutParams(dp(40), LayoutParams.MATCH_PARENT).withMargins(horizontal = 1),
             )
         }
-        categoryStrip.addView(categoryRow, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
+
+        browseHeaderStrip.addView(
+            browseHeaderRow,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
     }
 
-    private fun buildBrowseActions() {
-        browseActionRow.addView(
-            textKey("ABC", KeyRole.Function) { closePanel() },
-            LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+    private fun buildBottomToolbar() {
+        bottomToolbar.addView(
+            flatToolbarKey("ABC", enabled = true) { closePanel() },
+            LayoutParams(dp(62), LayoutParams.MATCH_PARENT).withMargins(end = 4),
         )
-        browseActionRow.addView(
-            textKey("Search", KeyRole.Function) {
-                searchActive = true
-                searchQuery = ""
-                updateMode()
+        bottomToolbar.addView(
+            toolbarTab("☺", active = true, enabled = true, onClick = null),
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
+        )
+        bottomToolbar.addView(
+            toolbarTab("GIF", active = false, enabled = false, onClick = null),
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
+        )
+        bottomToolbar.addView(
+            toolbarTab("▣", active = false, enabled = false, onClick = null),
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
+        )
+        bottomToolbar.addView(
+            toolbarTab(":-)", active = false, enabled = false, onClick = null),
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
+        )
+        bottomToolbar.addView(
+            flatToolbarKey("⌫", enabled = true) { callback?.onEmojiBackspace() }.apply {
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+                contentDescription = "Delete"
             },
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-        )
-        browseActionRow.addView(
-            textKey("space", KeyRole.Function) { callback?.onEmojiSpace() },
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-        )
-        browseActionRow.addView(
-            textKey("Del", KeyRole.Function) { callback?.onEmojiBackspace() },
             LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
         )
     }
 
-    private fun buildSearchKeyboard() {
-        addSearchKeyboardRow("qwertyuiop")
-        addSearchKeyboardRow("asdfghjkl", sidePaddingWeight = 0.5f)
-        addSearchKeyboardRow("zxcvbnm", sidePaddingWeight = 1.3f)
-
-        val bottomRow = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+    private fun updateMode(resetScroll: Boolean) {
+        updateListRows(keepScroll = !resetScroll)
+        if (resetScroll) {
+            emojiList.setSelection(0)
         }
-        bottomRow.addView(
-            textKey("Browse", KeyRole.Function) {
-                searchActive = false
-                searchQuery = ""
-                updateMode()
-            },
-            LayoutParams(dp(76), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-        )
-        bottomRow.addView(
-            textKey("space", KeyRole.Function) { appendSearchText(" ") },
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-        )
-        bottomRow.addView(
-            textKey("Clear", KeyRole.Function) {
-                searchQuery = ""
-                updateSearchText()
-                updateGridEntries()
-            },
-            LayoutParams(dp(68), LayoutParams.MATCH_PARENT).withMargins(start = 4),
-        )
-        searchKeyboard.addView(
-            bottomRow,
-            LayoutParams(LayoutParams.MATCH_PARENT, dp(36)).withMargins(top = 4),
-        )
-    }
-
-    private fun addSearchKeyboardRow(chars: String, sidePaddingWeight: Float = 0f) {
-        val row = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        if (sidePaddingWeight > 0f) {
-            row.addView(View(context), LayoutParams(0, 1, sidePaddingWeight))
-        }
-        chars.forEach { char ->
-            row.addView(
-                textKey(char.toString(), KeyRole.Character) { appendSearchText(char.toString()) },
-                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-        }
-        if (sidePaddingWeight > 0f) {
-            row.addView(View(context), LayoutParams(0, 1, sidePaddingWeight))
-        }
-        searchKeyboard.addView(
-            row,
-            LayoutParams(LayoutParams.MATCH_PARENT, dp(36)).withMargins(top = 4),
-        )
-    }
-
-    private fun updateMode() {
-        searchHeader.visibility = if (searchActive) VISIBLE else GONE
-        categoryStrip.visibility = if (searchActive) GONE else VISIBLE
-        browseActionRow.visibility = if (searchActive) GONE else VISIBLE
-        searchKeyboard.visibility = if (searchActive) VISIBLE else GONE
-
-        updateSearchText()
         updateCategoryButtons()
-        updateGridEntries()
     }
 
-    private fun updateSearchText() {
-        searchText.text = searchQuery.ifBlank { "Search emoji" }
+    private fun updateListRows(keepScroll: Boolean) {
+        val firstPosition = emojiList.firstVisiblePosition
+        val firstTop = emojiList.getChildAt(0)?.top ?: emojiList.paddingTop
+        val rows = buildListRows()
+
+        adapter.submitRows(rows)
+
+        if (keepScroll && rows.isNotEmpty()) {
+            emojiList.setSelectionFromTop(firstPosition.coerceAtMost(rows.lastIndex), firstTop)
+        }
+
+        val nextSection = adapter.sectionForPosition(emojiList.firstVisiblePosition)
+            ?: sectionPositions.keys.firstOrNull()
+            ?: EmojiSectionKey.Recent
+        if (selectedSection != nextSection) {
+            selectedSection = nextSection
+        }
+        updateCategoryButtons()
     }
 
-    private fun updateGridEntries() {
-        val entries = if (searchActive) {
-            if (searchQuery.isBlank()) {
-                recentEntries()
-            } else {
-                EmojiCatalog.search(searchQuery)
-            }
-        } else {
-            when (selectedTab) {
-                EmojiTab.Recent -> recentEntries()
-                EmojiTab.Category -> categoryEntries()
+    private fun buildListRows(): List<EmojiListRow> {
+        sectionPositions.clear()
+        return buildList {
+            addSection(EmojiSectionKey.Recent, "Recent emoji", recentEntries())
+            EmojiCatalog.categories.forEach { category ->
+                addSection(
+                    key = EmojiSectionKey.Category(category),
+                    title = sectionTitle(category),
+                    entries = EmojiCatalog.entriesByCategory[category].orEmpty(),
+                )
             }
         }
-        adapter.submitList(entries)
-        emojiGrid.setSelection(0)
+    }
+
+    private fun MutableList<EmojiListRow>.addSection(
+        key: EmojiSectionKey,
+        title: String,
+        entries: List<EmojiEntry>,
+    ) {
+        if (entries.isEmpty()) return
+        sectionPositions[key] = size
+        add(EmojiListRow.Header(key, title))
+        entries.chunked(EmojiCatalog.RECENT_COLUMN_COUNT).forEach { rowEntries ->
+            add(EmojiListRow.Emojis(key, rowEntries))
+        }
     }
 
     private fun recentEntries(): List<EmojiEntry> {
@@ -340,49 +306,52 @@ class EmojiPanelView @JvmOverloads constructor(
             .mapNotNull(EmojiCatalog::entryForEmoji)
     }
 
-    private fun categoryEntries(): List<EmojiEntry> {
-        return EmojiCatalog.entriesByCategory[selectedCategory].orEmpty()
+    private fun sectionTitle(category: EmojiCategory): String {
+        return when (category) {
+            EmojiCategory.SmileysEmotion -> "Smileys and emotions"
+            EmojiCategory.PeopleBody -> "People and body"
+            EmojiCategory.AnimalsNature -> "Animals and nature"
+            EmojiCategory.FoodDrink -> "Food and drink"
+            EmojiCategory.TravelPlaces -> "Travel and places"
+            EmojiCategory.Activities -> "Activities"
+            EmojiCategory.Objects -> "Objects"
+            EmojiCategory.Symbols -> "Symbols"
+            EmojiCategory.Flags -> "Flags"
+        }
+    }
+
+    private fun scrollToSection(section: EmojiSectionKey) {
+        selectedSection = section
+        updateCategoryButtons()
+        val position = sectionPositions[section] ?: 0
+        emojiList.setSelectionFromTop(position, emojiList.paddingTop)
     }
 
     private fun updateCategoryButtons() {
-        recentTabButton.background = keyBackground(active = selectedTab == EmojiTab.Recent, role = KeyRole.Character)
+        recentShortcutButton.background = categoryShortcutBackground(selectedSection == EmojiSectionKey.Recent)
+        recentShortcutButton.alpha = if (sectionPositions.containsKey(EmojiSectionKey.Recent)) 1f else 0.42f
         categoryButtons.forEach { (category, button) ->
-            button.background = keyBackground(
-                active = selectedTab == EmojiTab.Category && category == selectedCategory,
-                role = KeyRole.Character,
-            )
+            val section = EmojiSectionKey.Category(category)
+            button.background = categoryShortcutBackground(selectedSection == section)
+            button.alpha = if (sectionPositions.containsKey(section)) 1f else 0.42f
         }
     }
 
-    private fun appendSearchText(value: String) {
-        searchQuery += value
-        updateSearchText()
-        updateGridEntries()
-    }
-
-    private fun deleteSearchCharacter() {
-        if (searchQuery.isNotEmpty()) {
-            searchQuery = searchQuery.dropLast(1)
-            updateSearchText()
-            updateGridEntries()
-        }
+    private fun displayEmoji(entry: EmojiEntry): String {
+        return EmojiCatalog.displayEmoji(entry, defaultSkinTone)
     }
 
     private fun selectEmoji(emoji: String) {
         dismissVariantPopup()
         val updatedRecentEmojis = EmojiCatalog.promoteRecentEmoji(emoji, recentEmojis)
         recentEmojis = updatedRecentEmojis
-        if ((!searchActive && selectedTab == EmojiTab.Recent) || (searchActive && searchQuery.isBlank())) {
-            updateGridEntries()
-        }
+        updateListRows(keepScroll = true)
         callback?.onEmojiSelected(emoji, updatedRecentEmojis)
     }
 
     private fun closePanel() {
         dismissVariantPopup()
-        searchActive = false
-        searchQuery = ""
-        updateMode()
+        updateMode(resetScroll = true)
         callback?.onEmojiPanelClosed()
     }
 
@@ -436,6 +405,59 @@ class EmojiPanelView @JvmOverloads constructor(
         }
     }
 
+    private fun categoryShortcut(label: String, description: String, onClick: () -> Unit): TextView {
+        return TextView(context).apply {
+            text = label
+            contentDescription = description
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            isClickable = true
+            isFocusable = false
+            typeface = Typeface.DEFAULT
+            setTextColor(PALETTE.text)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 21f)
+            background = categoryShortcutBackground(active = false)
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun toolbarTab(
+        label: String,
+        active: Boolean,
+        enabled: Boolean,
+        onClick: (() -> Unit)?,
+    ): TextView {
+        return TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            isEnabled = enabled
+            isClickable = enabled && onClick != null
+            isFocusable = false
+            alpha = if (enabled) 1f else 0.38f
+            typeface = if (label == "GIF") Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+            setTextColor(if (enabled) PALETTE.text else PALETTE.disabledText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label == "GIF") 14f else 22f)
+            background = if (active) pillBackground(active = true) else pillBackground(active = false)
+            onClick?.let { click -> setOnClickListener { click() } }
+        }
+    }
+
+    private fun flatToolbarKey(label: String, enabled: Boolean, onClick: () -> Unit): TextView {
+        return TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            isClickable = enabled
+            isEnabled = enabled
+            isFocusable = false
+            setTextColor(if (enabled) PALETTE.mutedText else PALETTE.disabledText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+            background = ColorDrawable(Color.TRANSPARENT)
+            setOnClickListener { onClick() }
+        }
+    }
+
     private fun textKey(label: String, role: KeyRole, onClick: (() -> Unit)?): TextView {
         return TextView(context).apply {
             text = label
@@ -452,10 +474,22 @@ class EmojiPanelView @JvmOverloads constructor(
 
     private fun keyBackground(active: Boolean, role: KeyRole): GradientDrawable {
         val color = when {
-            active -> PALETTE.accent
+            active -> PALETTE.selected
             role == KeyRole.Function -> PALETTE.function
             else -> PALETTE.key
         }
+        return roundedBackground(color)
+    }
+
+    private fun pillBackground(active: Boolean): GradientDrawable {
+        return roundedBackground(if (active) PALETTE.selected else PALETTE.function)
+    }
+
+    private fun categoryShortcutBackground(active: Boolean): GradientDrawable {
+        return roundedBackground(if (active) PALETTE.selected else Color.TRANSPARENT)
+    }
+
+    private fun roundedBackground(color: Int): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
@@ -463,14 +497,14 @@ class EmojiPanelView @JvmOverloads constructor(
         }
     }
 
-    private fun LayoutParams.withMargins(
+    private fun LinearLayout.LayoutParams.withMargins(
         horizontal: Int = 0,
         vertical: Int = 0,
         start: Int = horizontal,
         top: Int = vertical,
         end: Int = horizontal,
         bottom: Int = vertical,
-    ): LayoutParams {
+    ): LinearLayout.LayoutParams {
         setMargins(dp(start), dp(top), dp(end), dp(bottom))
         return this
     }
@@ -482,70 +516,162 @@ class EmojiPanelView @JvmOverloads constructor(
         Function,
     }
 
-    private enum class EmojiTab {
-        Recent,
-        Category,
+    private sealed class EmojiSectionKey {
+        data object Recent : EmojiSectionKey()
+        data class Category(val category: EmojiCategory) : EmojiSectionKey()
     }
 
-    private class EmojiGridAdapter(
-        private val context: Context,
-    ) : BaseAdapter() {
-        private var entries: List<EmojiEntry> = emptyList()
-        var defaultSkinTone: EmojiSkinTone = EmojiSkinTone.Default
-            set(value) {
-                if (field != value) {
-                    field = value
-                    notifyDataSetChanged()
-                }
-            }
+    private sealed class EmojiListRow {
+        data class Header(val section: EmojiSectionKey, val title: String) : EmojiListRow()
+        data class Emojis(val section: EmojiSectionKey, val entries: List<EmojiEntry>) : EmojiListRow()
+        data class Message(val text: String) : EmojiListRow()
+    }
 
-        fun submitList(newEntries: List<EmojiEntry>) {
-            entries = newEntries
+    private class EmojiListAdapter(
+        private val context: Context,
+        private val displayEmoji: (EmojiEntry) -> String,
+        private val onEmojiClick: (String) -> Unit,
+        private val onEmojiLongClick: (EmojiEntry, View) -> Boolean,
+    ) : BaseAdapter() {
+        private var rows: List<EmojiListRow> = emptyList()
+
+        fun submitRows(newRows: List<EmojiListRow>) {
+            rows = newRows
             notifyDataSetChanged()
         }
 
-        override fun getCount(): Int = entries.size
-
-        override fun getItem(position: Int): EmojiEntry? = entries.getOrNull(position)
-
-        fun displayEmojiAt(position: Int): String? {
-            val entry = entries.getOrNull(position) ?: return null
-            return EmojiCatalog.displayEmoji(entry, defaultSkinTone)
+        fun sectionForPosition(position: Int): EmojiSectionKey? {
+            return when (val row = rows.getOrNull(position)) {
+                is EmojiListRow.Header -> row.section
+                is EmojiListRow.Emojis -> row.section
+                is EmojiListRow.Message,
+                null,
+                -> null
+            }
         }
+
+        override fun getCount(): Int = rows.size
+
+        override fun getItem(position: Int): EmojiListRow? = rows.getOrNull(position)
 
         override fun getItemId(position: Int): Long = position.toLong()
 
-        override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup?): View {
-            val view = (convertView as? TextView) ?: TextView(context).apply {
-                gravity = Gravity.CENTER
-                includeFontPadding = false
-                typeface = Typeface.DEFAULT
-                setTextColor(PALETTE.text)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 25f)
-                minHeight = dp(42)
-                background = GradientDrawable().apply {
-                    shape = GradientDrawable.RECTANGLE
-                    cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
-                    setColor(PALETTE.key)
-                }
+        override fun getViewTypeCount(): Int = VIEW_TYPE_COUNT
+
+        override fun getItemViewType(position: Int): Int {
+            return when (rows[position]) {
+                is EmojiListRow.Header -> VIEW_TYPE_HEADER
+                is EmojiListRow.Emojis -> VIEW_TYPE_EMOJIS
+                is EmojiListRow.Message -> VIEW_TYPE_MESSAGE
             }
-            val entry = entries[position]
-            val emoji = EmojiCatalog.displayEmoji(entry, defaultSkinTone)
-            view.text = emoji
-            view.contentDescription = EmojiCatalog.entryForEmoji(emoji)?.name ?: entry.name
+        }
+
+        override fun isEnabled(position: Int): Boolean = rows.getOrNull(position) is EmojiListRow.Emojis
+
+        override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
+            return when (val row = rows[position]) {
+                is EmojiListRow.Header -> headerView(row, convertView)
+                is EmojiListRow.Emojis -> emojiRowView(row, convertView)
+                is EmojiListRow.Message -> messageView(row, convertView)
+            }
+        }
+
+        private fun headerView(row: EmojiListRow.Header, convertView: View?): View {
+            val view = (convertView as? TextView) ?: TextView(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                includeFontPadding = false
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(PALETTE.sectionText)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                setPadding(dp(10), dp(12), dp(10), dp(6))
+            }
+            view.text = row.title
             return view
         }
 
+        private fun messageView(row: EmojiListRow.Message, convertView: View?): View {
+            val view = (convertView as? TextView) ?: TextView(context).apply {
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                setTextColor(PALETTE.sectionText)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                setPadding(dp(10), dp(28), dp(10), dp(28))
+            }
+            view.text = row.text
+            return view
+        }
+
+        private fun emojiRowView(row: EmojiListRow.Emojis, convertView: View?): View {
+            val rowView = (convertView as? LinearLayout) ?: createEmojiRowView()
+            for (index in 0 until EmojiCatalog.RECENT_COLUMN_COUNT) {
+                val cell = rowView.getChildAt(index) as TextView
+                val entry = row.entries.getOrNull(index)
+                if (entry == null) {
+                    cell.text = ""
+                    cell.visibility = View.INVISIBLE
+                    cell.isClickable = false
+                    cell.setOnClickListener(null)
+                    cell.setOnLongClickListener(null)
+                    cell.contentDescription = null
+                } else {
+                    val emoji = displayEmoji(entry)
+                    cell.visibility = View.VISIBLE
+                    cell.text = emoji
+                    cell.contentDescription = EmojiCatalog.entryForEmoji(emoji)?.name ?: entry.name
+                    cell.isClickable = true
+                    cell.setOnClickListener { onEmojiClick(emoji) }
+                    cell.setOnLongClickListener { onEmojiLongClick(entry, cell) }
+                }
+            }
+            return rowView
+        }
+
+        private fun createEmojiRowView(): LinearLayout {
+            return LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(1), 0, dp(1))
+                repeat(EmojiCatalog.RECENT_COLUMN_COUNT) {
+                    addView(
+                        TextView(context).apply {
+                            gravity = Gravity.CENTER
+                            includeFontPadding = false
+                            typeface = Typeface.DEFAULT
+                            setTextColor(PALETTE.text)
+                            setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+                            minHeight = dp(42)
+                            background = ColorDrawable(Color.TRANSPARENT)
+                        },
+                        LinearLayout.LayoutParams(0, dp(44), 1f).withMargins(horizontal = 1),
+                    )
+                }
+            }
+        }
+
+        private fun LinearLayout.LayoutParams.withMargins(horizontal: Int = 0): LinearLayout.LayoutParams {
+            setMargins(dp(horizontal), 0, dp(horizontal), 0)
+            return this
+        }
+
         private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
+
+        private companion object {
+            const val VIEW_TYPE_HEADER = 0
+            const val VIEW_TYPE_EMOJIS = 1
+            const val VIEW_TYPE_MESSAGE = 2
+            const val VIEW_TYPE_COUNT = 3
+        }
     }
 
     private object PALETTE {
-        val background = Color.BLACK
-        val key = Color.rgb(42, 42, 42)
-        val function = Color.rgb(50, 50, 50)
-        val accent = Color.rgb(48, 172, 226)
+        const val background = Color.BLACK
+        const val key = Color.TRANSPARENT
+        val function = Color.rgb(48, 48, 48)
+        val selected = Color.rgb(78, 78, 78)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
+        val disabledText = Color.rgb(130, 130, 130)
+        val sectionText = Color.rgb(145, 145, 145)
     }
 
     private companion object {
