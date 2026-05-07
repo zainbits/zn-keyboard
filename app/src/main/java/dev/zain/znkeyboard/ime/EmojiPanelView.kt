@@ -38,6 +38,7 @@ class EmojiPanelView @JvmOverloads constructor(
     var callback: Callback? = null
 
     private var recentEmojis = emptyList<String>()
+    private var pendingRecentEmojis: List<String>? = null
     private var recentRowCount = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
     private var defaultSkinTone = EmojiSkinTone.Default
     private var heightScale = 1f
@@ -134,6 +135,7 @@ class EmojiPanelView @JvmOverloads constructor(
 
     fun setRecentEmojis(emojis: List<String>) {
         val normalized = EmojiCatalog.normalizeRecentEmojis(emojis)
+        pendingRecentEmojis = null
         if (recentEmojis != normalized) {
             recentEmojis = normalized
             updateListRows(keepScroll = true)
@@ -254,17 +256,27 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun updateListRows(keepScroll: Boolean) {
-        val firstPosition = emojiList.firstVisiblePosition
-        val firstTop = emojiList.getChildAt(0)?.top ?: emojiList.paddingTop
+        val scrollAnchor = if (keepScroll) {
+            adapter.scrollAnchorForPosition(
+                position = emojiList.firstVisiblePosition,
+                top = emojiList.getChildAt(0)?.top ?: emojiList.paddingTop,
+            )
+        } else {
+            null
+        }
         val rows = buildListRows()
 
         adapter.submitRows(rows)
 
-        if (keepScroll && rows.isNotEmpty()) {
-            emojiList.setSelectionFromTop(firstPosition.coerceAtMost(rows.lastIndex), firstTop)
+        var restoredPosition: Int? = null
+        if (keepScroll && rows.isNotEmpty() && scrollAnchor != null) {
+            val anchoredPosition = adapter.positionForScrollAnchor(scrollAnchor)
+                ?: emojiList.firstVisiblePosition.coerceAtMost(rows.lastIndex)
+            emojiList.setSelectionFromTop(anchoredPosition, scrollAnchor.top)
+            restoredPosition = anchoredPosition
         }
 
-        val nextSection = adapter.sectionForPosition(emojiList.firstVisiblePosition)
+        val nextSection = adapter.sectionForPosition(restoredPosition ?: emojiList.firstVisiblePosition)
             ?: sectionPositions.keys.firstOrNull()
             ?: EmojiSectionKey.Recent
         if (selectedSection != nextSection) {
@@ -343,9 +355,11 @@ class EmojiPanelView @JvmOverloads constructor(
 
     private fun selectEmoji(emoji: String) {
         dismissVariantPopup()
-        val updatedRecentEmojis = EmojiCatalog.promoteRecentEmoji(emoji, recentEmojis)
-        recentEmojis = updatedRecentEmojis
-        updateListRows(keepScroll = true)
+        val updatedRecentEmojis = EmojiCatalog.promoteRecentEmoji(
+            emoji = emoji,
+            current = pendingRecentEmojis ?: recentEmojis,
+        )
+        pendingRecentEmojis = updatedRecentEmojis
         callback?.onEmojiSelected(emoji, updatedRecentEmojis)
     }
 
@@ -527,6 +541,12 @@ class EmojiPanelView @JvmOverloads constructor(
         data class Message(val text: String) : EmojiListRow()
     }
 
+    private data class EmojiScrollAnchor(
+        val section: EmojiSectionKey,
+        val rowOffsetInSection: Int,
+        val top: Int,
+    )
+
     private class EmojiListAdapter(
         private val context: Context,
         private val displayEmoji: (EmojiEntry) -> String,
@@ -541,13 +561,23 @@ class EmojiPanelView @JvmOverloads constructor(
         }
 
         fun sectionForPosition(position: Int): EmojiSectionKey? {
-            return when (val row = rows.getOrNull(position)) {
-                is EmojiListRow.Header -> row.section
-                is EmojiListRow.Emojis -> row.section
-                is EmojiListRow.Message,
-                null,
-                -> null
-            }
+            return rows.getOrNull(position)?.section
+        }
+
+        fun scrollAnchorForPosition(position: Int, top: Int): EmojiScrollAnchor? {
+            val section = sectionForPosition(position) ?: return null
+            val sectionStart = firstPositionForSection(section) ?: return null
+            return EmojiScrollAnchor(
+                section = section,
+                rowOffsetInSection = position - sectionStart,
+                top = top,
+            )
+        }
+
+        fun positionForScrollAnchor(anchor: EmojiScrollAnchor): Int? {
+            val sectionStart = firstPositionForSection(anchor.section) ?: return null
+            val sectionEnd = firstPositionAfterSection(anchor.section, sectionStart)
+            return (sectionStart + anchor.rowOffsetInSection).coerceAtMost(sectionEnd - 1)
         }
 
         override fun getCount(): Int = rows.size
@@ -652,6 +682,29 @@ class EmojiPanelView @JvmOverloads constructor(
             setMargins(dp(horizontal), 0, dp(horizontal), 0)
             return this
         }
+
+        private fun firstPositionForSection(section: EmojiSectionKey): Int? {
+            return rows.indexOfFirst { it.section == section }
+                .takeIf { it >= 0 }
+        }
+
+        private fun firstPositionAfterSection(section: EmojiSectionKey, sectionStart: Int): Int {
+            val nextSectionStart = rows
+                .subList(sectionStart + 1, rows.size)
+                .indexOfFirst { it.section != section }
+            return if (nextSectionStart >= 0) {
+                sectionStart + 1 + nextSectionStart
+            } else {
+                rows.size
+            }
+        }
+
+        private val EmojiListRow.section: EmojiSectionKey?
+            get() = when (this) {
+                is EmojiListRow.Header -> section
+                is EmojiListRow.Emojis -> section
+                is EmojiListRow.Message -> null
+            }
 
         private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
 

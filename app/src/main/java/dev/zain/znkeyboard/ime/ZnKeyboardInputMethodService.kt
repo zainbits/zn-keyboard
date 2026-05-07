@@ -242,7 +242,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentStripView?.setAgentRowKeyIds(KeyboardSettings.readAgentRowKeyIds(this))
         emojiPanelView?.let { view ->
             view.setHeightScale(heightScale)
-            view.setRecentEmojis(recentEmojis)
+            if (activeSurface != KeyboardSurface.Emoji) {
+                view.setRecentEmojis(recentEmojis)
+            }
             view.setRecentRowCount(recentEmojiRows)
             view.setDefaultSkinTone(defaultEmojiSkinTone)
         }
@@ -368,7 +370,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun persistRecentEmojis(emojis: List<String>) {
         val normalizedEmojis = EmojiCatalog.normalizeRecentEmojis(emojis)
         recentEmojis = normalizedEmojis
-        emojiPanelView?.setRecentEmojis(normalizedEmojis)
+        if (activeSurface != KeyboardSurface.Emoji) {
+            emojiPanelView?.setRecentEmojis(normalizedEmojis)
+        }
         emojiSearchView?.setRecentEmojis(normalizedEmojis)
         mainHandler.post {
             KeyboardSettings.saveRecentEmojis(this, normalizedEmojis)
