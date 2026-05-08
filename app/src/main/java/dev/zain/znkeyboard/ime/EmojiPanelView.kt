@@ -30,6 +30,7 @@ class EmojiPanelView @JvmOverloads constructor(
     interface Callback {
         fun onEmojiSelected(emoji: String, updatedRecentEmojis: List<String>)
         fun onEmojiSearchRequested()
+        fun onGifPanelRequested()
         fun onEmojiPanelClosed()
         fun onEmojiBackspace()
         fun onEmojiSpace()
@@ -227,7 +228,7 @@ class EmojiPanelView @JvmOverloads constructor(
             LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
         )
         bottomToolbar.addView(
-            toolbarTab("GIF", active = false, enabled = false, onClick = null),
+            toolbarTab("GIF", active = false, enabled = true, onClick = { callback?.onGifPanelRequested() }),
             LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
         )
         bottomToolbar.addView(

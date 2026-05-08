@@ -35,5 +35,15 @@
                 android:name="android.view.im"
                 android:resource="@xml/input_method" />
         </service>
+
+        <provider
+            android:name=".ime.GifFileProvider"
+            android:authorities="${applicationId}.gifprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/gif_file_paths" />
+        </provider>
     </application>
 </manifest>

@@ -114,6 +114,9 @@ private fun SettingsScreen() {
     var emojiSkinTone by remember { mutableStateOf(KeyboardSettings.readEmojiSkinTone(context)) }
     var recentEmojiRows by remember { mutableStateOf(KeyboardSettings.readRecentEmojiRows(context)) }
     var customEmojiTags by remember { mutableStateOf(KeyboardSettings.readCustomEmojiTags(context)) }
+    var gifApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readGifApiBaseUrl(context)) }
+    var gifAppKey by remember { mutableStateOf(KeyboardSettings.readGifAppKey(context)) }
+    var gifAppKeyLocked by remember { mutableStateOf(KeyboardSettings.readGifAppKeyLocked(context)) }
     var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
     var agentProviderType by remember { mutableStateOf(KeyboardSettings.readAgentProviderType(context)) }
     var agentApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readAgentApiBaseUrl(context)) }
@@ -134,6 +137,9 @@ private fun SettingsScreen() {
         emojiSkinTone = KeyboardSettings.readEmojiSkinTone(context)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(context)
         customEmojiTags = KeyboardSettings.readCustomEmojiTags(context)
+        gifApiBaseUrl = KeyboardSettings.readGifApiBaseUrl(context)
+        gifAppKey = KeyboardSettings.readGifAppKey(context)
+        gifAppKeyLocked = KeyboardSettings.readGifAppKeyLocked(context)
         agentModeEnabled = KeyboardSettings.readAgentModeEnabled(context)
         agentProviderType = nextProviderType
         agentApiBaseUrl = KeyboardSettings.readAgentApiBaseUrl(context)
@@ -312,6 +318,27 @@ private fun SettingsScreen() {
                 onAgentApiKeyLockedChange = {
                     agentApiKeyLocked = it
                     KeyboardSettings.saveAgentApiKeyLocked(context, agentProviderType, it)
+                },
+            )
+
+            GifSearchSection(
+                gifApiBaseUrl = gifApiBaseUrl,
+                gifAppKey = gifAppKey,
+                gifAppKeyLocked = gifAppKeyLocked,
+                onGifApiBaseUrlChange = {
+                    gifApiBaseUrl = it
+                    KeyboardSettings.saveGifApiBaseUrl(context, it)
+                },
+                onGifAppKeyChange = {
+                    gifAppKey = it
+                    KeyboardSettings.saveGifAppKey(context, it)
+                    if (it.isBlank() && gifAppKeyLocked) {
+                        gifAppKeyLocked = false
+                    }
+                },
+                onGifAppKeyLockedChange = {
+                    gifAppKeyLocked = it
+                    KeyboardSettings.saveGifAppKeyLocked(context, it)
                 },
             )
 
@@ -621,6 +648,124 @@ private fun BackupRestoreSection(
                     Text("Import")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun GifSearchSection(
+    gifApiBaseUrl: String,
+    gifAppKey: String,
+    gifAppKeyLocked: Boolean,
+    onGifApiBaseUrlChange: (String) -> Unit,
+    onGifAppKeyChange: (String) -> Unit,
+    onGifAppKeyLockedChange: (Boolean) -> Unit,
+) {
+    val effectivelyLocked = gifAppKeyLocked && gifAppKey.isNotBlank()
+
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "GIF search",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Uses KLIPY for searchable GIFs and meme-friendly results.",
+                        color = ZnKeyboardColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    text = if (gifAppKey.isBlank()) "Setup" else "Ready",
+                    color = if (gifAppKey.isBlank()) ZnKeyboardColors.Muted else ZnKeyboardColors.Accent,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            Text(
+                text = "GIF search queries go directly from this keyboard to KLIPY. The app key is stored on this device and stays out of backups.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            OutlinedTextField(
+                value = gifApiBaseUrl,
+                onValueChange = onGifApiBaseUrlChange,
+                label = { Text("API base URL") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                supportingText = {
+                    Text(
+                        text = "Default: ${KeyboardSettings.DEFAULT_GIF_API_BASE_URL}",
+                        color = ZnKeyboardColors.Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            OutlinedTextField(
+                value = gifAppKey,
+                onValueChange = onGifAppKeyChange,
+                label = { Text("KLIPY app key") },
+                singleLine = true,
+                enabled = !effectivelyLocked,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(
+                        onClick = {
+                            if (effectivelyLocked) {
+                                onGifAppKeyLockedChange(false)
+                            } else if (gifAppKey.isNotBlank()) {
+                                onGifAppKeyLockedChange(true)
+                            }
+                        },
+                        enabled = gifAppKey.isNotBlank(),
+                    ) {
+                        Icon(
+                            painter = painterResource(
+                                if (effectivelyLocked) R.drawable.ic_lock_24 else R.drawable.ic_lock_open_24,
+                            ),
+                            contentDescription = if (effectivelyLocked) "Unlock KLIPY app key" else "Lock KLIPY app key",
+                            tint = if (effectivelyLocked) ZnKeyboardColors.Accent else ZnKeyboardColors.Muted,
+                        )
+                    }
+                },
+                supportingText = {
+                    Text(
+                        text = if (effectivelyLocked) {
+                            "Locked. Tap lock to edit."
+                        } else if (gifAppKey.isNotBlank()) {
+                            "Tap lock to prevent edits."
+                        } else {
+                            "Create a free key in the KLIPY partner panel."
+                        },
+                        color = ZnKeyboardColors.Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

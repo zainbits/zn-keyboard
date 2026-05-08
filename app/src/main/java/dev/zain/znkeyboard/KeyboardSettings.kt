@@ -21,6 +21,7 @@ object KeyboardSettings {
     const val DEFAULT_AGENT_API_BASE_URL = "https://api.openai.com/v1"
     const val OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
     const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
+    const val DEFAULT_GIF_API_BASE_URL = "https://api.klipy.com"
     const val MAX_UPPER_ROW_KEYS = 9
     private const val LEGACY_MAX_AGENT_ROW_KEYS = 5
     const val MAX_SECOND_ROW_BUTTONS = MAX_UPPER_ROW_KEYS
@@ -56,6 +57,10 @@ object KeyboardSettings {
     private const val KEY_AGENT_API_KEY_CIPHERTEXT = "agent_api_key_ciphertext"
     private const val KEY_AGENT_API_KEY_IV = "agent_api_key_iv"
     private const val KEY_AGENT_API_KEY_LOCKED = "agent_api_key_locked"
+    private const val KEY_GIF_API_BASE_URL = "gif_api_base_url"
+    private const val KEY_GIF_APP_KEY_CIPHERTEXT = "gif_app_key_ciphertext"
+    private const val KEY_GIF_APP_KEY_IV = "gif_app_key_iv"
+    private const val KEY_GIF_APP_KEY_LOCKED = "gif_app_key_locked"
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val KEYSTORE_AGENT_API_KEY_ALIAS = "znkeyboard_agent_api_key"
     private const val KEYSTORE_TRANSFORMATION = "AES/GCM/NoPadding"
@@ -549,6 +554,78 @@ object KeyboardSettings {
         )
     }
 
+    fun readGifApiBaseUrl(context: Context): String {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_GIF_API_BASE_URL, DEFAULT_GIF_API_BASE_URL)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_GIF_API_BASE_URL
+    }
+
+    fun saveGifApiBaseUrl(context: Context, baseUrl: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_GIF_API_BASE_URL, baseUrl.trim())
+            .apply()
+    }
+
+    fun readGifAppKey(context: Context): String {
+        val prefs = context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+        val ciphertext = prefs.getString(KEY_GIF_APP_KEY_CIPHERTEXT, null)
+        val iv = prefs.getString(KEY_GIF_APP_KEY_IV, null)
+        if (!ciphertext.isNullOrBlank() && !iv.isNullOrBlank()) {
+            return decryptAgentApiKey(ciphertext, iv).getOrElse { "" }
+        }
+        return ""
+    }
+
+    fun saveGifAppKey(context: Context, appKey: String) {
+        val prefs = context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+        val trimmedAppKey = appKey.trim()
+        if (trimmedAppKey.isBlank()) {
+            prefs.edit()
+                .remove(KEY_GIF_APP_KEY_CIPHERTEXT)
+                .remove(KEY_GIF_APP_KEY_IV)
+                .remove(KEY_GIF_APP_KEY_LOCKED)
+                .apply()
+            return
+        }
+
+        encryptAgentApiKey(trimmedAppKey)
+            .onSuccess { encryptedValue ->
+                prefs.edit()
+                    .putString(KEY_GIF_APP_KEY_CIPHERTEXT, encryptedValue.ciphertext)
+                    .putString(KEY_GIF_APP_KEY_IV, encryptedValue.iv)
+                    .apply()
+            }
+            .onFailure {
+                prefs.edit()
+                    .remove(KEY_GIF_APP_KEY_CIPHERTEXT)
+                    .remove(KEY_GIF_APP_KEY_IV)
+                    .remove(KEY_GIF_APP_KEY_LOCKED)
+                    .apply()
+            }
+    }
+
+    fun readGifAppKeyLocked(context: Context): Boolean {
+        return context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_GIF_APP_KEY_LOCKED, false)
+    }
+
+    fun saveGifAppKeyLocked(context: Context, locked: Boolean) {
+        context.getSharedPreferences(SECRET_PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_GIF_APP_KEY_LOCKED, locked)
+            .apply()
+    }
+
+    fun readGifProviderSettings(context: Context): GifProviderSettings {
+        return GifProviderSettings(
+            baseUrl = readGifApiBaseUrl(context),
+            appKey = readGifAppKey(context),
+        )
+    }
+
     fun createBackupJson(context: Context): String {
         val backup = JSONObject()
             .put("format", BACKUP_FORMAT)
@@ -557,7 +634,9 @@ object KeyboardSettings {
             .put("appId", context.packageName)
             .put(
                 "excluded",
-                JSONArray().put("agentApiKey"),
+                JSONArray()
+                    .put("agentApiKey")
+                    .put("gifAppKey"),
             )
             .put(
                 "settings",
@@ -578,6 +657,11 @@ object KeyboardSettings {
                             .put("recentRows", readRecentEmojiRows(context))
                             .put("recentEmojis", stringArrayJson(readRecentEmojis(context)))
                             .put("customTags", customEmojiTagsJson(readCustomEmojiTags(context))),
+                    )
+                    .put(
+                        "gif",
+                        JSONObject()
+                            .put("apiBaseUrl", readGifApiBaseUrl(context)),
                     )
                     .put(
                         "rewrite",
@@ -610,6 +694,7 @@ object KeyboardSettings {
             ?: throw JSONException("Backup is missing settings.")
         val keyboard = settings.optJSONObject("keyboard") ?: JSONObject()
         val emoji = settings.optJSONObject("emoji") ?: JSONObject()
+        val gif = settings.optJSONObject("gif") ?: JSONObject()
         val rewrite = settings.optJSONObject("rewrite") ?: JSONObject()
 
         val heightScale = keyboard.optFiniteFloat("heightScale", readHeightScale(context))
@@ -664,6 +749,7 @@ object KeyboardSettings {
         saveRecentEmojiRows(context, recentRows)
         saveRecentEmojis(context, recentEmojis)
         saveCustomEmojiTags(context, customEmojiTags)
+        saveGifApiBaseUrl(context, gif.optString("apiBaseUrl", readGifApiBaseUrl(context)))
         saveAgentModeEnabled(context, rewrite.optBoolean("enabled", readAgentModeEnabled(context)))
         saveAgentProviderType(context, providerType)
         saveAgentApiBaseUrl(context, rewrite.optString("apiBaseUrl", readAgentApiBaseUrl(context)))
@@ -992,6 +1078,14 @@ object KeyboardSettings {
     ) {
         val isConfigured: Boolean
             get() = baseUrl.isNotBlank() && model.isNotBlank() && apiKey.isNotBlank()
+    }
+
+    data class GifProviderSettings(
+        val baseUrl: String,
+        val appKey: String,
+    ) {
+        val isConfigured: Boolean
+            get() = baseUrl.isNotBlank() && appKey.isNotBlank()
     }
 
     private data class EncryptedValue(
