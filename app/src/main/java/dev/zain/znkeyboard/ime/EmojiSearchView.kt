@@ -33,6 +33,7 @@ class EmojiSearchView @JvmOverloads constructor(
 
     private var recentEmojis = emptyList<String>()
     private var defaultSkinTone = EmojiSkinTone.Default
+    private var customEmojiTags = emptyMap<String, List<String>>()
     private var query = ""
     private var variantPopup: PopupWindow? = null
 
@@ -80,6 +81,15 @@ class EmojiSearchView @JvmOverloads constructor(
     fun setDefaultSkinTone(skinTone: EmojiSkinTone) {
         if (defaultSkinTone != skinTone) {
             defaultSkinTone = skinTone
+            updateResults()
+        }
+    }
+
+    fun setCustomEmojiTags(tagsByEmoji: Map<String, List<String>>) {
+        val normalized = tagsByEmoji
+            .filterValues { it.isNotEmpty() }
+        if (customEmojiTags != normalized) {
+            customEmojiTags = normalized
             updateResults()
         }
     }
@@ -208,7 +218,7 @@ class EmojiSearchView @JvmOverloads constructor(
                 EmojiCatalog.entriesByCategory[EmojiCategory.SmileysEmotion].orEmpty()
             }
         } else {
-            EmojiCatalog.search(query)
+            EmojiCatalog.search(query, customEmojiTags)
         }
         return source.take(MAX_RESULT_ROWS * EmojiCatalog.RECENT_COLUMN_COUNT)
     }

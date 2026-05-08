@@ -105,6 +105,7 @@ private fun SettingsScreen() {
     var keyboardRowOrder by remember { mutableStateOf(KeyboardSettings.readKeyboardRowOrder(context)) }
     var emojiSkinTone by remember { mutableStateOf(KeyboardSettings.readEmojiSkinTone(context)) }
     var recentEmojiRows by remember { mutableStateOf(KeyboardSettings.readRecentEmojiRows(context)) }
+    var customEmojiTags by remember { mutableStateOf(KeyboardSettings.readCustomEmojiTags(context)) }
     var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
     var agentProviderType by remember { mutableStateOf(KeyboardSettings.readAgentProviderType(context)) }
     var agentApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readAgentApiBaseUrl(context)) }
@@ -138,6 +139,12 @@ private fun SettingsScreen() {
         val normalizedSnippets = KeyboardSettings.normalizeTextSnippets(snippets)
         textSnippets = normalizedSnippets
         KeyboardSettings.saveTextSnippets(context, normalizedSnippets)
+    }
+
+    fun updateCustomEmojiTags(tagsByEmoji: Map<String, List<String>>) {
+        val normalizedTags = KeyboardSettings.normalizeCustomEmojiTags(tagsByEmoji)
+        customEmojiTags = normalizedTags
+        KeyboardSettings.saveCustomEmojiTags(context, normalizedTags)
     }
 
     Scaffold(
@@ -275,6 +282,7 @@ private fun SettingsScreen() {
             EmojiPreferencesSection(
                 skinTone = emojiSkinTone,
                 recentEmojiRows = recentEmojiRows,
+                customEmojiTags = customEmojiTags,
                 onSkinToneChange = {
                     emojiSkinTone = it
                     KeyboardSettings.saveEmojiSkinTone(context, it)
@@ -284,6 +292,7 @@ private fun SettingsScreen() {
                     recentEmojiRows = rows
                     KeyboardSettings.saveRecentEmojiRows(context, rows)
                 },
+                onCustomEmojiTagsChange = ::updateCustomEmojiTags,
             )
 
             RowButtonsSection(
@@ -456,8 +465,10 @@ private fun TextSnippetEditorRow(
 private fun EmojiPreferencesSection(
     skinTone: EmojiSkinTone,
     recentEmojiRows: Int,
+    customEmojiTags: Map<String, List<String>>,
     onSkinToneChange: (EmojiSkinTone) -> Unit,
     onRecentEmojiRowsChange: (Int) -> Unit,
+    onCustomEmojiTagsChange: (Map<String, List<String>>) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -554,6 +565,197 @@ private fun EmojiPreferencesSection(
                 },
                 valueRange = EmojiCatalog.MIN_RECENT_ROW_COUNT.toFloat()..EmojiCatalog.MAX_RECENT_ROW_COUNT.toFloat(),
                 steps = EmojiCatalog.MAX_RECENT_ROW_COUNT - EmojiCatalog.MIN_RECENT_ROW_COUNT - 1,
+            )
+
+            CustomEmojiTagsEditor(
+                tagsByEmoji = customEmojiTags,
+                onTagsChange = onCustomEmojiTagsChange,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CustomEmojiTagsEditor(
+    tagsByEmoji: Map<String, List<String>>,
+    onTagsChange: (Map<String, List<String>>) -> Unit,
+) {
+    var draftEmoji by remember { mutableStateOf("") }
+    var draftTags by remember { mutableStateOf("") }
+    val normalizedEmoji = remember(draftEmoji) {
+        draftEmoji
+            .takeIf { it.isNotBlank() }
+            ?.let(KeyboardSettings::normalizeEmojiForCustomTags)
+    }
+    val normalizedTags = remember(draftTags) {
+        KeyboardSettings.normalizeCustomEmojiTagInput(draftTags)
+    }
+    val canSave = normalizedEmoji != null && normalizedTags.isNotEmpty()
+    val editingExistingEmoji = normalizedEmoji?.let { it in tagsByEmoji } == true
+    val atLimit = normalizedEmoji != null &&
+        !editingExistingEmoji &&
+        tagsByEmoji.size >= KeyboardSettings.MAX_CUSTOM_EMOJI_TAGGED_EMOJIS
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Custom search tags",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "${tagsByEmoji.size}/${KeyboardSettings.MAX_CUSTOM_EMOJI_TAGGED_EMOJIS}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+
+        Text(
+            text = "Add vocabulary that should find a specific emoji in keyboard search.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            OutlinedTextField(
+                value = draftEmoji,
+                onValueChange = { draftEmoji = it },
+                label = { Text("Emoji") },
+                singleLine = true,
+                modifier = Modifier.width(96.dp),
+            )
+            OutlinedTextField(
+                value = draftTags,
+                onValueChange = { draftTags = it },
+                label = { Text("Tags") },
+                placeholder = { Text("chai, duas") },
+                singleLine = true,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Button(
+            onClick = {
+                val emoji = normalizedEmoji ?: return@Button
+                onTagsChange(tagsByEmoji + (emoji to normalizedTags))
+                draftEmoji = ""
+                draftTags = ""
+            },
+            enabled = canSave && (editingExistingEmoji || tagsByEmoji.size < KeyboardSettings.MAX_CUSTOM_EMOJI_TAGGED_EMOJIS),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_add_24),
+                contentDescription = null,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(if (editingExistingEmoji) "Update tags" else "Add tags")
+        }
+
+        val helperText = when {
+            draftEmoji.isBlank() && draftTags.isBlank() -> "Paste one supported emoji and comma-separated tags."
+            normalizedEmoji == null -> "Paste exactly one supported emoji."
+            normalizedTags.isEmpty() -> "Enter at least one tag."
+            atLimit -> "Remove an emoji before adding another."
+            else -> "Search will match: ${normalizedTags.joinToString(", ")}"
+        }
+        Text(
+            text = helperText,
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        if (tagsByEmoji.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
+                    .background(ZnKeyboardColors.Key),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No custom emoji tags",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                tagsByEmoji.forEach { (emoji, tags) ->
+                    CustomEmojiTagRow(
+                        emoji = emoji,
+                        tags = tags,
+                        onEdit = {
+                            draftEmoji = emoji
+                            draftTags = tags.joinToString(", ")
+                        },
+                        onRemove = {
+                            onTagsChange(tagsByEmoji - emoji)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CustomEmojiTagRow(
+    emoji: String,
+    tags: List<String>,
+    onEdit: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            color = ZnKeyboardColors.Key,
+            shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
+            tonalElevation = 0.dp,
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onEdit),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = emoji,
+                    style = MaterialTheme.typography.titleLarge,
+                )
+                Text(
+                    text = tags.joinToString(", "),
+                    color = ZnKeyboardColors.OnSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        IconButton(
+            onClick = onRemove,
+            modifier = Modifier.size(44.dp),
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_delete_24),
+                contentDescription = "Remove custom emoji tags",
+                tint = ZnKeyboardColors.Muted,
             )
         }
     }

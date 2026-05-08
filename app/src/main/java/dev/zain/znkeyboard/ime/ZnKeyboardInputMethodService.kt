@@ -44,6 +44,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
     private var defaultEmojiSkinTone = EmojiSkinTone.Default
+    private var customEmojiTags: Map<String, List<String>> = emptyMap()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activeSurface = KeyboardSurface.Keyboard
     private var activeRequestTarget: AgentEditTarget? = null
@@ -56,6 +57,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        customEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
         val keyboard = ZnKeyboardView(this).also { view ->
             keyboardView = view
             view.callback = this
@@ -218,6 +220,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val heightScale = KeyboardSettings.readHeightScale(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        customEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
         keyboardView?.let { view ->
             view.setHeightScale(heightScale)
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
@@ -235,6 +238,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         emojiSearchView?.let { view ->
             view.setRecentEmojis(recentEmojis)
             view.setDefaultSkinTone(defaultEmojiSkinTone)
+            view.setCustomEmojiTags(customEmojiTags)
         }
         snippetPanelView?.let { view ->
             view.setHeightScale(heightScale)
@@ -268,8 +272,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val search = emojiSearchView ?: return
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        customEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
         search.setRecentEmojis(recentEmojis)
         search.setDefaultSkinTone(defaultEmojiSkinTone)
+        search.setCustomEmojiTags(customEmojiTags)
         search.clearSearch()
         search.visibility = View.VISIBLE
         keyboard.setEnterLabel("Search")

@@ -7,6 +7,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONException
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -25,6 +26,9 @@ object KeyboardSettings {
     const val MAX_SECOND_ROW_BUTTONS = LEGACY_MAX_AGENT_ROW_KEYS + 2
     const val MAX_TEXT_SNIPPETS = 60
     const val MAX_TEXT_SNIPPET_CHARS = 2_000
+    const val MAX_CUSTOM_EMOJI_TAGGED_EMOJIS = 250
+    const val MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI = 12
+    const val MAX_CUSTOM_EMOJI_TAG_CHARS = 32
 
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
@@ -37,6 +41,7 @@ object KeyboardSettings {
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
     private const val KEY_EMOJI_SKIN_TONE = "emoji_skin_tone"
+    private const val KEY_CUSTOM_EMOJI_TAGS = "custom_emoji_tags"
     private const val KEY_AGENT_MODE_ENABLED = "agent_mode_enabled"
     private const val KEY_AGENT_PROVIDER_TYPE = "agent_provider_type"
     private const val KEY_AGENT_API_BASE_URL = "agent_api_base_url"
@@ -109,6 +114,7 @@ object KeyboardSettings {
     )
     private val secondRowButtonOptionIds = SECOND_ROW_BUTTON_OPTIONS.mapTo(mutableSetOf()) { it.id }
     private val keyboardRowIds = KeyboardRow.entries.mapTo(mutableSetOf()) { it.id }
+    private val whitespaceRegex = Regex("\\s+")
 
     fun readHeightScale(context: Context): Float {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -282,6 +288,55 @@ object KeyboardSettings {
             .edit()
             .putString(KEY_EMOJI_SKIN_TONE, skinTone.id)
             .apply()
+    }
+
+    fun readCustomEmojiTags(context: Context): Map<String, List<String>> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_CUSTOM_EMOJI_TAGS, null) ?: return emptyMap()
+        return parseCustomEmojiTags(stored)
+            ?.let(::normalizeCustomEmojiTags)
+            ?: emptyMap()
+    }
+
+    fun saveCustomEmojiTags(context: Context, tagsByEmoji: Map<String, List<String>>) {
+        val encoded = JSONArray().apply {
+            normalizeCustomEmojiTags(tagsByEmoji).forEach { (emoji, tags) ->
+                put(
+                    JSONObject()
+                        .put("emoji", emoji)
+                        .put(
+                            "tags",
+                            JSONArray().apply {
+                                tags.forEach(::put)
+                            },
+                        ),
+                )
+            }
+        }.toString()
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_CUSTOM_EMOJI_TAGS, encoded)
+            .apply()
+    }
+
+    fun normalizeCustomEmojiTags(tagsByEmoji: Map<String, List<String>>): Map<String, List<String>> {
+        val normalized = linkedMapOf<String, List<String>>()
+        tagsByEmoji.forEach { (rawEmoji, rawTags) ->
+            val emoji = normalizeEmojiForCustomTags(rawEmoji) ?: return@forEach
+            val tags = normalizeCustomEmojiTagList(rawTags)
+            if (tags.isNotEmpty() && emoji !in normalized && normalized.size < MAX_CUSTOM_EMOJI_TAGGED_EMOJIS) {
+                normalized[emoji] = tags
+            }
+        }
+        return normalized
+    }
+
+    fun normalizeEmojiForCustomTags(emoji: String): String? {
+        return EmojiCatalog.entryForEmoji(emoji.trim())?.emoji
+    }
+
+    fun normalizeCustomEmojiTagInput(input: String): List<String> {
+        return normalizeCustomEmojiTagList(input.split(',', '\n'))
     }
 
     fun readAgentModeEnabled(context: Context): Boolean {
@@ -517,6 +572,42 @@ object KeyboardSettings {
         } catch (_: JSONException) {
             null
         }
+    }
+
+    private fun parseCustomEmojiTags(stored: String): Map<String, List<String>>? {
+        return try {
+            val array = JSONArray(stored)
+            buildMap {
+                for (index in 0 until array.length()) {
+                    val item = array.optJSONObject(index) ?: continue
+                    val emoji = item.optString("emoji")
+                    val tags = item.optJSONArray("tags") ?: continue
+                    put(
+                        emoji,
+                        buildList {
+                            for (tagIndex in 0 until tags.length()) {
+                                add(tags.optString(tagIndex))
+                            }
+                        },
+                    )
+                }
+            }
+        } catch (_: JSONException) {
+            null
+        }
+    }
+
+    private fun normalizeCustomEmojiTagList(tags: List<String>): List<String> {
+        return tags
+            .map {
+                it.trim()
+                    .replace(whitespaceRegex, " ")
+                    .take(MAX_CUSTOM_EMOJI_TAG_CHARS)
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI)
     }
 
     private fun encryptAgentApiKey(apiKey: String): Result<EncryptedValue> {

@@ -156,7 +156,10 @@ object EmojiCatalog {
         return normalizeRecentEmojis(listOf(emoji) + current.filterNot { it == emoji })
     }
 
-    fun search(query: String): List<EmojiEntry> {
+    fun search(
+        query: String,
+        customTagsByEmoji: Map<String, List<String>> = emptyMap(),
+    ): List<EmojiEntry> {
         val terms = query
             .trim()
             .lowercase(Locale.US)
@@ -164,17 +167,44 @@ object EmojiCatalog {
             .filter { it.isNotBlank() }
         if (terms.isEmpty()) return emptyList()
 
+        val customSearchTextByEmoji = customTagsByEmoji
+            .mapNotNull { (emoji, tags) ->
+                val supportedEmoji = entryForEmoji(emoji)?.emoji ?: return@mapNotNull null
+                val searchText = tags.joinToString(" ")
+                    .lowercase(Locale.US)
+                    .takeIf { it.isNotBlank() }
+                    ?: return@mapNotNull null
+                supportedEmoji to searchText
+            }
+            .toMap()
+        val customTaggedEntries = if (customSearchTextByEmoji.isEmpty()) {
+            emptySequence()
+        } else {
+            allEntries
+                .asSequence()
+                .filter { it.emoji in customSearchTextByEmoji }
+        }
         val source = if (terms.any { it in skinToneSearchTerms }) {
             entries.asSequence() + allEntries.asSequence().filter { it.skinTone != EmojiSkinTone.Default }
         } else {
             entries.asSequence()
-        }
+        } + customTaggedEntries
 
         return source
-            .filter { entry -> terms.all { term -> term in entry.searchText } }
+            .filter { entry -> entry.matchesSearchTerms(terms, customSearchTextByEmoji) }
             .distinctBy { it.emoji }
             .take(MAX_SEARCH_RESULTS)
             .toList()
+    }
+
+    private fun EmojiEntry.matchesSearchTerms(
+        terms: List<String>,
+        customSearchTextByEmoji: Map<String, String>,
+    ): Boolean {
+        val customSearchText = customSearchTextByEmoji[emoji].orEmpty()
+        return terms.all { term ->
+            term in searchText || term in customSearchText
+        }
     }
 
     private val skinToneSearchTerms = setOf(
