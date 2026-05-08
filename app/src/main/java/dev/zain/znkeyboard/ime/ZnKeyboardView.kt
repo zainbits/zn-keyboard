@@ -444,7 +444,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         keyPaint.style = Paint.Style.FILL
         keyPaint.color = when {
             rewriteLoading -> PALETTE.aiLoadingSurface
-            active -> PALETTE.accent
+            active -> PALETTE.pressedKey
             key.role == KeyRole.Action -> PALETTE.action
             key.role == KeyRole.Function -> PALETTE.function
             else -> PALETTE.key
@@ -459,7 +459,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         val contentColor = when {
             rewriteLoading -> PALETTE.text
-            active -> PALETTE.text
+            active -> PALETTE.pressedText
             key.role == KeyRole.Character -> PALETTE.text
             else -> PALETTE.mutedText
         }
@@ -1165,10 +1165,11 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private object PALETTE {
         val background = Color.BLACK
-        val key = Color.rgb(42, 42, 42)
-        val function = Color.rgb(50, 50, 50)
-        val action = Color.rgb(42, 42, 42)
-        val accent = Color.rgb(48, 172, 226)
+        val key = Color.rgb(48, 48, 48)
+        val function = Color.rgb(56, 56, 56)
+        val action = Color.rgb(48, 48, 48)
+        val pressedKey = Color.rgb(26, 26, 26)
+        val pressedText = Color.rgb(142, 142, 142)
         val aiLoadingSurface = Color.rgb(24, 24, 31)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
