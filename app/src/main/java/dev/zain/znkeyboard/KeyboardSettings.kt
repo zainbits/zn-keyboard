@@ -21,7 +21,8 @@ object KeyboardSettings {
     const val OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
     const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
     const val MAX_UPPER_ROW_KEYS = 9
-    const val MAX_AGENT_ROW_KEYS = 5
+    private const val LEGACY_MAX_AGENT_ROW_KEYS = 5
+    const val MAX_SECOND_ROW_BUTTONS = LEGACY_MAX_AGENT_ROW_KEYS + 2
     const val MAX_TEXT_SNIPPETS = 60
     const val MAX_TEXT_SNIPPET_CHARS = 2_000
 
@@ -30,6 +31,8 @@ object KeyboardSettings {
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
+    private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
+    private const val KEY_KEYBOARD_ROW_ORDER = "keyboard_row_order"
     private const val KEY_TEXT_SNIPPETS = "text_snippets"
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
@@ -51,7 +54,11 @@ object KeyboardSettings {
     private const val GCM_TAG_LENGTH_BITS = 128
 
     val DEFAULT_UPPER_ROW_KEY_IDS = listOf("ctrl", "tab", "pipe", "slash", "left", "up", "down", "right", "esc")
-    val DEFAULT_AGENT_ROW_KEY_IDS = listOf("left", "right", "backspace")
+    val DEFAULT_SECOND_ROW_BUTTON_IDS = listOf("rewrite", "left", "right", "backspace", "history")
+    val DEFAULT_KEYBOARD_ROW_ORDER = listOf(
+        KeyboardRow.Second.id,
+        KeyboardRow.Upper.id,
+    )
 
     val UPPER_ROW_KEY_OPTIONS = listOf(
         UpperRowKeyOption("ctrl", "Ctrl"),
@@ -95,6 +102,13 @@ object KeyboardSettings {
     )
 
     private val upperRowKeyOptionIds = UPPER_ROW_KEY_OPTIONS.mapTo(mutableSetOf()) { it.id }
+    val SECOND_ROW_BUTTON_OPTIONS = listOf(
+        UpperRowKeyOption("rewrite", "Rewrite"),
+    ) + UPPER_ROW_KEY_OPTIONS + listOf(
+        UpperRowKeyOption("history", "History"),
+    )
+    private val secondRowButtonOptionIds = SECOND_ROW_BUTTON_OPTIONS.mapTo(mutableSetOf()) { it.id }
+    private val keyboardRowIds = KeyboardRow.entries.mapTo(mutableSetOf()) { it.id }
 
     fun readHeightScale(context: Context): Float {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -133,25 +147,71 @@ object KeyboardSettings {
         return UPPER_ROW_KEY_OPTIONS.firstOrNull { it.id == keyId }?.label.orEmpty()
     }
 
-    fun readAgentRowKeyIds(context: Context): List<String> {
+    fun readSecondRowButtonIds(context: Context): List<String> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val stored = prefs.getString(KEY_AGENT_ROW_KEYS, null) ?: return DEFAULT_AGENT_ROW_KEY_IDS
-        return parseAgentRowKeyIds(stored) ?: DEFAULT_AGENT_ROW_KEY_IDS
+        prefs.getString(KEY_SECOND_ROW_BUTTONS, null)?.let { stored ->
+            return parseSecondRowButtonIds(stored) ?: DEFAULT_SECOND_ROW_BUTTON_IDS
+        }
+
+        val legacyAgentRow = prefs.getString(KEY_AGENT_ROW_KEYS, null)
+            ?.let(::parseAgentRowKeyIds)
+            ?: return DEFAULT_SECOND_ROW_BUTTON_IDS
+        return normalizeSecondRowButtonIds(listOf("rewrite") + legacyAgentRow + "history")
     }
 
-    fun saveAgentRowKeyIds(context: Context, keyIds: List<String>) {
-        val keys = normalizeAgentRowKeyIds(keyIds)
+    fun saveSecondRowButtonIds(context: Context, buttonIds: List<String>) {
+        val buttons = normalizeSecondRowButtonIds(buttonIds)
         val encoded = JSONArray().apply {
-            keys.forEach(::put)
+            buttons.forEach(::put)
         }.toString()
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_AGENT_ROW_KEYS, encoded).apply()
+        prefs.edit().putString(KEY_SECOND_ROW_BUTTONS, encoded).apply()
     }
 
-    fun normalizeAgentRowKeyIds(keyIds: List<String>): List<String> {
-        return keyIds
-            .filter { it in upperRowKeyOptionIds }
-            .take(MAX_AGENT_ROW_KEYS)
+    fun normalizeSecondRowButtonIds(buttonIds: List<String>): List<String> {
+        return buttonIds
+            .filter { it in secondRowButtonOptionIds }
+            .distinct()
+            .take(MAX_SECOND_ROW_BUTTONS)
+    }
+
+    fun labelForSecondRowButton(buttonId: String): String {
+        return SECOND_ROW_BUTTON_OPTIONS.firstOrNull { it.id == buttonId }?.label.orEmpty()
+    }
+
+    fun readKeyboardRowOrder(context: Context): List<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val stored = prefs.getString(KEY_KEYBOARD_ROW_ORDER, null) ?: return DEFAULT_KEYBOARD_ROW_ORDER
+        return parseKeyboardRowOrder(stored) ?: DEFAULT_KEYBOARD_ROW_ORDER
+    }
+
+    fun saveKeyboardRowOrder(context: Context, rowIds: List<String>) {
+        val rows = normalizeKeyboardRowOrder(rowIds)
+        val encoded = JSONArray().apply {
+            rows.forEach(::put)
+        }.toString()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putString(KEY_KEYBOARD_ROW_ORDER, encoded).apply()
+    }
+
+    fun normalizeKeyboardRowOrder(rowIds: List<String>): List<String> {
+        val seen = mutableSetOf<String>()
+        return buildList {
+            rowIds.forEach { rowId ->
+                if (rowId in keyboardRowIds && seen.add(rowId)) {
+                    add(rowId)
+                }
+            }
+            DEFAULT_KEYBOARD_ROW_ORDER.forEach { rowId ->
+                if (seen.add(rowId)) {
+                    add(rowId)
+                }
+            }
+        }
+    }
+
+    fun labelForKeyboardRow(rowId: String): String {
+        return KeyboardRow.entries.firstOrNull { it.id == rowId }?.label.orEmpty()
     }
 
     fun readTextSnippets(context: Context): List<String> {
@@ -429,7 +489,21 @@ object KeyboardSettings {
     }
 
     private fun parseAgentRowKeyIds(stored: String): List<String>? {
-        return parseStringArray(stored)?.let(::normalizeAgentRowKeyIds)
+        return parseStringArray(stored)?.let(::normalizeLegacyAgentRowKeyIds)
+    }
+
+    private fun normalizeLegacyAgentRowKeyIds(keyIds: List<String>): List<String> {
+        return keyIds
+            .filter { it in upperRowKeyOptionIds }
+            .take(LEGACY_MAX_AGENT_ROW_KEYS)
+    }
+
+    private fun parseSecondRowButtonIds(stored: String): List<String>? {
+        return parseStringArray(stored)?.let(::normalizeSecondRowButtonIds)
+    }
+
+    private fun parseKeyboardRowOrder(stored: String): List<String>? {
+        return parseStringArray(stored)?.let(::normalizeKeyboardRowOrder)
     }
 
     private fun parseStringArray(stored: String): List<String>? {
@@ -541,6 +615,14 @@ object KeyboardSettings {
         val id: String,
         val label: String,
     )
+
+    enum class KeyboardRow(
+        val id: String,
+        val label: String,
+    ) {
+        Upper("upper", "Function row"),
+        Second("second", "Tools row"),
+    }
 
     enum class AgentProviderType(
         val id: String,

@@ -27,6 +27,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState)
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
+        fun onAgentRewriteRequested()
+        fun onAgentHistoryRequested()
     }
 
     var callback: Callback? = null
@@ -50,6 +52,9 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var enterLabel = "Enter"
     private var heightScale = 1f
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
+    private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
+    private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
+    private var secondRowState = SecondRowState(visible = true)
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -90,6 +95,35 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
+    fun setSecondRowButtonIds(buttonIds: List<String>) {
+        val normalizedButtonIds = KeyboardSettings.normalizeSecondRowButtonIds(buttonIds)
+        if (secondRowButtonIds != normalizedButtonIds) {
+            secondRowButtonIds = normalizedButtonIds
+            requestLayout()
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun setKeyboardRowOrder(rowIds: List<String>) {
+        val normalizedRowIds = KeyboardSettings.normalizeKeyboardRowOrder(rowIds)
+        if (keyboardRowOrder != normalizedRowIds) {
+            keyboardRowOrder = normalizedRowIds
+            requestLayout()
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun renderSecondRow(state: SecondRowState) {
+        if (secondRowState != state) {
+            secondRowState = state
+            requestLayout()
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
     fun setEnterLabel(label: String) {
         if (enterLabel != label) {
             enterLabel = label
@@ -108,8 +142,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val secondRowHeight = if (hasVisibleSecondRow()) {
+            ImeLayout.compactAgentRowHeightPx(context, heightScale)
+        } else {
+            0
+        }
         val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
             .roundToInt()
+            .plus(secondRowHeight)
         val width = MeasureSpec.getSize(widthMeasureSpec)
         setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
     }
@@ -187,10 +227,11 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun handlePointerDown(event: MotionEvent, pointerIndex: Int) {
         val pointerId = event.getPointerId(pointerIndex)
         val hit = findHit(event.getX(pointerIndex), event.getY(pointerIndex))
-        activeTouches.put(pointerId, ActiveTouch(hit?.key))
+        val key = hit?.key?.takeIf { it.enabled }
+        activeTouches.put(pointerId, ActiveTouch(key))
         pointerQueue.remove(pointerId)
         pointerQueue.add(pointerId)
-        when (hit?.key?.id) {
+        when (key?.id) {
             "comma" -> scheduleLongPress(pointerId, "comma") {
                 callback?.onEmojiPanelRequested()
             }
@@ -198,7 +239,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 callback?.onSnippetPanelRequested()
             }
         }
-        hit?.key?.takeIf(::isBackspaceKey)?.let { key ->
+        key?.takeIf(::isBackspaceKey)?.let { key ->
             scheduleBackspaceRepeat(pointerId, key)
         }
     }
@@ -208,7 +249,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         for (pointerIndex in 0 until event.pointerCount) {
             val pointerId = event.getPointerId(pointerIndex)
             val touch = activeTouches.get(pointerId) ?: continue
-            val key = findHit(event.getX(pointerIndex), event.getY(pointerIndex))?.key
+            val key = findHit(event.getX(pointerIndex), event.getY(pointerIndex))?.key?.takeIf { it.enabled }
             if (touch.currentKey?.id != key?.id) {
                 touch.currentKey = key
                 if (pendingLongPressPointerId == pointerId && key?.id != pendingLongPressKeyId) {
@@ -347,6 +388,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val key = hit.key
         val bounds = hit.visualBounds
         val active = key.active || isKeyPressed(key.id)
+        val keyAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_KEY_ALPHA
         keyPaint.style = Paint.Style.FILL
         keyPaint.color = when {
             active -> PALETTE.accent
@@ -354,6 +396,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             key.role == KeyRole.Function -> PALETTE.function
             else -> PALETTE.key
         }
+        keyPaint.alpha = keyAlpha
 
         val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
         canvas.drawRoundRect(bounds, radius, radius, keyPaint)
@@ -363,13 +406,15 @@ class ZnKeyboardView @JvmOverloads constructor(
             key.role == KeyRole.Character -> PALETTE.text
             else -> PALETTE.mutedText
         }
+        val contentAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_CONTENT_ALPHA
 
         key.icon?.let {
-            drawIcon(canvas, it, bounds, contentColor)
+            drawIcon(canvas, it, bounds, contentColor, contentAlpha)
         } ?: run {
             val textSize = fitTextSize(key.label, bounds, key.role)
             textPaint.textSize = textSize
             textPaint.color = contentColor
+            textPaint.alpha = contentAlpha
             val metrics = textPaint.fontMetrics
             val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
             canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
@@ -380,12 +425,13 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    private fun drawIcon(canvas: Canvas, icon: KeyIcon, bounds: RectF, color: Int) {
+    private fun drawIcon(canvas: Canvas, icon: KeyIcon, bounds: RectF, color: Int, alpha: Int) {
         val iconSize = min(bounds.width(), bounds.height()) * 0.5f
         val left = bounds.centerX() - iconSize / 2f
         val top = bounds.centerY() - iconSize / 2f
 
         iconPaint.color = color
+        iconPaint.alpha = alpha
         iconPaint.strokeWidth = 2.2f
         iconPaint.style = Paint.Style.STROKE
 
@@ -551,6 +597,8 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
+            KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
+            KeyIntent.AgentHistory -> callback?.onAgentHistoryRequested()
             is KeyIntent.Dispatch -> {
                 callback?.onKeyboardAction(intent.action, ModifierState(ctrl = ctrl, alt = alt))
                 if (shiftState == ShiftState.OneShot && key.consumesOneShotShift) {
@@ -645,19 +693,27 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun midpoint(start: Float, end: Float): Float = start + (end - start) / 2f
 
     private fun rows(): List<RowSpec> {
-        return buildList {
-            terminalRow()?.let(::add)
-            if (layoutMode == LayoutMode.Letters) {
-                add(RowSpec(chars("qwertyuiop"), 1f))
-                add(RowSpec(chars("asdfghjkl"), 1f, layoutKeyCount = 10))
-                add(letterBottomRow())
-            } else {
-                add(RowSpec(chars("1234567890"), 1f))
-                add(RowSpec(symbols("@#\$_&-+()"), 1f))
-                add(symbolBottomRow())
-            }
-            add(bottomRow())
+        val buttonRowSpecs = mapOf(
+            KeyboardSettings.KeyboardRow.Upper.id to terminalRow(),
+            KeyboardSettings.KeyboardRow.Second.id to secondRow(),
+        )
+        val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
+        val mainRows = if (layoutMode == LayoutMode.Letters) {
+            listOf(
+                RowSpec(chars("qwertyuiop"), 1f),
+                RowSpec(chars("asdfghjkl"), 1f, layoutKeyCount = 10),
+                letterBottomRow(),
+                bottomRow(),
+            )
+        } else {
+            listOf(
+                RowSpec(chars("1234567890"), 1f),
+                RowSpec(symbols("@#\$_&-+()"), 1f),
+                symbolBottomRow(),
+                bottomRow(),
+            )
         }
+        return buttonRows + mainRows
     }
 
     private fun terminalRow(): RowSpec? {
@@ -666,67 +722,123 @@ class ZnKeyboardView @JvmOverloads constructor(
                 keyId = keyId,
                 index = index,
                 weight = upperRowKeyWeight(index, upperRowKeyIds.lastIndex),
+                rowPrefix = "upper",
+                enabled = true,
             )
         }
         return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT) }
+    }
+
+    private fun secondRow(): RowSpec? {
+        if (!hasVisibleSecondRow()) return null
+        val keys = secondRowButtonIds.mapIndexedNotNull { index, buttonId ->
+            secondRowButtonSpec(
+                buttonId = buttonId,
+                index = index,
+                weight = upperRowKeyWeight(index, secondRowButtonIds.lastIndex),
+            )
+        }
+        return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT) }
+    }
+
+    private fun hasVisibleSecondRow(): Boolean {
+        return secondRowState.visible && secondRowButtonIds.isNotEmpty()
     }
 
     private fun upperRowKeyWeight(index: Int, lastIndex: Int): Float {
         return if (index == 0 || index == lastIndex) 1.4f else 1f
     }
 
-    private fun upperRowKeySpec(keyId: String, index: Int, weight: Float): KeySpec? {
-        val id = "upper_${index}_$keyId"
+    private fun secondRowButtonSpec(buttonId: String, index: Int, weight: Float): KeySpec? {
+        val id = "second_${index}_$buttonId"
+        return when (buttonId) {
+            "rewrite" -> KeySpec(
+                id = id,
+                label = "Rewrite",
+                intent = KeyIntent.AgentRewrite,
+                weight = weight,
+                role = KeyRole.Action,
+                active = secondRowState.loading,
+                enabled = secondRowState.rewriteEnabled && !secondRowState.loading,
+                emphasizedWhenDisabled = secondRowState.loading,
+            )
+            "history" -> KeySpec(
+                id = id,
+                label = "History",
+                intent = KeyIntent.AgentHistory,
+                weight = weight,
+                role = KeyRole.Function,
+                enabled = secondRowState.historyEnabled && !secondRowState.loading,
+            )
+            else -> upperRowKeySpec(
+                keyId = buttonId,
+                index = index,
+                weight = weight,
+                rowPrefix = "second",
+                enabled = !secondRowState.loading,
+            )
+        }
+    }
+
+    private fun upperRowKeySpec(
+        keyId: String,
+        index: Int,
+        weight: Float,
+        rowPrefix: String,
+        enabled: Boolean,
+    ): KeySpec? {
+        val id = "${rowPrefix}_${index}_$keyId"
         return when (keyId) {
-            "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl)
-            "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt)
-            "tab" -> KeySpec(id, "Tab", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_TAB)), weight, KeyRole.Function)
-            "esc" -> KeySpec(id, "Esc", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_ESCAPE)), weight, KeyRole.Action)
-            "left" -> KeySpec(id, "Left", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_LEFT)), weight, KeyRole.Function, icon = KeyIcon.ArrowLeft)
-            "up" -> KeySpec(id, "Up", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_UP)), weight, KeyRole.Function, icon = KeyIcon.ArrowUp)
-            "down" -> KeySpec(id, "Down", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_DOWN)), weight, KeyRole.Function, icon = KeyIcon.ArrowDown)
-            "right" -> KeySpec(id, "Right", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_RIGHT)), weight, KeyRole.Function, icon = KeyIcon.ArrowRight)
-            "home" -> KeySpec(id, "Home", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_HOME)), weight, KeyRole.Function)
-            "end" -> KeySpec(id, "End", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_END)), weight, KeyRole.Function)
-            "page_up" -> KeySpec(id, "PgUp", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_UP)), weight, KeyRole.Function)
-            "page_down" -> KeySpec(id, "PgDn", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_DOWN)), weight, KeyRole.Function)
-            "backspace" -> KeySpec(id, "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), weight, KeyRole.Function, icon = KeyIcon.Delete)
-            "pipe" -> textUpperRowKey(id, "|", weight)
-            "slash" -> textUpperRowKey(id, "/", weight)
-            "backslash" -> textUpperRowKey(id, "\\", weight)
-            "minus" -> textUpperRowKey(id, "-", weight)
-            "equals" -> textUpperRowKey(id, "=", weight)
-            "underscore" -> textUpperRowKey(id, "_", weight)
-            "plus" -> textUpperRowKey(id, "+", weight)
-            "colon" -> textUpperRowKey(id, ":", weight)
-            "semicolon" -> textUpperRowKey(id, ";", weight)
-            "quote" -> textUpperRowKey(id, "\"", weight)
-            "apostrophe" -> textUpperRowKey(id, "'", weight)
-            "backtick" -> textUpperRowKey(id, "`", weight)
-            "at" -> textUpperRowKey(id, "@", weight)
-            "hash" -> textUpperRowKey(id, "#", weight)
-            "dollar" -> textUpperRowKey(id, "\$", weight)
-            "ampersand" -> textUpperRowKey(id, "&", weight)
-            "star" -> textUpperRowKey(id, "*", weight)
-            "left_paren" -> textUpperRowKey(id, "(", weight)
-            "right_paren" -> textUpperRowKey(id, ")", weight)
-            "left_bracket" -> textUpperRowKey(id, "[", weight)
-            "right_bracket" -> textUpperRowKey(id, "]", weight)
-            "left_brace" -> textUpperRowKey(id, "{", weight)
-            "right_brace" -> textUpperRowKey(id, "}", weight)
-            "less_than" -> textUpperRowKey(id, "<", weight)
-            "greater_than" -> textUpperRowKey(id, ">", weight)
+            "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
+            "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt, enabled = enabled)
+            "tab" -> KeySpec(id, "Tab", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_TAB)), weight, KeyRole.Function, enabled = enabled)
+            "esc" -> KeySpec(id, "Esc", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_ESCAPE)), weight, KeyRole.Action, enabled = enabled)
+            "left" -> KeySpec(id, "Left", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_LEFT)), weight, KeyRole.Function, icon = KeyIcon.ArrowLeft, enabled = enabled)
+            "up" -> KeySpec(id, "Up", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_UP)), weight, KeyRole.Function, icon = KeyIcon.ArrowUp, enabled = enabled)
+            "down" -> KeySpec(id, "Down", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_DOWN)), weight, KeyRole.Function, icon = KeyIcon.ArrowDown, enabled = enabled)
+            "right" -> KeySpec(id, "Right", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_DPAD_RIGHT)), weight, KeyRole.Function, icon = KeyIcon.ArrowRight, enabled = enabled)
+            "home" -> KeySpec(id, "Home", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_HOME)), weight, KeyRole.Function, enabled = enabled)
+            "end" -> KeySpec(id, "End", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_MOVE_END)), weight, KeyRole.Function, enabled = enabled)
+            "page_up" -> KeySpec(id, "PgUp", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_UP)), weight, KeyRole.Function, enabled = enabled)
+            "page_down" -> KeySpec(id, "PgDn", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_DOWN)), weight, KeyRole.Function, enabled = enabled)
+            "backspace" -> KeySpec(id, "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), weight, KeyRole.Function, icon = KeyIcon.Delete, enabled = enabled)
+            "pipe" -> textUpperRowKey(id, "|", weight, enabled)
+            "slash" -> textUpperRowKey(id, "/", weight, enabled)
+            "backslash" -> textUpperRowKey(id, "\\", weight, enabled)
+            "minus" -> textUpperRowKey(id, "-", weight, enabled)
+            "equals" -> textUpperRowKey(id, "=", weight, enabled)
+            "underscore" -> textUpperRowKey(id, "_", weight, enabled)
+            "plus" -> textUpperRowKey(id, "+", weight, enabled)
+            "colon" -> textUpperRowKey(id, ":", weight, enabled)
+            "semicolon" -> textUpperRowKey(id, ";", weight, enabled)
+            "quote" -> textUpperRowKey(id, "\"", weight, enabled)
+            "apostrophe" -> textUpperRowKey(id, "'", weight, enabled)
+            "backtick" -> textUpperRowKey(id, "`", weight, enabled)
+            "at" -> textUpperRowKey(id, "@", weight, enabled)
+            "hash" -> textUpperRowKey(id, "#", weight, enabled)
+            "dollar" -> textUpperRowKey(id, "\$", weight, enabled)
+            "ampersand" -> textUpperRowKey(id, "&", weight, enabled)
+            "star" -> textUpperRowKey(id, "*", weight, enabled)
+            "left_paren" -> textUpperRowKey(id, "(", weight, enabled)
+            "right_paren" -> textUpperRowKey(id, ")", weight, enabled)
+            "left_bracket" -> textUpperRowKey(id, "[", weight, enabled)
+            "right_bracket" -> textUpperRowKey(id, "]", weight, enabled)
+            "left_brace" -> textUpperRowKey(id, "{", weight, enabled)
+            "right_brace" -> textUpperRowKey(id, "}", weight, enabled)
+            "less_than" -> textUpperRowKey(id, "<", weight, enabled)
+            "greater_than" -> textUpperRowKey(id, ">", weight, enabled)
             else -> null
         }
     }
 
-    private fun textUpperRowKey(id: String, value: String, weight: Float): KeySpec {
+    private fun textUpperRowKey(id: String, value: String, weight: Float, enabled: Boolean): KeySpec {
         return KeySpec(
             id = id,
             label = value,
             intent = KeyIntent.Dispatch(KeyboardAction.Text(value)),
             weight = weight,
             role = KeyRole.Character,
+            enabled = enabled,
         )
     }
 
@@ -856,6 +968,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val active: Boolean = false,
         val icon: KeyIcon? = null,
         val consumesOneShotShift: Boolean = false,
+        val enabled: Boolean = true,
+        val emphasizedWhenDisabled: Boolean = false,
     )
 
     private data class KeyHit(
@@ -880,6 +994,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object SwitchMode : KeyIntent()
         data object ToggleAlt : KeyIntent()
         data object ToggleCtrl : KeyIntent()
+        data object AgentRewrite : KeyIntent()
+        data object AgentHistory : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
 
@@ -891,6 +1007,18 @@ class ZnKeyboardView @JvmOverloads constructor(
         val accent = Color.rgb(48, 172, 226)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
+    }
+
+    data class SecondRowState(
+        val visible: Boolean,
+        val loading: Boolean = false,
+        val rewriteEnabled: Boolean = false,
+        val historyEnabled: Boolean = false,
+    )
+
+    private companion object {
+        const val DISABLED_KEY_ALPHA = 118
+        const val DISABLED_CONTENT_ALPHA = 130
     }
 }
 

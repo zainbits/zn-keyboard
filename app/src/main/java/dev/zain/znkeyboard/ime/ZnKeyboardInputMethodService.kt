@@ -31,7 +31,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     EmojiPanelView.Callback,
     EmojiSearchView.Callback,
     SnippetPanelView.Callback,
-    AgentAssistStripView.Callback,
     AgentReviewView.Callback,
     AgentHistoryView.Callback {
     private var keyboardView: ZnKeyboardView? = null
@@ -41,7 +40,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var snippetPanelView: SnippetPanelView? = null
     private var agentReviewView: AgentReviewView? = null
     private var agentHistoryView: AgentHistoryView? = null
-    private var agentStripView: AgentAssistStripView? = null
     private var currentEditorInfo: EditorInfo? = null
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
@@ -58,10 +56,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
-        val agentStrip = AgentAssistStripView(this).also { view ->
-            agentStripView = view
-            view.callback = this
-        }
         val keyboard = ZnKeyboardView(this).also { view ->
             keyboardView = view
             view.callback = this
@@ -83,13 +77,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(
-                agentStrip,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                ),
-            )
-            addView(
                 emojiSearch,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
@@ -105,7 +92,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             )
             applyKeyboardSettings()
             keyboard.setEnterLabel(resolveEnterLabel(currentEditorInfo))
-            renderAgentStrip()
+            renderSecondRow()
         }
     }
 
@@ -122,7 +109,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         keyboardView?.setEnterLabel(resolveEnterLabel(info))
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -211,11 +198,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onAgentHistoryRequested() {
+        if (isSensitiveEditor(currentEditorInfo)) return
         showAgentHistoryPanel()
-    }
-
-    override fun onAgentRowAction(action: KeyboardAction, modifiers: ModifierState) {
-        onKeyboardAction(action, modifiers)
     }
 
     override fun onAgentReviewApply() {
@@ -237,9 +221,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         keyboardView?.let { view ->
             view.setHeightScale(heightScale)
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
+            view.setSecondRowButtonIds(KeyboardSettings.readSecondRowButtonIds(this))
+            view.setKeyboardRowOrder(KeyboardSettings.readKeyboardRowOrder(this))
         }
-        agentStripView?.setHeightScale(heightScale)
-        agentStripView?.setAgentRowKeyIds(KeyboardSettings.readAgentRowKeyIds(this))
         emojiPanelView?.let { view ->
             view.setHeightScale(heightScale)
             if (activeSurface != KeyboardSurface.Emoji) {
@@ -258,7 +242,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         agentReviewView?.setHeightScale(heightScale)
         agentHistoryView?.setHeightScale(heightScale)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showEmojiPanel() {
@@ -276,7 +260,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         panel.setDefaultSkinTone(defaultEmojiSkinTone)
         activeSurface = KeyboardSurface.Emoji
         swapKeyboardSurface(panel)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showEmojiSearchPanel() {
@@ -291,7 +275,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         keyboard.setEnterLabel("Search")
         activeSurface = KeyboardSurface.EmojiSearch
         swapKeyboardSurface(keyboard)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showSnippetPanel() {
@@ -304,19 +288,19 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         panel.setSnippets(KeyboardSettings.readTextSnippets(this))
         activeSurface = KeyboardSurface.Snippets
         swapKeyboardSurface(panel)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showKeyboardPanel() {
         hideEmojiSearchView()
         activeSurface = KeyboardSurface.Keyboard
         val keyboard = keyboardView ?: run {
-            renderAgentStrip()
+            renderSecondRow()
             return
         }
         keyboard.setEnterLabel(resolveEnterLabel(currentEditorInfo))
         swapKeyboardSurface(keyboard)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showAgentReviewPanel(review: AgentReview) {
@@ -329,7 +313,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         reviewView.render(review.replacementText)
         activeSurface = KeyboardSurface.Review
         swapKeyboardSurface(reviewView)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun showAgentHistoryPanel() {
@@ -342,7 +326,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         historyView.submitHistory(AgentRewriteHistoryStore.read(this))
         activeSurface = KeyboardSurface.History
         swapKeyboardSurface(historyView)
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun swapKeyboardSurface(surface: View) {
@@ -618,7 +602,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (!agentLoading && activeRequestTarget == null && activeReview == null) {
             if (agentError != null) {
                 agentError = null
-                renderAgentStrip()
+                renderSecondRow()
             }
             return
         }
@@ -630,7 +614,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (activeSurface == KeyboardSurface.Review) {
             showKeyboardPanel()
         } else {
-            renderAgentStrip()
+            renderSecondRow()
         }
     }
 
@@ -639,7 +623,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         requestText: String,
         selectTargetForRequest: Boolean,
     ) {
-        if (!isAgentStripAvailable()) return
+        if (!isRewriteAvailable()) return
         val providerSettings = KeyboardSettings.readAgentProviderSettings(this)
         if (!providerSettings.isConfigured) {
             showAgentError("Add API settings first.")
@@ -655,7 +639,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentLoading = true
         activeRequestTarget = target
         Log.d(TAG, "Starting rewrite request for ${requestText.length} chars")
-        renderAgentStrip()
+        renderSecondRow()
 
         Thread {
             val result = runCatching {
@@ -666,7 +650,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
 
             mainHandler.post {
-                if (generation != requestGeneration || !isAgentStripAvailable()) return@post
+                if (generation != requestGeneration || !isRewriteAvailable()) return@post
                 agentLoading = false
                 activeRequestTarget = null
                 result
@@ -677,7 +661,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                         restoreSelectionIfNeeded(target)
                         showAgentError(error.message ?: "LLM request failed.")
                     }
-                renderAgentStrip()
+                renderSecondRow()
             }
         }.apply {
             name = "ZnKeyboardAgentRequest"
@@ -1037,7 +1021,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentError = message
         Log.w(TAG, message)
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-        renderAgentStrip()
+        renderSecondRow()
     }
 
     private fun resetAgentState(returnToKeyboard: Boolean = false) {
@@ -1049,29 +1033,26 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (returnToKeyboard) {
             showKeyboardPanel()
         } else {
-            renderAgentStrip()
+            renderSecondRow()
         }
     }
 
-    private fun renderAgentStrip() {
-        val visible = isAgentStripAvailable() &&
-            activeSurface != KeyboardSurface.Emoji &&
-            activeSurface != KeyboardSurface.EmojiSearch &&
-            activeSurface != KeyboardSurface.Review &&
-            activeSurface != KeyboardSurface.History
+    private fun renderSecondRow() {
+        val visible = activeSurface == KeyboardSurface.Keyboard
         val providerConfigured = KeyboardSettings.readAgentProviderSettings(this).isConfigured
+        val sensitiveEditor = isSensitiveEditor(currentEditorInfo)
 
-        agentStripView?.render(
-            AgentAssistStripView.State(
+        keyboardView?.renderSecondRow(
+            ZnKeyboardView.SecondRowState(
                 visible = visible,
                 loading = agentLoading,
-                rewriteEnabled = visible && providerConfigured,
-                historyEnabled = visible,
+                rewriteEnabled = visible && isRewriteAvailable() && providerConfigured,
+                historyEnabled = visible && !sensitiveEditor,
             ),
         )
     }
 
-    private fun isAgentStripAvailable(): Boolean {
+    private fun isRewriteAvailable(): Boolean {
         return KeyboardSettings.readAgentModeEnabled(this) && !isSensitiveEditor(currentEditorInfo)
     }
 

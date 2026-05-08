@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -50,21 +52,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -94,7 +101,8 @@ private fun SettingsScreen() {
     val context = LocalContext.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
-    var agentRowKeyIds by remember { mutableStateOf(KeyboardSettings.readAgentRowKeyIds(context)) }
+    var secondRowButtonIds by remember { mutableStateOf(KeyboardSettings.readSecondRowButtonIds(context)) }
+    var keyboardRowOrder by remember { mutableStateOf(KeyboardSettings.readKeyboardRowOrder(context)) }
     var emojiSkinTone by remember { mutableStateOf(KeyboardSettings.readEmojiSkinTone(context)) }
     var recentEmojiRows by remember { mutableStateOf(KeyboardSettings.readRecentEmojiRows(context)) }
     var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
@@ -114,10 +122,16 @@ private fun SettingsScreen() {
         KeyboardSettings.saveUpperRowKeyIds(context, normalizedKeyIds)
     }
 
-    fun updateAgentRowKeyIds(keyIds: List<String>) {
-        val normalizedKeyIds = KeyboardSettings.normalizeAgentRowKeyIds(keyIds)
-        agentRowKeyIds = normalizedKeyIds
-        KeyboardSettings.saveAgentRowKeyIds(context, normalizedKeyIds)
+    fun updateSecondRowButtonIds(buttonIds: List<String>) {
+        val normalizedButtonIds = KeyboardSettings.normalizeSecondRowButtonIds(buttonIds)
+        secondRowButtonIds = normalizedButtonIds
+        KeyboardSettings.saveSecondRowButtonIds(context, normalizedButtonIds)
+    }
+
+    fun updateKeyboardRowOrder(rowIds: List<String>) {
+        val normalizedRowIds = KeyboardSettings.normalizeKeyboardRowOrder(rowIds)
+        keyboardRowOrder = normalizedRowIds
+        KeyboardSettings.saveKeyboardRowOrder(context, normalizedRowIds)
     }
 
     fun updateTextSnippets(snippets: List<String>) {
@@ -272,20 +286,29 @@ private fun SettingsScreen() {
                 },
             )
 
-            UpperRowKeysSection(
-                title = "Agent row buttons",
-                keyIds = agentRowKeyIds,
-                maxKeys = KeyboardSettings.MAX_AGENT_ROW_KEYS,
-                defaultKeyIds = KeyboardSettings.DEFAULT_AGENT_ROW_KEY_IDS,
-                onKeyIdsChange = ::updateAgentRowKeyIds,
+            RowButtonsSection(
+                title = "Tools row buttons",
+                keyIds = secondRowButtonIds,
+                maxKeys = KeyboardSettings.MAX_SECOND_ROW_BUTTONS,
+                defaultKeyIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS,
+                keyOptions = KeyboardSettings.SECOND_ROW_BUTTON_OPTIONS,
+                labelForKey = KeyboardSettings::labelForSecondRowButton,
+                onKeyIdsChange = ::updateSecondRowButtonIds,
             )
 
-            UpperRowKeysSection(
-                title = "Upper row keys",
+            RowButtonsSection(
+                title = "Function row keys",
                 keyIds = upperRowKeyIds,
                 maxKeys = KeyboardSettings.MAX_UPPER_ROW_KEYS,
                 defaultKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
+                keyOptions = KeyboardSettings.UPPER_ROW_KEY_OPTIONS,
+                labelForKey = KeyboardSettings::labelForUpperRowKey,
                 onKeyIdsChange = ::updateUpperRowKeyIds,
+            )
+
+            KeyboardRowOrderSection(
+                rowOrder = keyboardRowOrder,
+                onRowOrderChange = ::updateKeyboardRowOrder,
             )
         }
     }
@@ -574,12 +597,12 @@ private fun AgentModeSection(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Agent mode",
+                        text = "Rewrite",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = "Shows LLM rewrite controls above the keyboard.",
+                        text = "Controls the Rewrite button in the tools row.",
                         color = ZnKeyboardColors.Muted,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -591,7 +614,7 @@ private fun AgentModeSection(
             }
 
             Text(
-                text = "Text is sent directly from this keyboard to your configured provider. Agent features are disabled in password fields.",
+                text = "Text is sent directly from this keyboard to your configured provider. Rewrite is disabled in password fields.",
                 color = ZnKeyboardColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -1079,11 +1102,13 @@ private fun ReasoningControls(
 }
 
 @Composable
-private fun UpperRowKeysSection(
+private fun RowButtonsSection(
     title: String,
     keyIds: List<String>,
     maxKeys: Int,
     defaultKeyIds: List<String>,
+    keyOptions: List<KeyboardSettings.UpperRowKeyOption>,
+    labelForKey: (String) -> String,
     onKeyIdsChange: (List<String>) -> Unit,
 ) {
     Surface(
@@ -1142,6 +1167,8 @@ private fun UpperRowKeysSection(
                         UpperRowKeyEditor(
                             index = index,
                             keyId = keyId,
+                            keyOptions = keyOptions,
+                            labelForKey = labelForKey,
                             onKeyChange = { nextKeyId ->
                                 onKeyIdsChange(
                                     keyIds.toMutableList().apply {
@@ -1167,7 +1194,7 @@ private fun UpperRowKeysSection(
             ) {
                 Button(
                     onClick = {
-                        onKeyIdsChange(keyIds + nextUpperRowKeyId(keyIds, defaultKeyIds))
+                        onKeyIdsChange(keyIds + nextRowButtonId(keyIds, defaultKeyIds, keyOptions))
                     },
                     enabled = keyIds.size < maxKeys,
                     modifier = Modifier.weight(1f),
@@ -1198,11 +1225,13 @@ private fun UpperRowKeysSection(
 private fun UpperRowKeyEditor(
     index: Int,
     keyId: String,
+    keyOptions: List<KeyboardSettings.UpperRowKeyOption>,
+    labelForKey: (String) -> String,
     onKeyChange: (String) -> Unit,
     onRemove: () -> Unit,
 ) {
     var expanded by remember(index, keyId) { mutableStateOf(false) }
-    val selectedLabel = KeyboardSettings.labelForUpperRowKey(keyId)
+    val selectedLabel = labelForKey(keyId)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1232,7 +1261,7 @@ private fun UpperRowKeyEditor(
 
             FloatingPickerMenu(
                 expanded = expanded,
-                items = KeyboardSettings.UPPER_ROW_KEY_OPTIONS.map { option ->
+                items = keyOptions.map { option ->
                     PickerItem(
                         id = option.id,
                         title = option.label,
@@ -1254,6 +1283,151 @@ private fun UpperRowKeyEditor(
                 painter = painterResource(R.drawable.ic_delete_24),
                 contentDescription = "Remove key",
                 tint = ZnKeyboardColors.Muted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun KeyboardRowOrderSection(
+    rowOrder: List<String>,
+    onRowOrderChange: (List<String>) -> Unit,
+) {
+    val normalizedOrder = KeyboardSettings.normalizeKeyboardRowOrder(rowOrder)
+
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_tune_24),
+                        contentDescription = null,
+                        tint = ZnKeyboardColors.Accent,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Shortcut row order",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = "${normalizedOrder.size}",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(ROW_ORDER_ITEM_GAP)) {
+                normalizedOrder.forEachIndexed { index, rowId ->
+                    KeyboardRowOrderItem(
+                        index = index,
+                        rowId = rowId,
+                        rowCount = normalizedOrder.size,
+                        onMove = { fromIndex, toIndex ->
+                            onRowOrderChange(normalizedOrder.moveItem(fromIndex, toIndex))
+                        },
+                    )
+                }
+            }
+
+            OutlinedButton(
+                onClick = { onRowOrderChange(KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER) },
+                enabled = normalizedOrder != KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+            ) {
+                Text("Reset")
+            }
+        }
+    }
+}
+
+@Composable
+private fun KeyboardRowOrderItem(
+    index: Int,
+    rowId: String,
+    rowCount: Int,
+    onMove: (Int, Int) -> Unit,
+) {
+    val currentIndex by rememberUpdatedState(index)
+    val density = LocalDensity.current
+    val itemDistancePx = with(density) { (ROW_ORDER_ITEM_HEIGHT + ROW_ORDER_ITEM_GAP).toPx() }
+    var dragging by remember(rowId) { mutableStateOf(false) }
+    var dragOffset by remember(rowId) { mutableFloatStateOf(0f) }
+
+    Surface(
+        color = if (dragging) ZnKeyboardColors.FunctionKey else ZnKeyboardColors.Key,
+        shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ROW_ORDER_ITEM_HEIGHT)
+            .zIndex(if (dragging) 1f else 0f)
+            .offset { IntOffset(0, dragOffset.roundToInt()) }
+            .pointerInput(rowId, rowCount, itemDistancePx) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        dragging = true
+                    },
+                    onDragCancel = {
+                        dragging = false
+                        dragOffset = 0f
+                    },
+                    onDragEnd = {
+                        val targetIndex = (currentIndex + (dragOffset / itemDistancePx).roundToInt())
+                            .coerceIn(0, rowCount - 1)
+                        dragging = false
+                        dragOffset = 0f
+                        if (targetIndex != currentIndex) {
+                            onMove(currentIndex, targetIndex)
+                        }
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffset += dragAmount.y
+                    },
+                )
+            },
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                painter = painterResource(R.drawable.ic_drag_handle_24),
+                contentDescription = "Move row",
+                tint = ZnKeyboardColors.Muted,
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                text = "${index + 1}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.width(24.dp),
+            )
+            Text(
+                text = KeyboardSettings.labelForKeyboardRow(rowId),
+                color = ZnKeyboardColors.OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
             )
         }
     }
@@ -1301,9 +1475,22 @@ private fun SystemSetupActions() {
     }
 }
 
-private fun nextUpperRowKeyId(currentKeyIds: List<String>, preferredKeyIds: List<String>): String {
+private fun nextRowButtonId(
+    currentKeyIds: List<String>,
+    preferredKeyIds: List<String>,
+    keyOptions: List<KeyboardSettings.UpperRowKeyOption>,
+): String {
     return preferredKeyIds.firstOrNull { it !in currentKeyIds }
-        ?: KeyboardSettings.UPPER_ROW_KEY_OPTIONS.first().id
+        ?: keyOptions.firstOrNull { it.id !in currentKeyIds }?.id
+        ?: keyOptions.first().id
+}
+
+private fun <T> List<T>.moveItem(fromIndex: Int, toIndex: Int): List<T> {
+    if (fromIndex !in indices || toIndex !in indices || fromIndex == toIndex) return this
+    return toMutableList().apply {
+        val item = removeAt(fromIndex)
+        add(toIndex, item)
+    }
 }
 
 private fun fetchModelOptions(
@@ -1392,6 +1579,8 @@ private val PICKER_MAX_HEIGHT = 280.dp
 private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp
 private val REASONING_PICKER_MAX_HEIGHT = 260.dp
 private val SKIN_TONE_PICKER_MAX_HEIGHT = 260.dp
+private val ROW_ORDER_ITEM_HEIGHT = 48.dp
+private val ROW_ORDER_ITEM_GAP = 8.dp
 private val SECTION_CORNER_RADIUS = 8.dp
 private val COMPACT_ITEM_CORNER_RADIUS = 6.dp
 private val PICKER_CORNER_RADIUS = 10.dp
