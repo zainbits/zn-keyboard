@@ -27,6 +27,8 @@ object KeyboardSettings {
     const val MAX_SECOND_ROW_BUTTONS = MAX_UPPER_ROW_KEYS
     const val MAX_TEXT_SNIPPETS = 60
     const val MAX_TEXT_SNIPPET_CHARS = 2_000
+    const val MAX_TEXT_SNIPPET_TAGS = 8
+    const val MAX_TEXT_SNIPPET_TAG_CHARS = 32
     const val MAX_CUSTOM_EMOJI_TAGGED_EMOJIS = 250
     const val MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI = 12
     const val MAX_CUSTOM_EMOJI_TAG_CHARS = 32
@@ -235,30 +237,88 @@ object KeyboardSettings {
         return KeyboardRow.entries.firstOrNull { it.id == rowId }?.label.orEmpty()
     }
 
-    fun readTextSnippets(context: Context): List<String> {
+    fun readTextSnippets(context: Context): List<TextSnippet> {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val stored = prefs.getString(KEY_TEXT_SNIPPETS, null) ?: return emptyList()
-        return parseStringArray(stored)
+        return parseTextSnippetArray(stored)
             ?.let(::normalizeTextSnippets)
             ?: emptyList()
     }
 
-    fun saveTextSnippets(context: Context, snippets: List<String>) {
-        val encoded = JSONArray().apply {
-            normalizeTextSnippets(snippets).forEach(::put)
-        }.toString()
+    fun saveTextSnippets(context: Context, snippets: List<TextSnippet>) {
+        val encoded = textSnippetsJson(normalizeTextSnippets(snippets)).toString()
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_TEXT_SNIPPETS, encoded)
             .apply()
     }
 
-    fun normalizeTextSnippets(snippets: List<String>): List<String> {
+    fun registerTextSnippetsChangeListener(
+        context: Context,
+        onChanged: () -> Unit,
+    ): SharedPreferences.OnSharedPreferenceChangeListener {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == KEY_TEXT_SNIPPETS) {
+                onChanged()
+            }
+        }
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .registerOnSharedPreferenceChangeListener(listener)
+        return listener
+    }
+
+    fun unregisterTextSnippetsChangeListener(
+        context: Context,
+        listener: SharedPreferences.OnSharedPreferenceChangeListener,
+    ) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .unregisterOnSharedPreferenceChangeListener(listener)
+    }
+
+    fun normalizeTextSnippets(snippets: List<TextSnippet>): List<TextSnippet> {
+        val seenTexts = mutableSetOf<String>()
         return snippets
-            .map { it.trim().take(MAX_TEXT_SNIPPET_CHARS) }
-            .filter { it.isNotBlank() }
-            .distinct()
+            .mapNotNull { snippet ->
+                val text = normalizeTextSnippetText(snippet.text)
+                if (text.isBlank() || !seenTexts.add(text)) {
+                    null
+                } else {
+                    TextSnippet(
+                        text = text,
+                        tags = normalizeTextSnippetTags(snippet.tags),
+                    )
+                }
+            }
             .take(MAX_TEXT_SNIPPETS)
+    }
+
+    fun textSnippetFromText(text: String, tags: List<String> = emptyList()): TextSnippet {
+        return TextSnippet(
+            text = normalizeTextSnippetText(text),
+            tags = normalizeTextSnippetTags(tags),
+        )
+    }
+
+    fun parseTextSnippetTags(value: String): List<String> {
+        return normalizeTextSnippetTags(value.split(","))
+    }
+
+    fun normalizeTextSnippetTags(tags: List<String>): List<String> {
+        return tags
+            .map {
+                it.trim()
+                    .removePrefix("#")
+                    .replace(whitespaceRegex, " ")
+                    .take(MAX_TEXT_SNIPPET_TAG_CHARS)
+                    .trim()
+            }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase() }
+            .take(MAX_TEXT_SNIPPET_TAGS)
+    }
+
+    private fun normalizeTextSnippetText(text: String): String {
+        return text.trim().take(MAX_TEXT_SNIPPET_CHARS)
     }
 
     fun readRecentEmojis(context: Context): List<String> {
@@ -649,7 +709,7 @@ object KeyboardSettings {
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
                             .put("shortcutRowOrder", stringArrayJson(readKeyboardRowOrder(context))),
                     )
-                    .put("snippets", stringArrayJson(readTextSnippets(context)))
+                    .put("snippets", textSnippetsJson(readTextSnippets(context)))
                     .put(
                         "emoji",
                         JSONObject()
@@ -709,7 +769,7 @@ object KeyboardSettings {
             ?.let(::normalizeKeyboardRowOrder)
             ?: readKeyboardRowOrder(context)
 
-        val snippets = settings.optStringList("snippets")
+        val snippets = settings.optTextSnippetList("snippets")
             ?.let(::normalizeTextSnippets)
             ?: readTextSnippets(context)
         val skinTone = emoji.optById(
@@ -802,6 +862,14 @@ object KeyboardSettings {
                     add(array.optString(index))
                 }
             }
+        } catch (_: JSONException) {
+            null
+        }
+    }
+
+    private fun parseTextSnippetArray(stored: String): List<TextSnippet>? {
+        return try {
+            JSONArray(stored).toTextSnippetList()
         } catch (_: JSONException) {
             null
         }
@@ -923,6 +991,18 @@ object KeyboardSettings {
         }
     }
 
+    private fun textSnippetsJson(snippets: List<TextSnippet>): JSONArray {
+        return JSONArray().apply {
+            normalizeTextSnippets(snippets).forEach { snippet ->
+                put(
+                    JSONObject()
+                        .put("text", snippet.text)
+                        .put("tags", stringArrayJson(snippet.tags)),
+                )
+            }
+        }
+    }
+
     private fun customEmojiTagsJson(tagsByEmoji: Map<String, List<String>>): JSONArray {
         return JSONArray().apply {
             tagsByEmoji.forEach { (emoji, tags) ->
@@ -931,6 +1011,35 @@ object KeyboardSettings {
                         .put("emoji", emoji)
                         .put("tags", stringArrayJson(tags)),
                 )
+            }
+        }
+    }
+
+    private fun JSONObject.optTextSnippetList(key: String): List<TextSnippet>? {
+        val array = optJSONArray(key) ?: return null
+        return array.toTextSnippetList()
+    }
+
+    private fun JSONArray.toTextSnippetList(): List<TextSnippet> {
+        return buildList {
+            for (index in 0 until length()) {
+                val item = opt(index)
+                when (item) {
+                    is JSONObject -> {
+                        val tags = item.optJSONArray("tags")?.toStringList().orEmpty()
+                        add(TextSnippet(text = item.optString("text"), tags = tags))
+                    }
+                    is String -> add(TextSnippet(text = item, tags = emptyList()))
+                    else -> add(TextSnippet(text = optString(index), tags = emptyList()))
+                }
+            }
+        }
+    }
+
+    private fun JSONArray.toStringList(): List<String> {
+        return buildList {
+            for (index in 0 until length()) {
+                add(optString(index))
             }
         }
     }
@@ -999,6 +1108,11 @@ object KeyboardSettings {
     data class UpperRowKeyOption(
         val id: String,
         val label: String,
+    )
+
+    data class TextSnippet(
+        val text: String,
+        val tags: List<String> = emptyList(),
     )
 
     enum class KeyboardRow(

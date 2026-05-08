@@ -38,6 +38,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     EmojiSearchView.Callback,
     GifSearchView.Callback,
     SnippetPanelView.Callback,
+    SnippetSearchView.Callback,
     AgentReviewView.Callback,
     AgentHistoryView.Callback {
     private var keyboardView: ZnKeyboardView? = null
@@ -47,6 +48,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var emojiSearchView: EmojiSearchView? = null
     private var gifSearchView: GifSearchView? = null
     private var snippetPanelView: SnippetPanelView? = null
+    private var snippetSearchView: SnippetSearchView? = null
     private var agentReviewView: AgentReviewView? = null
     private var agentHistoryView: AgentHistoryView? = null
     private var currentEditorInfo: EditorInfo? = null
@@ -85,6 +87,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.callback = this
             view.setProviderSettings(KeyboardSettings.readGifProviderSettings(this))
         }
+        val snippetSearch = SnippetSearchView(this).also { view ->
+            snippetSearchView = view
+            view.callback = this
+        }
         val keyboardSlot = FrameLayout(this).also { container ->
             keyboardContainer = container
             container.addView(
@@ -107,6 +113,13 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             )
             addView(
                 gifSearch,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+            addView(
+                snippetSearch,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -177,6 +190,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             return
         }
         if (activeSurface == KeyboardSurface.GifSearch && handleGifSearchKeyboardAction(action, modifiers)) {
+            return
+        }
+        if (activeSurface == KeyboardSurface.SnippetSearch && handleSnippetSearchKeyboardAction(action, modifiers)) {
             return
         }
         when (action) {
@@ -274,16 +290,25 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
+    override fun onSnippetSearchRequested() {
+        showSnippetSearchPanel()
+    }
+
+    override fun onSnippetSaveCurrentInput() {
+        saveCurrentInputAsSnippet()
+    }
+
     override fun onSnippetPanelClosed() {
         showKeyboardPanel()
     }
 
-    override fun onSnippetBackspace() {
-        handleBackspace(ModifierState(ctrl = false, alt = false))
+    override fun onSnippetSearchClosed() {
+        showSnippetPanel()
     }
 
-    override fun onSnippetSpace() {
-        handleText(" ", ModifierState(ctrl = false, alt = false))
+    override fun onSnippetSearchSnippetSelected(snippet: String) {
+        handleText(snippet, ModifierState(ctrl = false, alt = false))
+        showKeyboardPanel()
     }
 
     override fun onAgentRewriteRequested() {
@@ -347,6 +372,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setHeightScale(heightScale)
             view.setSnippets(KeyboardSettings.readTextSnippets(this))
         }
+        snippetSearchView?.setSnippets(KeyboardSettings.readTextSnippets(this))
         agentReviewView?.setHeightScale(heightScale)
         agentHistoryView?.setHeightScale(heightScale)
         renderSecondRow()
@@ -355,6 +381,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showEmojiPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
+        hideSnippetSearchView()
         val panel = emojiPanelView ?: EmojiPanelView(this).also { view ->
             emojiPanelView = view
             view.callback = this
@@ -373,6 +400,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showEmojiSearchPanel() {
         hideGifSearchView()
+        hideSnippetSearchView()
         val keyboard = keyboardView ?: return
         val search = emojiSearchView ?: return
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
@@ -391,6 +419,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showGifPanel(keepCurrentResults: Boolean = false) {
         hideEmojiSearchView()
+        hideSnippetSearchView()
         val panel = gifSearchView ?: return
         panel.setHeightScale(KeyboardSettings.readHeightScale(this))
         panel.setProviderSettings(KeyboardSettings.readGifProviderSettings(this))
@@ -407,6 +436,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showGifSearchPanel() {
         hideEmojiSearchView()
+        hideSnippetSearchView()
         val keyboard = keyboardView ?: return
         val search = gifSearchView ?: return
         search.setHeightScale(KeyboardSettings.readHeightScale(this))
@@ -423,6 +453,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showSnippetPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
+        hideSnippetSearchView()
         val panel = snippetPanelView ?: SnippetPanelView(this).also { view ->
             snippetPanelView = view
             view.callback = this
@@ -434,9 +465,62 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderSecondRow()
     }
 
+    private fun showSnippetSearchPanel() {
+        hideEmojiSearchView()
+        hideGifSearchView()
+        val keyboard = keyboardView ?: return
+        val search = snippetSearchView ?: return
+        search.setSnippets(KeyboardSettings.readTextSnippets(this))
+        search.clearSearch()
+        search.visibility = View.VISIBLE
+        keyboard.setEnterLabel("Search")
+        activeSurface = KeyboardSurface.SnippetSearch
+        swapKeyboardSurface(keyboard)
+        renderSecondRow()
+    }
+
+    private fun saveCurrentInputAsSnippet() {
+        if (isSensitiveEditor(currentEditorInfo)) {
+            Toast.makeText(this, "Snippets are disabled in password fields.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val snapshot = captureEditorSnapshot(KeyboardSettings.MAX_TEXT_SNIPPET_CHARS + 1) ?: run {
+            Toast.makeText(this, "Couldn't read the current field.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (snapshot.textStartOffset != 0) {
+            Toast.makeText(this, "Couldn't read the full field.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val snippet = KeyboardSettings.textSnippetFromText(snapshot.text)
+        if (snippet.text.isBlank()) {
+            Toast.makeText(this, "No text to save.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val snippets = KeyboardSettings.readTextSnippets(this)
+        if (snippets.any { it.text == snippet.text }) {
+            Toast.makeText(this, "Snippet already saved.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (snippets.size >= KeyboardSettings.MAX_TEXT_SNIPPETS) {
+            Toast.makeText(this, "Snippet limit reached.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val updatedSnippets = snippets + snippet
+        KeyboardSettings.saveTextSnippets(this, updatedSnippets)
+        snippetPanelView?.setSnippets(updatedSnippets)
+        snippetSearchView?.setSnippets(updatedSnippets)
+        Toast.makeText(this, "Snippet saved.", Toast.LENGTH_SHORT).show()
+    }
+
     private fun showKeyboardPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
+        hideSnippetSearchView()
         activeSurface = KeyboardSurface.Keyboard
         val keyboard = keyboardView ?: run {
             renderSecondRow()
@@ -450,6 +534,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showAgentReviewPanel(review: AgentReview) {
         hideEmojiSearchView()
         hideGifSearchView()
+        hideSnippetSearchView()
         val reviewView = agentReviewView ?: AgentReviewView(this).also { view ->
             agentReviewView = view
             view.callback = this
@@ -464,6 +549,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showAgentHistoryPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
+        hideSnippetSearchView()
         val historyView = agentHistoryView ?: AgentHistoryView(this).also { view ->
             agentHistoryView = view
             view.callback = this
@@ -517,6 +603,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             if (view.visibility != View.GONE) {
                 view.visibility = View.GONE
             }
+        }
+    }
+
+    private fun hideSnippetSearchView() {
+        snippetSearchView?.let { view ->
+            if (view.visibility != View.GONE) {
+                view.visibility = View.GONE
+            }
+            view.clearSearch()
         }
     }
 
@@ -664,6 +759,24 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         when (action) {
             KeyboardAction.Backspace -> searchView.deleteQueryCharacter()
             KeyboardAction.Enter -> searchView.searchNow()
+            is KeyboardAction.KeyCode -> {
+                if (action.keyCode == KeyEvent.KEYCODE_DEL) {
+                    searchView.deleteQueryCharacter()
+                }
+            }
+            is KeyboardAction.Text -> searchView.appendQueryText(action.value)
+        }
+        return true
+    }
+
+    private fun handleSnippetSearchKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
+        if (modifiers.hasHardwareMeta) {
+            return true
+        }
+        val searchView = snippetSearchView ?: return true
+        when (action) {
+            KeyboardAction.Backspace -> searchView.deleteQueryCharacter()
+            KeyboardAction.Enter -> Unit
             is KeyboardAction.KeyCode -> {
                 if (action.keyCode == KeyEvent.KEYCODE_DEL) {
                     searchView.deleteQueryCharacter()
@@ -1546,6 +1659,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         Gif,
         GifSearch,
         Snippets,
+        SnippetSearch,
         Review,
         History,
     }

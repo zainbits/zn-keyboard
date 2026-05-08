@@ -159,7 +159,7 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EMOJI_PANEL_EXTRA_HEIGHT_DP) *
+        val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EXTENDED_PANEL_EXTRA_HEIGHT_DP) *
             heightScale *
             resources.displayMetrics.density +
             bottomSystemControlGapPx)

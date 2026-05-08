@@ -11,10 +11,14 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.R
 import kotlin.math.roundToInt
 
 class SnippetPanelView @JvmOverloads constructor(
@@ -23,9 +27,9 @@ class SnippetPanelView @JvmOverloads constructor(
 ) : LinearLayout(context, attrs) {
     interface Callback {
         fun onSnippetSelected(snippet: String)
+        fun onSnippetSearchRequested()
+        fun onSnippetSaveCurrentInput()
         fun onSnippetPanelClosed()
-        fun onSnippetBackspace()
-        fun onSnippetSpace()
     }
 
     var callback: Callback? = null
@@ -70,8 +74,15 @@ class SnippetPanelView @JvmOverloads constructor(
             ),
         )
     }
+    private val searchBar = iconTextKey("Search snippets", R.drawable.ic_search_24) {
+        callback?.onSnippetSearchRequested()
+    }.apply {
+        gravity = Gravity.CENTER_VERTICAL
+        contentDescription = "Search snippets"
+        setPadding(dp(14), 0, dp(14), 0)
+    }
 
-    private var snippets = emptyList<String>()
+    private var snippets = emptyList<KeyboardSettings.TextSnippet>()
     private var heightScale = 1f
 
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
@@ -91,12 +102,12 @@ class SnippetPanelView @JvmOverloads constructor(
         isClickable = true
 
         addView(
-            contentFrame,
-            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f),
+            buildHeaderRow(),
+            LayoutParams(LayoutParams.MATCH_PARENT, dp(42)).withMargins(bottom = 6),
         )
         addView(
-            buildActionRow(),
-            LayoutParams(LayoutParams.MATCH_PARENT, dp(42)).withMargins(top = 6),
+            contentFrame,
+            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f),
         )
         rebuildSnippetCards()
     }
@@ -108,7 +119,7 @@ class SnippetPanelView @JvmOverloads constructor(
         }
     }
 
-    fun setSnippets(nextSnippets: List<String>) {
+    fun setSnippets(nextSnippets: List<KeyboardSettings.TextSnippet>) {
         val normalized = KeyboardSettings.normalizeTextSnippets(nextSnippets)
         if (snippets == normalized) return
 
@@ -117,7 +128,10 @@ class SnippetPanelView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
+        val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EXTENDED_PANEL_EXTRA_HEIGHT_DP) *
+            heightScale *
+            resources.displayMetrics.density +
+            bottomSystemControlGapPx)
             .roundToInt()
         val exactHeightSpec = MeasureSpec.makeMeasureSpec(resolveSize(desiredHeight, heightMeasureSpec), MeasureSpec.EXACTLY)
         super.onMeasure(widthMeasureSpec, exactHeightSpec)
@@ -140,43 +154,67 @@ class SnippetPanelView @JvmOverloads constructor(
         scrollView.visibility = if (empty) GONE else VISIBLE
     }
 
-    private fun buildActionRow(): LinearLayout {
+    private fun buildHeaderRow(): LinearLayout {
         return LinearLayout(context).apply {
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textKey("ABC", KeyRole.Function) { callback?.onSnippetPanelClosed() },
+                textKey("‹", KeyRole.Function) { callback?.onSnippetPanelClosed() }.apply {
+                    contentDescription = "Back to keyboard"
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
+                },
                 LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
             addView(
-                textKey("space", KeyRole.Function) { callback?.onSnippetSpace() },
+                searchBar,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
             )
             addView(
-                textKey("Del", KeyRole.Function) { callback?.onSnippetBackspace() },
+                iconKey(R.drawable.ic_save_24, "Save current input as snippet") {
+                    callback?.onSnippetSaveCurrentInput()
+                },
                 LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
             )
         }
     }
 
-    private fun snippetCard(snippet: String): TextView {
-        return TextView(context).apply {
-            text = snippet
+    private fun snippetCard(snippet: KeyboardSettings.TextSnippet): LinearLayout {
+        return LinearLayout(context).apply {
+            orientation = VERTICAL
             gravity = Gravity.START
-            includeFontPadding = true
-            setTextColor(PALETTE.text)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-            setLineSpacing(dp(2).toFloat(), 1f)
             setPadding(dp(12), dp(10), dp(12), dp(10))
-            maxLines = SNIPPET_CARD_MAX_LINES
-            ellipsize = TextUtils.TruncateAt.END
-            minHeight = dp(50)
+            minimumHeight = dp(50)
             background = cardBackground()
             isClickable = true
             isFocusable = false
-            contentDescription = snippet
+            contentDescription = snippet.text
+            addView(
+                TextView(context).apply {
+                    text = snippet.text
+                    includeFontPadding = true
+                    setTextColor(PALETTE.text)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+                    setLineSpacing(dp(2).toFloat(), 1f)
+                    maxLines = SNIPPET_CARD_MAX_LINES
+                    ellipsize = TextUtils.TruncateAt.END
+                },
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
+            )
+            if (snippet.tags.isNotEmpty()) {
+                addView(
+                    TextView(context).apply {
+                        text = snippet.tags.joinToString("  ") { "#$it" }
+                        includeFontPadding = false
+                        setTextColor(PALETTE.tagText)
+                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
+                        setSingleLine(true)
+                        ellipsize = TextUtils.TruncateAt.END
+                    },
+                    LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).withMargins(top = 6),
+                )
+            }
             setOnClickListener {
-                callback?.onSnippetSelected(snippet)
+                callback?.onSnippetSelected(snippet.text)
             }
         }
     }
@@ -193,6 +231,30 @@ class SnippetPanelView @JvmOverloads constructor(
             background = keyBackground(role)
             setOnClickListener { onClick() }
         }
+    }
+
+    private fun iconTextKey(label: String, iconResId: Int, onClick: () -> Unit): TextView {
+        return textKey(label, KeyRole.Function, onClick).apply {
+            setCompoundDrawablesRelativeWithIntrinsicBounds(tintedIcon(iconResId), null, null, null)
+            compoundDrawablePadding = dp(8)
+        }
+    }
+
+    private fun iconKey(iconResId: Int, description: String, onClick: () -> Unit): ImageButton {
+        return ImageButton(context).apply {
+            contentDescription = description
+            background = keyBackground(KeyRole.Function)
+            isClickable = true
+            isFocusable = false
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(tintedIcon(iconResId))
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun tintedIcon(iconResId: Int) = ContextCompat.getDrawable(context, iconResId)?.mutate()?.apply {
+        setTint(PALETTE.mutedText)
     }
 
     private fun cardBackground(): GradientDrawable {
@@ -333,6 +395,7 @@ class SnippetPanelView @JvmOverloads constructor(
         val function = Color.rgb(50, 50, 50)
         val border = Color.rgb(62, 62, 62)
         const val text = Color.WHITE
+        val tagText = Color.rgb(170, 210, 255)
         val mutedText = Color.rgb(230, 230, 230)
     }
 

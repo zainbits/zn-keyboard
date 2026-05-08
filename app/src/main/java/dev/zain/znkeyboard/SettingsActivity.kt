@@ -51,6 +51,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -201,6 +202,15 @@ private fun SettingsScreen() {
         }
     }
 
+    DisposableEffect(context) {
+        val listener = KeyboardSettings.registerTextSnippetsChangeListener(context) {
+            textSnippets = KeyboardSettings.readTextSnippets(context)
+        }
+        onDispose {
+            KeyboardSettings.unregisterTextSnippetsChangeListener(context, listener)
+        }
+    }
+
     fun updateUpperRowKeyIds(keyIds: List<String>) {
         val normalizedKeyIds = KeyboardSettings.normalizeUpperRowKeyIds(keyIds)
         upperRowKeyIds = normalizedKeyIds
@@ -219,7 +229,7 @@ private fun SettingsScreen() {
         KeyboardSettings.saveKeyboardRowOrder(context, normalizedRowIds)
     }
 
-    fun updateTextSnippets(snippets: List<String>) {
+    fun updateTextSnippets(snippets: List<KeyboardSettings.TextSnippet>) {
         val normalizedSnippets = KeyboardSettings.normalizeTextSnippets(snippets)
         textSnippets = normalizedSnippets
         KeyboardSettings.saveTextSnippets(context, normalizedSnippets)
@@ -435,13 +445,17 @@ private fun SettingsScreen() {
 
 @Composable
 private fun TextSnippetsSection(
-    snippets: List<String>,
-    onSnippetsChange: (List<String>) -> Unit,
+    snippets: List<KeyboardSettings.TextSnippet>,
+    onSnippetsChange: (List<KeyboardSettings.TextSnippet>) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    val normalizedDraft = KeyboardSettings.normalizeTextSnippets(listOf(draft)).firstOrNull().orEmpty()
-    val canAddSnippet = normalizedDraft.isNotBlank() &&
-        normalizedDraft !in snippets &&
+    var tagDraft by remember { mutableStateOf("") }
+    val normalizedDraft = KeyboardSettings.textSnippetFromText(
+        text = draft,
+        tags = KeyboardSettings.parseTextSnippetTags(tagDraft),
+    )
+    val canAddSnippet = normalizedDraft.text.isNotBlank() &&
+        snippets.none { it.text == normalizedDraft.text } &&
         snippets.size < KeyboardSettings.MAX_TEXT_SNIPPETS
 
     Surface(
@@ -480,10 +494,20 @@ private fun TextSnippetsSection(
                 modifier = Modifier.fillMaxWidth(),
             )
 
+            OutlinedTextField(
+                value = tagDraft,
+                onValueChange = { tagDraft = it },
+                label = { Text("Tags") },
+                placeholder = { Text("work, address, reply") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             Button(
                 onClick = {
                     onSnippetsChange(snippets + normalizedDraft)
                     draft = ""
+                    tagDraft = ""
                 },
                 enabled = canAddSnippet,
                 modifier = Modifier.fillMaxWidth(),
@@ -517,6 +541,13 @@ private fun TextSnippetsSection(
                     snippets.forEachIndexed { index, snippet ->
                         TextSnippetEditorRow(
                             snippet = snippet,
+                            onTagsChange = { tags ->
+                                onSnippetsChange(
+                                    snippets.toMutableList().apply {
+                                        this[index] = snippet.copy(tags = tags)
+                                    },
+                                )
+                            },
                             onRemove = {
                                 onSnippetsChange(
                                     snippets.toMutableList().apply {
@@ -534,13 +565,15 @@ private fun TextSnippetsSection(
 
 @Composable
 private fun TextSnippetEditorRow(
-    snippet: String,
+    snippet: KeyboardSettings.TextSnippet,
+    onTagsChange: (List<String>) -> Unit,
     onRemove: () -> Unit,
 ) {
+    var tagDraft by remember(snippet) { mutableStateOf(snippet.tags.joinToString(", ")) }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
         Surface(
             color = ZnKeyboardColors.Key,
@@ -548,14 +581,29 @@ private fun TextSnippetEditorRow(
             tonalElevation = 0.dp,
             modifier = Modifier.weight(1f),
         ) {
-            Text(
-                text = snippet,
-                color = ZnKeyboardColors.OnSurface,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
+            Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            )
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = snippet.text,
+                    color = ZnKeyboardColors.OnSurface,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                OutlinedTextField(
+                    value = tagDraft,
+                    onValueChange = { value ->
+                        tagDraft = value
+                        onTagsChange(KeyboardSettings.parseTextSnippetTags(value))
+                    },
+                    label = { Text("Tags") },
+                    placeholder = { Text("comma separated") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         IconButton(
