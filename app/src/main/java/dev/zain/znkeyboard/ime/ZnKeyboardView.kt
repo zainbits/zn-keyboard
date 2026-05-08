@@ -3,11 +3,15 @@ package dev.zain.znkeyboard.ime
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.SparseArray
 import android.util.TypedValue
@@ -16,8 +20,10 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import dev.zain.znkeyboard.KeyboardSettings
+import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 class ZnKeyboardView @JvmOverloads constructor(
     context: Context,
@@ -45,6 +51,31 @@ class ZnKeyboardView @JvmOverloads constructor(
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
     }
+    private val loadingGradientPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val loadingGlassPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.argb(76, 10, 12, 18)
+    }
+    private val loadingSparklePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = PALETTE.text
+    }
+    private val loadingSparklePath = Path().apply {
+        moveTo(0f, -1f)
+        lineTo(0.2f, -0.2f)
+        lineTo(1f, 0f)
+        lineTo(0.2f, 0.2f)
+        lineTo(0f, 1f)
+        lineTo(-0.2f, 0.2f)
+        lineTo(-1f, 0f)
+        lineTo(-0.2f, -0.2f)
+        close()
+    }
+    private val loadingGradientMatrix = Matrix()
+    private val loadingShaderBounds = RectF()
+    private var loadingGradientShader: LinearGradient? = null
 
     private var layoutMode = LayoutMode.Letters
     private var shiftState = ShiftState.Off
@@ -173,6 +204,9 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         hitTargets.forEach { hit ->
             drawKey(canvas, hit)
+        }
+        if (shortcutRowState.loading) {
+            postInvalidateOnAnimation()
         }
     }
 
@@ -402,10 +436,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun drawKey(canvas: Canvas, hit: KeyHit) {
         val key = hit.key
         val bounds = hit.visualBounds
-        val active = key.active || isKeyPressed(key.id)
+        val rewriteLoading = key.intent == KeyIntent.AgentRewrite && shortcutRowState.loading
+        val active = if (rewriteLoading) isKeyPressed(key.id) else key.active || isKeyPressed(key.id)
         val keyAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_KEY_ALPHA
+        val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
+
         keyPaint.style = Paint.Style.FILL
         keyPaint.color = when {
+            rewriteLoading -> PALETTE.aiLoadingSurface
             active -> PALETTE.accent
             key.role == KeyRole.Action -> PALETTE.action
             key.role == KeyRole.Function -> PALETTE.function
@@ -413,17 +451,23 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
         keyPaint.alpha = keyAlpha
 
-        val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
         canvas.drawRoundRect(bounds, radius, radius, keyPaint)
 
+        if (rewriteLoading) {
+            drawRewriteLoadingWash(canvas, bounds, radius)
+        }
+
         val contentColor = when {
+            rewriteLoading -> PALETTE.text
             active -> PALETTE.text
             key.role == KeyRole.Character -> PALETTE.text
             else -> PALETTE.mutedText
         }
         val contentAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_CONTENT_ALPHA
 
-        key.icon?.let {
+        if (rewriteLoading) {
+            drawRewriteLoadingContent(canvas, key.label, bounds, contentColor, contentAlpha)
+        } else key.icon?.let {
             drawIcon(canvas, it, bounds, contentColor, contentAlpha)
         } ?: run {
             val textSize = fitTextSize(key.label, bounds, key.role, key.largeLabel)
@@ -438,6 +482,111 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (key.id == "shift" && shiftState == ShiftState.Locked) {
             drawShiftLockIndicator(canvas, bounds, contentColor)
         }
+    }
+
+    private fun drawRewriteLoadingWash(canvas: Canvas, bounds: RectF, radius: Float) {
+        val shader = loadingGradientShader(bounds)
+        val progress = loadingProgress()
+        val offsetX = sin(TWO_PI * progress) * bounds.width() * 0.72f
+        loadingGradientMatrix.setTranslate(offsetX, 0f)
+        shader.setLocalMatrix(loadingGradientMatrix)
+
+        loadingGradientPaint.shader = shader
+        loadingGradientPaint.alpha = 255
+        canvas.drawRoundRect(bounds, radius, radius, loadingGradientPaint)
+        loadingGradientPaint.shader = null
+
+        // A translucent surface layer keeps the moving gradient from competing with the label.
+        canvas.drawRoundRect(bounds, radius, radius, loadingGlassPaint)
+    }
+
+    private fun drawRewriteLoadingContent(
+        canvas: Canvas,
+        label: String,
+        bounds: RectF,
+        color: Int,
+        alpha: Int,
+    ) {
+        val textSize = fitTextSize(label, bounds, KeyRole.Action, largeLabel = false)
+        textPaint.textSize = textSize
+        textPaint.color = color
+        textPaint.alpha = alpha
+
+        val metrics = textPaint.fontMetrics
+        val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
+        val labelWidth = textPaint.measureText(label)
+        val sparkleRadius = min(bounds.height() * 0.16f, dp(6.5f))
+        val labelGap = dp(6f)
+        val sparkleWidth = sparkleRadius * 2f
+        val totalWidth = labelWidth + labelGap + sparkleWidth
+
+        if (totalWidth > bounds.width() - dp(6f)) {
+            canvas.drawText(label, bounds.centerX(), baseline, textPaint)
+            return
+        }
+
+        val labelLeft = bounds.centerX() - totalWidth / 2f
+        textPaint.textAlign = Paint.Align.LEFT
+        canvas.drawText(label, labelLeft, baseline, textPaint)
+        textPaint.textAlign = Paint.Align.CENTER
+
+        val progress = loadingProgress()
+        val pulse = ((sin(TWO_PI * (progress + 0.12f)) + 1f) / 2f)
+        val scale = 0.78f + pulse * 0.28f
+        val rotation = progress * 360f
+        val sparkleCenterX = labelLeft + labelWidth + labelGap + sparkleRadius
+        val sparkleCenterY = bounds.centerY()
+        loadingSparklePaint.color = color
+        loadingSparklePaint.alpha = (150 + pulse * 105).roundToInt().coerceAtMost(alpha)
+
+        canvas.save()
+        canvas.translate(sparkleCenterX, sparkleCenterY)
+        canvas.rotate(rotation)
+        canvas.scale(sparkleRadius * scale, sparkleRadius * scale)
+        canvas.drawPath(loadingSparklePath, loadingSparklePaint)
+        canvas.restore()
+
+        val miniPulse = ((sin(TWO_PI * (progress + 0.58f)) + 1f) / 2f)
+        loadingSparklePaint.alpha = (72 + miniPulse * 80).roundToInt().coerceAtMost(alpha)
+        canvas.save()
+        canvas.translate(
+            sparkleCenterX + cos(TWO_PI * progress) * sparkleRadius * 1.1f,
+            sparkleCenterY + sin(TWO_PI * progress) * sparkleRadius * 0.72f,
+        )
+        canvas.rotate(-rotation * 2f + 35f)
+        canvas.scale(sparkleRadius * 0.36f, sparkleRadius * 0.36f)
+        canvas.drawPath(loadingSparklePath, loadingSparklePaint)
+        canvas.restore()
+    }
+
+    private fun loadingGradientShader(bounds: RectF): LinearGradient {
+        val existingShader = loadingGradientShader
+        if (
+            existingShader != null &&
+            loadingShaderBounds.left == bounds.left &&
+            loadingShaderBounds.top == bounds.top &&
+            loadingShaderBounds.right == bounds.right &&
+            loadingShaderBounds.bottom == bounds.bottom
+        ) {
+            return existingShader
+        }
+        loadingShaderBounds.set(bounds)
+        val gradientWidth = bounds.width() * 1.45f
+        return LinearGradient(
+            bounds.left - gradientWidth,
+            bounds.top,
+            bounds.right + gradientWidth,
+            bounds.bottom,
+            AI_LOADING_COLORS,
+            AI_LOADING_POSITIONS,
+            Shader.TileMode.CLAMP,
+        ).also { shader ->
+            loadingGradientShader = shader
+        }
+    }
+
+    private fun loadingProgress(): Float {
+        return (SystemClock.uptimeMillis() % AI_LOADING_CYCLE_MS) / AI_LOADING_CYCLE_MS.toFloat()
     }
 
     private fun drawIcon(canvas: Canvas, icon: KeyIcon, bounds: RectF, color: Int, alpha: Int) {
@@ -779,7 +928,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         return when (keyId) {
             "rewrite" -> KeySpec(
                 id = id,
-                label = "Rewrite",
+                label = if (shortcutRowState.loading) "Rewriting" else "Rewrite",
                 intent = KeyIntent.AgentRewrite,
                 weight = weight,
                 role = KeyRole.Action,
@@ -1020,6 +1169,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val function = Color.rgb(50, 50, 50)
         val action = Color.rgb(42, 42, 42)
         val accent = Color.rgb(48, 172, 226)
+        val aiLoadingSurface = Color.rgb(24, 24, 31)
         const val text = Color.WHITE
         val mutedText = Color.rgb(230, 230, 230)
     }
@@ -1034,6 +1184,18 @@ class ZnKeyboardView @JvmOverloads constructor(
     private companion object {
         const val DISABLED_KEY_ALPHA = 118
         const val DISABLED_CONTENT_ALPHA = 130
+        const val AI_LOADING_CYCLE_MS = 2200L
+        const val TWO_PI = 6.2831855f
+        val AI_LOADING_COLORS = intArrayOf(
+            Color.argb(0, 73, 216, 255),
+            Color.argb(88, 73, 216, 255),
+            Color.argb(128, 140, 108, 255),
+            Color.argb(118, 255, 95, 189),
+            Color.argb(104, 255, 204, 92),
+            Color.argb(112, 88, 230, 161),
+            Color.argb(0, 73, 216, 255),
+        )
+        val AI_LOADING_POSITIONS = floatArrayOf(0f, 0.18f, 0.34f, 0.5f, 0.66f, 0.82f, 1f)
     }
 }
 

@@ -30,6 +30,9 @@ object KeyboardSettings {
     const val MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI = 12
     const val MAX_CUSTOM_EMOJI_TAG_CHARS = 32
 
+    private const val BACKUP_FORMAT = "dev.zain.znkeyboard.settings-backup"
+    private const val BACKUP_SCHEMA_VERSION = 1
+    private const val BACKUP_JSON_INDENT = 2
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
@@ -546,6 +549,143 @@ object KeyboardSettings {
         )
     }
 
+    fun createBackupJson(context: Context): String {
+        val backup = JSONObject()
+            .put("format", BACKUP_FORMAT)
+            .put("schemaVersion", BACKUP_SCHEMA_VERSION)
+            .put("createdAtEpochMillis", System.currentTimeMillis())
+            .put("appId", context.packageName)
+            .put(
+                "excluded",
+                JSONArray().put("agentApiKey"),
+            )
+            .put(
+                "settings",
+                JSONObject()
+                    .put(
+                        "keyboard",
+                        JSONObject()
+                            .put("heightScale", readHeightScale(context))
+                            .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
+                            .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
+                            .put("shortcutRowOrder", stringArrayJson(readKeyboardRowOrder(context))),
+                    )
+                    .put("snippets", stringArrayJson(readTextSnippets(context)))
+                    .put(
+                        "emoji",
+                        JSONObject()
+                            .put("skinTone", readEmojiSkinTone(context).id)
+                            .put("recentRows", readRecentEmojiRows(context))
+                            .put("recentEmojis", stringArrayJson(readRecentEmojis(context)))
+                            .put("customTags", customEmojiTagsJson(readCustomEmojiTags(context))),
+                    )
+                    .put(
+                        "rewrite",
+                        JSONObject()
+                            .put("enabled", readAgentModeEnabled(context))
+                            .put("providerType", readAgentProviderType(context).id)
+                            .put("apiBaseUrl", readAgentApiBaseUrl(context))
+                            .put("model", readAgentModel(context))
+                            .put("openRouterProviderSlug", readOpenRouterProviderSlug(context))
+                            .put("reasoningMode", readAgentReasoningMode(context).id)
+                            .put("reasoningTextEnabled", readAgentReasoningTextEnabled(context)),
+                    ),
+            )
+
+        return backup.toString(BACKUP_JSON_INDENT)
+    }
+
+    fun restoreBackupJson(context: Context, backupJson: String): BackupRestoreResult {
+        val backup = JSONObject(backupJson)
+        if (backup.optString("format") != BACKUP_FORMAT) {
+            throw JSONException("Not a ZnKeyboard settings backup.")
+        }
+
+        val schemaVersion = backup.optInt("schemaVersion", -1)
+        if (schemaVersion !in 1..BACKUP_SCHEMA_VERSION) {
+            throw JSONException("Unsupported ZnKeyboard backup version.")
+        }
+
+        val settings = backup.optJSONObject("settings")
+            ?: throw JSONException("Backup is missing settings.")
+        val keyboard = settings.optJSONObject("keyboard") ?: JSONObject()
+        val emoji = settings.optJSONObject("emoji") ?: JSONObject()
+        val rewrite = settings.optJSONObject("rewrite") ?: JSONObject()
+
+        val heightScale = keyboard.optFiniteFloat("heightScale", readHeightScale(context))
+            .coerceIn(MIN_HEIGHT_SCALE, MAX_HEIGHT_SCALE)
+        val upperRowKeys = keyboard.optStringList("shortcutRowAKeys")
+            ?.let(::normalizeUpperRowKeyIds)
+            ?: readUpperRowKeyIds(context)
+        val secondRowButtons = keyboard.optStringList("shortcutRowBKeys")
+            ?.let(::normalizeSecondRowButtonIds)
+            ?: readSecondRowButtonIds(context)
+        val rowOrder = keyboard.optStringList("shortcutRowOrder")
+            ?.let(::normalizeKeyboardRowOrder)
+            ?: readKeyboardRowOrder(context)
+
+        val snippets = settings.optStringList("snippets")
+            ?.let(::normalizeTextSnippets)
+            ?: readTextSnippets(context)
+        val skinTone = emoji.optById(
+            key = "skinTone",
+            entries = EmojiSkinTone.entries,
+            defaultValue = readEmojiSkinTone(context),
+            idFor = EmojiSkinTone::id,
+        )
+        val recentRows = emoji.optInt("recentRows", readRecentEmojiRows(context))
+            .let(EmojiCatalog::normalizeRecentRowCount)
+        val recentEmojis = emoji.optStringList("recentEmojis")
+            ?.let(EmojiCatalog::normalizeRecentEmojis)
+            ?: readRecentEmojis(context)
+        val customEmojiTags = emoji.optCustomEmojiTags("customTags")
+            ?.let(::normalizeCustomEmojiTags)
+            ?: readCustomEmojiTags(context)
+
+        val providerType = rewrite.optById(
+            key = "providerType",
+            entries = AgentProviderType.entries,
+            defaultValue = readAgentProviderType(context),
+            idFor = AgentProviderType::id,
+        )
+        val reasoningMode = rewrite.optById(
+            key = "reasoningMode",
+            entries = AgentReasoningMode.entries,
+            defaultValue = readAgentReasoningMode(context),
+            idFor = AgentReasoningMode::id,
+        )
+
+        saveHeightScale(context, heightScale)
+        saveUpperRowKeyIds(context, upperRowKeys)
+        saveSecondRowButtonIds(context, secondRowButtons)
+        saveKeyboardRowOrder(context, rowOrder)
+        saveTextSnippets(context, snippets)
+        saveEmojiSkinTone(context, skinTone)
+        saveRecentEmojiRows(context, recentRows)
+        saveRecentEmojis(context, recentEmojis)
+        saveCustomEmojiTags(context, customEmojiTags)
+        saveAgentModeEnabled(context, rewrite.optBoolean("enabled", readAgentModeEnabled(context)))
+        saveAgentProviderType(context, providerType)
+        saveAgentApiBaseUrl(context, rewrite.optString("apiBaseUrl", readAgentApiBaseUrl(context)))
+        saveAgentModel(context, rewrite.optString("model", readAgentModel(context)))
+        saveOpenRouterProviderSlug(
+            context,
+            rewrite.optString("openRouterProviderSlug", readOpenRouterProviderSlug(context)),
+        )
+        saveAgentReasoningMode(context, reasoningMode)
+        saveAgentReasoningTextEnabled(
+            context,
+            rewrite.optBoolean("reasoningTextEnabled", readAgentReasoningTextEnabled(context)),
+        )
+
+        return BackupRestoreResult(
+            schemaVersion = schemaVersion,
+            snippetCount = snippets.size,
+            customEmojiTagCount = customEmojiTags.size,
+            recentEmojiCount = recentEmojis.size,
+        )
+    }
+
     private fun parseUpperRowKeyIds(stored: String): List<String>? {
         return parseStringArray(stored)?.let(::normalizeUpperRowKeyIds)
     }
@@ -691,6 +831,67 @@ object KeyboardSettings {
         return "${providerType.id}_$key"
     }
 
+    private fun stringArrayJson(values: List<String>): JSONArray {
+        return JSONArray().apply {
+            values.forEach(::put)
+        }
+    }
+
+    private fun customEmojiTagsJson(tagsByEmoji: Map<String, List<String>>): JSONArray {
+        return JSONArray().apply {
+            tagsByEmoji.forEach { (emoji, tags) ->
+                put(
+                    JSONObject()
+                        .put("emoji", emoji)
+                        .put("tags", stringArrayJson(tags)),
+                )
+            }
+        }
+    }
+
+    private fun JSONObject.optStringList(key: String): List<String>? {
+        val array = optJSONArray(key) ?: return null
+        return buildList {
+            for (index in 0 until array.length()) {
+                add(array.optString(index))
+            }
+        }
+    }
+
+    private fun JSONObject.optCustomEmojiTags(key: String): Map<String, List<String>>? {
+        val array = optJSONArray(key) ?: return null
+        return linkedMapOf<String, List<String>>().apply {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val tags = item.optJSONArray("tags") ?: continue
+                put(
+                    item.optString("emoji"),
+                    buildList {
+                        for (tagIndex in 0 until tags.length()) {
+                            add(tags.optString(tagIndex))
+                        }
+                    },
+                )
+            }
+        }
+    }
+
+    private fun JSONObject.optFiniteFloat(key: String, defaultValue: Float): Float {
+        if (!has(key)) return defaultValue
+        val value = optDouble(key, defaultValue.toDouble()).toFloat()
+        return if (value.isFinite()) value else defaultValue
+    }
+
+    private fun <T> JSONObject.optById(
+        key: String,
+        entries: List<T>,
+        defaultValue: T,
+        idFor: (T) -> String,
+    ): T {
+        val id = optString(key, "")
+        return entries.firstOrNull { idFor(it) == id } ?: defaultValue
+    }
+
     private fun getOrCreateAgentSecretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         (keyStore.getKey(KEYSTORE_AGENT_API_KEY_ALIAS, null) as? SecretKey)?.let { return it }
@@ -797,4 +998,12 @@ object KeyboardSettings {
         val ciphertext: String,
         val iv: String,
     )
+
+    data class BackupRestoreResult(
+        val schemaVersion: Int,
+        val snippetCount: Int,
+        val customEmojiTagCount: Int,
+        val recentEmojiCount: Int,
+    )
+
 }

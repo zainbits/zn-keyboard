@@ -2,11 +2,15 @@ package dev.zain.znkeyboard
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -52,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,11 +79,14 @@ import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -116,6 +124,76 @@ private fun SettingsScreen() {
     var agentApiKey by remember { mutableStateOf(KeyboardSettings.readAgentApiKey(context, agentProviderType)) }
     var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
+
+    fun refreshSettingsFromStorage() {
+        val nextProviderType = KeyboardSettings.readAgentProviderType(context)
+        heightScale = KeyboardSettings.readHeightScale(context)
+        upperRowKeyIds = KeyboardSettings.readUpperRowKeyIds(context)
+        secondRowButtonIds = KeyboardSettings.readSecondRowButtonIds(context)
+        keyboardRowOrder = KeyboardSettings.readKeyboardRowOrder(context)
+        emojiSkinTone = KeyboardSettings.readEmojiSkinTone(context)
+        recentEmojiRows = KeyboardSettings.readRecentEmojiRows(context)
+        customEmojiTags = KeyboardSettings.readCustomEmojiTags(context)
+        agentModeEnabled = KeyboardSettings.readAgentModeEnabled(context)
+        agentProviderType = nextProviderType
+        agentApiBaseUrl = KeyboardSettings.readAgentApiBaseUrl(context)
+        agentModel = KeyboardSettings.readAgentModel(context)
+        openRouterProviderSlug = KeyboardSettings.readOpenRouterProviderSlug(context)
+        agentReasoningMode = KeyboardSettings.readAgentReasoningMode(context)
+        agentReasoningTextEnabled = KeyboardSettings.readAgentReasoningTextEnabled(context)
+        agentApiKey = KeyboardSettings.readAgentApiKey(context, nextProviderType)
+        agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, nextProviderType)
+        textSnippets = KeyboardSettings.readTextSnippets(context)
+    }
+
+    val scope = rememberCoroutineScope()
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { writeSettingsBackup(context, uri) }
+            }
+            val message = result.fold(
+                onSuccess = { "Settings exported" },
+                onFailure = { error ->
+                    error.message?.takeIf { it.isNotBlank() } ?: "Could not export settings"
+                },
+            )
+            Toast.makeText(
+                context,
+                message,
+                if (result.isSuccess) Toast.LENGTH_SHORT else Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching { restoreSettingsBackup(context, uri) }
+            }
+            result
+                .onSuccess { restoreResult ->
+                    refreshSettingsFromStorage()
+                    Toast.makeText(
+                        context,
+                        "Settings restored (${restoreResult.snippetCount} snippets)",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .onFailure { error ->
+                    Toast.makeText(
+                        context,
+                        error.message?.takeIf { it.isNotBlank() } ?: "Could not import settings",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+        }
+    }
 
     fun updateUpperRowKeyIds(keyIds: List<String>) {
         val normalizedKeyIds = KeyboardSettings.normalizeUpperRowKeyIds(keyIds)
@@ -173,6 +251,11 @@ private fun SettingsScreen() {
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
             SystemSetupActions()
+
+            BackupRestoreSection(
+                onExport = { exportLauncher.launch(suggestedBackupFileName()) },
+                onImport = { importLauncher.launch(BACKUP_IMPORT_MIME_TYPES) },
+            )
 
             TextSnippetsSection(
                 snippets = textSnippets,
@@ -457,6 +540,87 @@ private fun TextSnippetEditorRow(
                 contentDescription = "Remove snippet",
                 tint = ZnKeyboardColors.Muted,
             )
+        }
+    }
+}
+
+@Composable
+private fun BackupRestoreSection(
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+) {
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_download_24),
+                        contentDescription = null,
+                        tint = ZnKeyboardColors.Accent,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Backup & restore",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = "JSON",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            Text(
+                text = "API keys stay out of backup files.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Button(
+                    onClick = onExport,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_download_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Export")
+                }
+
+                OutlinedButton(
+                    onClick = onImport,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_upload_24),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Import")
+                }
+            }
         }
     }
 }
@@ -1762,6 +1926,30 @@ private fun List<ModelOption>.filterForQuery(query: String): List<ModelOption> {
     }
 }
 
+private fun writeSettingsBackup(context: Context, uri: Uri) {
+    val output = context.contentResolver.openOutputStream(uri)
+        ?: throw IOException("Could not open export file.")
+    output.bufferedWriter(Charsets.UTF_8).use { writer ->
+        writer.write(KeyboardSettings.createBackupJson(context))
+    }
+}
+
+private fun restoreSettingsBackup(
+    context: Context,
+    uri: Uri,
+): KeyboardSettings.BackupRestoreResult {
+    val input = context.contentResolver.openInputStream(uri)
+        ?: throw IOException("Could not open import file.")
+    val backupJson = input.bufferedReader(Charsets.UTF_8).use { reader ->
+        reader.readText()
+    }
+    return KeyboardSettings.restoreBackupJson(context, backupJson)
+}
+
+private fun suggestedBackupFileName(): String {
+    return "znkeyboard-backup-${BACKUP_FILE_TIMESTAMP_FORMAT.format(LocalDateTime.now())}.json"
+}
+
 private data class ModelOption(
     val id: String,
     val name: String?,
@@ -1776,6 +1964,8 @@ private data class PickerItem(
 private const val MODEL_LOAD_DEBOUNCE_MS = 500L
 private const val MODEL_QUERY_DEBOUNCE_MS = 1_000L
 private const val MODEL_LOAD_TIMEOUT_MS = 10_000
+private val BACKUP_FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US)
+private val BACKUP_IMPORT_MIME_TYPES = arrayOf("application/json", "text/json", "text/plain")
 private val PICKER_MENU_WIDTH = 320.dp
 private val PICKER_MAX_HEIGHT = 280.dp
 private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp

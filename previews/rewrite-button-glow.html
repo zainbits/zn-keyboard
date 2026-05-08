@@ -1,0 +1,683 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rewrite Button AI Glow Preview</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070912;
+        --panel: rgba(15, 19, 31, 0.82);
+        --panel-border: rgba(255, 255, 255, 0.11);
+        --text: #f7f9ff;
+        --muted: #a5aec4;
+        --intensity: 0.78;
+        --speed: 6s;
+        --button-radius: 22px;
+        --rainbow: #49d8ff, #8c6cff, #ff5fbd, #ffcc5c, #58e6a1, #49d8ff;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 18% 10%, rgba(83, 122, 255, 0.28), transparent 34%),
+          radial-gradient(circle at 80% 0%, rgba(255, 95, 189, 0.22), transparent 30%),
+          radial-gradient(circle at 52% 88%, rgba(77, 218, 255, 0.13), transparent 34%),
+          linear-gradient(145deg, #04050a, var(--bg) 52%, #111425);
+      }
+
+      main {
+        width: min(1180px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 42px 0 56px;
+      }
+
+      .hero {
+        max-width: 860px;
+        margin-bottom: 24px;
+      }
+
+      .eyebrow {
+        margin-bottom: 12px;
+        color: #b7c2ff;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(38px, 7vw, 78px);
+        line-height: 0.96;
+        letter-spacing: -0.06em;
+      }
+
+      .subtitle {
+        max-width: 760px;
+        margin: 18px 0 0;
+        color: var(--muted);
+        font-size: clamp(16px, 2vw, 19px);
+        line-height: 1.6;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        margin: 26px 0 28px;
+      }
+
+      .control {
+        padding: 16px;
+        border: 1px solid var(--panel-border);
+        border-radius: 20px;
+        background: rgba(255, 255, 255, 0.055);
+        backdrop-filter: blur(18px);
+      }
+
+      .control label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 10px;
+        color: #dde3f8;
+        font-size: 13px;
+        font-weight: 800;
+      }
+
+      .control output {
+        color: #abb7ff;
+        font-variant-numeric: tabular-nums;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: #a6b1ff;
+      }
+
+      .showcase {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 18px;
+        margin-bottom: 18px;
+      }
+
+      .panel {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid var(--panel-border);
+        border-radius: 32px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.09), transparent 44%),
+          var(--panel);
+        box-shadow: 0 24px 90px rgba(0, 0, 0, 0.34);
+      }
+
+      .panel::before {
+        position: absolute;
+        inset: -160px -120px auto auto;
+        width: 340px;
+        height: 340px;
+        content: "";
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(124, 142, 255, 0.22), transparent 66%);
+        pointer-events: none;
+      }
+
+      .main-panel {
+        min-height: 500px;
+        padding: 28px;
+      }
+
+      .side-panel {
+        display: grid;
+        gap: 18px;
+      }
+
+      .mini-panel {
+        min-height: 240px;
+        padding: 24px;
+      }
+
+      .panel h2 {
+        margin: 0 0 9px;
+        font-size: 24px;
+        letter-spacing: -0.035em;
+      }
+
+      .mini-panel h2 {
+        font-size: 20px;
+      }
+
+      .panel p {
+        max-width: 560px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .stage {
+        position: relative;
+        display: grid;
+        min-height: 320px;
+        margin-top: 30px;
+        place-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at 50% 48%, rgba(255, 255, 255, 0.06), transparent 28%),
+          rgba(4, 6, 12, 0.56);
+      }
+
+      .mini-panel .stage {
+        min-height: 136px;
+        margin-top: 22px;
+      }
+
+      .mock-input {
+        position: absolute;
+        top: 22px;
+        left: 22px;
+        right: 22px;
+        padding: 14px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        color: #c7d0e6;
+        background: rgba(255, 255, 255, 0.055);
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .ai-button {
+        position: relative;
+        isolation: isolate;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        min-width: 194px;
+        min-height: 58px;
+        padding: 0 24px;
+        border: 0;
+        border-radius: var(--button-radius);
+        color: var(--text);
+        background: rgba(15, 18, 30, 0.92);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.16),
+          0 16px 34px rgba(0, 0, 0, 0.34);
+        font: inherit;
+        font-size: 16px;
+        font-weight: 850;
+        letter-spacing: -0.015em;
+      }
+
+      .mini-panel .ai-button {
+        min-width: 172px;
+        min-height: 52px;
+        font-size: 15px;
+      }
+
+      .spark {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        border-radius: 48% 52% 44% 56%;
+        background:
+          radial-gradient(circle at 35% 30%, white 0 14%, transparent 16%),
+          conic-gradient(from 220deg, var(--rainbow));
+        box-shadow: 0 0 18px rgba(133, 169, 255, 0.74);
+      }
+
+      .dots {
+        display: inline-flex;
+        gap: 4px;
+        margin-left: -4px;
+      }
+
+      .dots span {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: currentColor;
+        animation: dotPulse 1.25s ease-in-out infinite;
+      }
+
+      .dots span:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+
+      .dots span:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+
+      .gemini-flow {
+        border-radius: calc(var(--button-radius) + 22px);
+      }
+
+      .gemini-flow::before,
+      .gemini-flow::after {
+        position: absolute;
+        content: "";
+        pointer-events: none;
+      }
+
+      .gemini-flow::before {
+        inset: -34px;
+        z-index: -2;
+        border-radius: inherit;
+        background:
+          radial-gradient(circle at var(--x1) var(--y1), rgba(73, 216, 255, var(--intensity)), transparent 33%),
+          radial-gradient(circle at var(--x2) var(--y2), rgba(255, 95, 189, calc(var(--intensity) * 0.86)), transparent 31%),
+          radial-gradient(circle at var(--x3) var(--y3), rgba(255, 204, 92, calc(var(--intensity) * 0.74)), transparent 29%),
+          radial-gradient(circle at var(--x4) var(--y4), rgba(88, 230, 161, calc(var(--intensity) * 0.76)), transparent 30%);
+        filter: blur(16px);
+        opacity: 0.92;
+        animation: blobFlow var(--speed) ease-in-out infinite alternate;
+      }
+
+      .gemini-flow::after {
+        inset: -5px;
+        z-index: -1;
+        border-radius: calc(var(--button-radius) + 5px);
+        background: linear-gradient(115deg, var(--rainbow));
+        background-size: 260% 260%;
+        opacity: calc(var(--intensity) * 0.8);
+        animation: gradientSlide calc(var(--speed) * 0.72) linear infinite;
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+        padding: 2px;
+      }
+
+      .gemini-flow .ai-button {
+        background:
+          radial-gradient(circle at 35% 0%, rgba(120, 156, 255, 0.2), transparent 42%),
+          rgba(13, 16, 28, 0.93);
+      }
+
+      .siri-ring {
+        border-radius: calc(var(--button-radius) + 14px);
+      }
+
+      .siri-ring::before,
+      .siri-ring::after {
+        position: absolute;
+        inset: -10px;
+        z-index: -1;
+        content: "";
+        border-radius: inherit;
+        background: conic-gradient(from var(--angle), #3bdcff, #6965ff, #ff54c9, #ffcf5c, #50e38e, #3bdcff);
+        animation: spinRing var(--speed) linear infinite;
+      }
+
+      .siri-ring::before {
+        inset: -18px;
+        opacity: calc(var(--intensity) * 0.68);
+        filter: blur(18px);
+      }
+
+      .siri-ring::after {
+        padding: 4px;
+        opacity: calc(var(--intensity) * 0.96);
+        mask:
+          linear-gradient(#000 0 0) content-box,
+          linear-gradient(#000 0 0);
+        mask-composite: exclude;
+      }
+
+      .rainbow-fill .ai-button {
+        overflow: hidden;
+        background:
+          linear-gradient(100deg, #46d9ff, #7f6cff, #ff5dbb, #ffcf5d, #54e6a4, #46d9ff);
+        background-size: 360% 360%;
+        box-shadow:
+          0 0 34px rgba(102, 138, 255, calc(var(--intensity) * 0.52)),
+          0 18px 44px rgba(0, 0, 0, 0.42);
+        animation: gradientSlide calc(var(--speed) * 0.75) linear infinite;
+      }
+
+      .rainbow-fill .ai-button::before {
+        position: absolute;
+        inset: 2px;
+        z-index: -1;
+        content: "";
+        border-radius: calc(var(--button-radius) - 2px);
+        background: rgba(8, 11, 20, 0.48);
+        backdrop-filter: blur(18px) saturate(1.35);
+      }
+
+      .rainbow-fill .ai-button::after {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background: linear-gradient(105deg, transparent 24%, rgba(255, 255, 255, 0.28), transparent 62%);
+        transform: translateX(-120%);
+        animation: shine calc(var(--speed) * 0.82) ease-in-out infinite;
+      }
+
+      .normal-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin-top: 22px;
+        padding: 16px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 22px;
+        color: var(--muted);
+        background: rgba(255, 255, 255, 0.04);
+        font-size: 14px;
+      }
+
+      .normal-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 42px;
+        padding: 0 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 16px;
+        color: #e9eeff;
+        background: rgba(255, 255, 255, 0.065);
+        font: inherit;
+        font-weight: 800;
+      }
+
+      .note {
+        padding: 18px 20px;
+        border: 1px solid var(--panel-border);
+        border-radius: 24px;
+        color: #bcc6dc;
+        background: rgba(255, 255, 255, 0.05);
+        line-height: 1.6;
+      }
+
+      .note strong {
+        color: white;
+      }
+
+      @property --angle {
+        syntax: "<angle>";
+        inherits: false;
+        initial-value: 0deg;
+      }
+
+      @property --x1 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 12%;
+      }
+
+      @property --y1 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 28%;
+      }
+
+      @property --x2 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 74%;
+      }
+
+      @property --y2 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 30%;
+      }
+
+      @property --x3 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 82%;
+      }
+
+      @property --y3 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 78%;
+      }
+
+      @property --x4 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 18%;
+      }
+
+      @property --y4 {
+        syntax: "<percentage>";
+        inherits: false;
+        initial-value: 76%;
+      }
+
+      @keyframes blobFlow {
+        0% {
+          --x1: 8%;
+          --y1: 30%;
+          --x2: 78%;
+          --y2: 24%;
+          --x3: 88%;
+          --y3: 78%;
+          --x4: 18%;
+          --y4: 82%;
+          transform: rotate(-2deg) scale(1);
+        }
+        50% {
+          --x1: 42%;
+          --y1: 12%;
+          --x2: 90%;
+          --y2: 52%;
+          --x3: 50%;
+          --y3: 92%;
+          --x4: 4%;
+          --y4: 46%;
+          transform: rotate(2deg) scale(1.04);
+        }
+        100% {
+          --x1: 92%;
+          --y1: 28%;
+          --x2: 50%;
+          --y2: 10%;
+          --x3: 18%;
+          --y3: 74%;
+          --x4: 70%;
+          --y4: 88%;
+          transform: rotate(-1deg) scale(1.02);
+        }
+      }
+
+      @keyframes spinRing {
+        to {
+          --angle: 360deg;
+        }
+      }
+
+      @keyframes gradientSlide {
+        0% {
+          background-position: 0% 50%;
+        }
+        100% {
+          background-position: 200% 50%;
+        }
+      }
+
+      @keyframes shine {
+        0%,
+        36% {
+          opacity: 0;
+          transform: translateX(-120%);
+        }
+        50% {
+          opacity: 1;
+        }
+        76%,
+        100% {
+          opacity: 0;
+          transform: translateX(120%);
+        }
+      }
+
+      @keyframes dotPulse {
+        0%,
+        80%,
+        100% {
+          transform: translateY(0);
+          opacity: 0.28;
+        }
+        40% {
+          transform: translateY(-3px);
+          opacity: 0.92;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.001ms !important;
+          animation-iteration-count: 1 !important;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .controls,
+        .showcase {
+          grid-template-columns: 1fr;
+        }
+
+        .side-panel {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="eyebrow">Second pass preview</div>
+        <h1>Make the button feel like AI is thinking</h1>
+        <p class="subtitle">
+          This version is intentionally less timid: bigger glow, visible color movement, and
+          three genuinely different treatments so we can choose the right app direction.
+        </p>
+      </section>
+
+      <section class="controls" aria-label="Preview controls">
+        <div class="control">
+          <label for="intensity">
+            Glow intensity
+            <output id="intensityValue">78%</output>
+          </label>
+          <input id="intensity" type="range" min="35" max="100" value="78" />
+        </div>
+        <div class="control">
+          <label for="speed">
+            Flow speed
+            <output id="speedValue">6.0s</output>
+          </label>
+          <input id="speed" type="range" min="28" max="95" value="60" />
+        </div>
+      </section>
+
+      <section class="showcase" aria-label="AI rewrite loading states">
+        <article class="panel main-panel">
+          <h2>Gemini-Style Flowing Aura</h2>
+          <p>
+            This is closest to the modern AI look: soft colored blobs move behind the button,
+            while a thin animated rainbow edge keeps the actual pill readable.
+          </p>
+          <div class="stage">
+            <div class="mock-input">Rewrite this so it sounds clearer, warmer, and more confident.</div>
+            <div class="gemini-flow">
+              <button class="ai-button" type="button">
+                <span class="spark" aria-hidden="true"></span>
+                Rewriting
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              </button>
+            </div>
+          </div>
+          <div class="normal-row">
+            <span>Normal state stays simple. The rainbow only appears while waiting for the LLM.</span>
+            <button class="normal-button" type="button">
+              <span class="spark" aria-hidden="true"></span>
+              Rewrite
+            </button>
+          </div>
+        </article>
+
+        <div class="side-panel">
+          <article class="panel mini-panel">
+            <h2>Siri-Style Animated Ring</h2>
+            <p>A more Apple-like glowing ring around a dark pill.</p>
+            <div class="stage">
+              <div class="siri-ring">
+                <button class="ai-button" type="button">
+                  <span class="spark" aria-hidden="true"></span>
+                  Rewriting
+                  <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+                </button>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel mini-panel rainbow-fill">
+            <h2>Rainbow Glass Fill</h2>
+            <p>The loudest option: the button itself has a moving gradient under glass.</p>
+            <div class="stage">
+              <button class="ai-button" type="button">
+                <span class="spark" aria-hidden="true"></span>
+                Rewriting
+                <span class="dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <p class="note">
+        <strong>Better app direction:</strong> I now think the Gemini-Style Flowing Aura is closer
+        to what you described: a subtle rainbow that flows and glows, not just a blue button
+        and not just a thin static-looking border.
+      </p>
+    </main>
+
+    <script>
+      const root = document.documentElement;
+
+      const intensity = document.getElementById("intensity");
+      const intensityValue = document.getElementById("intensityValue");
+      const speed = document.getElementById("speed");
+      const speedValue = document.getElementById("speedValue");
+
+      function updateIntensity() {
+        const value = Number(intensity.value);
+        root.style.setProperty("--intensity", (value / 100).toFixed(2));
+        intensityValue.textContent = `${value}%`;
+      }
+
+      function updateSpeed() {
+        const seconds = (Number(speed.value) / 10).toFixed(1);
+        root.style.setProperty("--speed", `${seconds}s`);
+        speedValue.textContent = `${seconds}s`;
+      }
+
+      intensity.addEventListener("input", updateIntensity);
+      speed.addEventListener("input", updateSpeed);
+      updateIntensity();
+      updateSpeed();
+    </script>
+  </body>
+</html>
