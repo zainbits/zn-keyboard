@@ -1528,19 +1528,58 @@ private fun RowButtonsSection(
                     )
                 }
             } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                var draggingKeyIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
+                var keyDropIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
+                val activeDraggingKeyIndex = draggingKeyIndex?.takeIf { it in keyIds.indices }
+                val activeKeyDropIndex = keyDropIndex?.takeIf { it in keyIds.indices }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(reorderListHeight(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, keyIds.size)),
+                ) {
+                    if (activeDraggingKeyIndex != null && activeKeyDropIndex != null) {
+                        ReorderDropShadow(
+                            index = activeKeyDropIndex,
+                            label = labelForKey(keyIds[activeDraggingKeyIndex]),
+                            height = SHORTCUT_KEY_ITEM_HEIGHT,
+                            modifier = Modifier
+                                .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, activeKeyDropIndex))
+                                .zIndex(0f),
+                        )
+                    }
+
                     keyIds.forEachIndexed { index, keyId ->
+                        val visualIndex = reorderVisualIndex(index, activeDraggingKeyIndex, activeKeyDropIndex)
                         UpperRowKeyEditor(
                             index = index,
                             keyId = keyId,
+                            keyCount = keyIds.size,
                             keyOptions = keyOptions,
                             labelForKey = labelForKey,
+                            modifier = Modifier
+                                .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, visualIndex))
+                                .zIndex(if (activeDraggingKeyIndex == index) 2f else 1f),
+                            onDragStart = {
+                                draggingKeyIndex = index
+                                keyDropIndex = index
+                            },
+                            onDragTargetChange = { targetIndex ->
+                                keyDropIndex = targetIndex
+                            },
+                            onDragFinish = {
+                                draggingKeyIndex = null
+                                keyDropIndex = null
+                            },
                             onKeyChange = { nextKeyId ->
                                 onKeyIdsChange(
                                     keyIds.toMutableList().apply {
                                         set(index, nextKeyId)
                                     },
                                 )
+                            },
+                            onMove = { fromIndex, toIndex ->
+                                onKeyIdsChange(keyIds.moveItem(fromIndex, toIndex))
                             },
                             onRemove = {
                                 onKeyIdsChange(
@@ -1591,65 +1630,119 @@ private fun RowButtonsSection(
 private fun UpperRowKeyEditor(
     index: Int,
     keyId: String,
+    keyCount: Int,
     keyOptions: List<KeyboardSettings.UpperRowKeyOption>,
     labelForKey: (String) -> String,
+    modifier: Modifier = Modifier,
+    onDragStart: () -> Unit,
+    onDragTargetChange: (Int) -> Unit,
+    onDragFinish: () -> Unit,
     onKeyChange: (String) -> Unit,
+    onMove: (Int, Int) -> Unit,
     onRemove: () -> Unit,
 ) {
     var expanded by remember(index, keyId) { mutableStateOf(false) }
     val selectedLabel = labelForKey(keyId)
+    val currentIndex by rememberUpdatedState(index)
+    val density = LocalDensity.current
+    val itemDistancePx = with(density) { (SHORTCUT_KEY_ITEM_HEIGHT + SHORTCUT_KEY_ITEM_GAP).toPx() }
+    var dragging by remember(index, keyId) { mutableStateOf(false) }
+    var dragOffset by remember(index, keyId) { mutableFloatStateOf(0f) }
 
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        color = if (dragging) ZnKeyboardColors.FunctionKey else Color.Transparent,
+        shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(SHORTCUT_KEY_ITEM_HEIGHT)
+            .offset { IntOffset(0, dragOffset.roundToInt()) }
+            .pointerInput(index, keyId, keyCount, itemDistancePx) {
+                detectDragGesturesAfterLongPress(
+                    onDragStart = {
+                        dragging = true
+                        onDragStart()
+                    },
+                    onDragCancel = {
+                        dragging = false
+                        dragOffset = 0f
+                        onDragFinish()
+                    },
+                    onDragEnd = {
+                        val targetIndex = reorderTargetIndex(currentIndex, dragOffset, itemDistancePx, keyCount)
+                        dragging = false
+                        dragOffset = 0f
+                        onDragFinish()
+                        if (targetIndex != currentIndex) {
+                            onMove(currentIndex, targetIndex)
+                        }
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffset = (dragOffset + dragAmount.y)
+                            .coerceIn(
+                                -currentIndex * itemDistancePx,
+                                (keyCount - 1 - currentIndex) * itemDistancePx,
+                            )
+                        onDragTargetChange(reorderTargetIndex(currentIndex, dragOffset, itemDistancePx, keyCount))
+                    },
+                )
+            },
     ) {
-        Text(
-            text = "${index + 1}",
-            color = ZnKeyboardColors.Muted,
-            style = MaterialTheme.typography.labelLarge,
-            modifier = Modifier.width(24.dp),
-        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "${index + 1}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.width(24.dp),
+            )
 
-        Box(modifier = Modifier.weight(1f)) {
-            OutlinedButton(
-                onClick = { expanded = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-            ) {
-                Text(
-                    text = selectedLabel,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { expanded = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+                ) {
+                    Text(
+                        text = selectedLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+
+                FloatingPickerMenu(
+                    expanded = expanded,
+                    items = keyOptions.map { option ->
+                        PickerItem(
+                            id = option.id,
+                            title = option.label,
+                        )
+                    },
+                    onDismissRequest = { expanded = false },
+                    onItemSelected = { item ->
+                        expanded = false
+                        onKeyChange(item.id)
+                    },
                 )
             }
 
-            FloatingPickerMenu(
-                expanded = expanded,
-                items = keyOptions.map { option ->
-                    PickerItem(
-                        id = option.id,
-                        title = option.label,
-                    )
-                },
-                onDismissRequest = { expanded = false },
-                onItemSelected = { item ->
-                    expanded = false
-                    onKeyChange(item.id)
-                },
-            )
-        }
-
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier.size(44.dp),
-        ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_delete_24),
-                contentDescription = "Remove key",
-                tint = ZnKeyboardColors.Muted,
-            )
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(44.dp),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_delete_24),
+                    contentDescription = "Remove key",
+                    tint = ZnKeyboardColors.Muted,
+                )
+            }
         }
     }
 }
@@ -1696,12 +1789,47 @@ private fun KeyboardRowOrderSection(
                 )
             }
 
-            Column(verticalArrangement = Arrangement.spacedBy(ROW_ORDER_ITEM_GAP)) {
+            var draggingRowIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
+            var rowDropIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
+            val activeDraggingRowIndex = draggingRowIndex?.takeIf { it in normalizedOrder.indices }
+            val activeRowDropIndex = rowDropIndex?.takeIf { it in normalizedOrder.indices }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(reorderListHeight(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, normalizedOrder.size)),
+            ) {
+                if (activeDraggingRowIndex != null && activeRowDropIndex != null) {
+                    ReorderDropShadow(
+                        index = activeRowDropIndex,
+                        label = KeyboardSettings.labelForKeyboardRow(normalizedOrder[activeDraggingRowIndex]),
+                        height = ROW_ORDER_ITEM_HEIGHT,
+                        modifier = Modifier
+                            .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, activeRowDropIndex))
+                            .zIndex(0f),
+                    )
+                }
+
                 normalizedOrder.forEachIndexed { index, rowId ->
+                    val visualIndex = reorderVisualIndex(index, activeDraggingRowIndex, activeRowDropIndex)
                     KeyboardRowOrderItem(
                         index = index,
                         rowId = rowId,
                         rowCount = normalizedOrder.size,
+                        modifier = Modifier
+                            .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, visualIndex))
+                            .zIndex(if (activeDraggingRowIndex == index) 2f else 1f),
+                        onDragStart = {
+                            draggingRowIndex = index
+                            rowDropIndex = index
+                        },
+                        onDragTargetChange = { targetIndex ->
+                            rowDropIndex = targetIndex
+                        },
+                        onDragFinish = {
+                            draggingRowIndex = null
+                            rowDropIndex = null
+                        },
                         onMove = { fromIndex, toIndex ->
                             onRowOrderChange(normalizedOrder.moveItem(fromIndex, toIndex))
                         },
@@ -1726,6 +1854,10 @@ private fun KeyboardRowOrderItem(
     index: Int,
     rowId: String,
     rowCount: Int,
+    modifier: Modifier = Modifier,
+    onDragStart: () -> Unit,
+    onDragTargetChange: (Int) -> Unit,
+    onDragFinish: () -> Unit,
     onMove: (Int, Int) -> Unit,
 ) {
     val currentIndex by rememberUpdatedState(index)
@@ -1738,32 +1870,38 @@ private fun KeyboardRowOrderItem(
         color = if (dragging) ZnKeyboardColors.FunctionKey else ZnKeyboardColors.Key,
         shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
         tonalElevation = 0.dp,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(ROW_ORDER_ITEM_HEIGHT)
-            .zIndex(if (dragging) 1f else 0f)
             .offset { IntOffset(0, dragOffset.roundToInt()) }
             .pointerInput(rowId, rowCount, itemDistancePx) {
                 detectDragGesturesAfterLongPress(
                     onDragStart = {
                         dragging = true
+                        onDragStart()
                     },
                     onDragCancel = {
                         dragging = false
                         dragOffset = 0f
+                        onDragFinish()
                     },
                     onDragEnd = {
-                        val targetIndex = (currentIndex + (dragOffset / itemDistancePx).roundToInt())
-                            .coerceIn(0, rowCount - 1)
+                        val targetIndex = reorderTargetIndex(currentIndex, dragOffset, itemDistancePx, rowCount)
                         dragging = false
                         dragOffset = 0f
+                        onDragFinish()
                         if (targetIndex != currentIndex) {
                             onMove(currentIndex, targetIndex)
                         }
                     },
                     onDrag = { change, dragAmount ->
                         change.consume()
-                        dragOffset += dragAmount.y
+                        dragOffset = (dragOffset + dragAmount.y)
+                            .coerceIn(
+                                -currentIndex * itemDistancePx,
+                                (rowCount - 1 - currentIndex) * itemDistancePx,
+                            )
+                        onDragTargetChange(reorderTargetIndex(currentIndex, dragOffset, itemDistancePx, rowCount))
                     },
                 )
             },
@@ -1775,12 +1913,6 @@ private fun KeyboardRowOrderItem(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_drag_handle_24),
-                contentDescription = "Move row",
-                tint = ZnKeyboardColors.Muted,
-                modifier = Modifier.size(22.dp),
-            )
             Text(
                 text = "${index + 1}",
                 color = ZnKeyboardColors.Muted,
@@ -1790,6 +1922,46 @@ private fun KeyboardRowOrderItem(
             Text(
                 text = KeyboardSettings.labelForKeyboardRow(rowId),
                 color = ZnKeyboardColors.OnSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReorderDropShadow(
+    index: Int,
+    label: String,
+    height: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = ZnKeyboardColors.Accent.copy(alpha = 0.18f),
+        shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "${index + 1}",
+                color = ZnKeyboardColors.Accent,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.width(24.dp),
+            )
+            Text(
+                text = label,
+                color = ZnKeyboardColors.OnSurface.copy(alpha = 0.72f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium,
@@ -1849,6 +2021,38 @@ private fun nextRowButtonId(
     return preferredKeyIds.firstOrNull { it !in currentKeyIds }
         ?: keyOptions.firstOrNull { it.id !in currentKeyIds }?.id
         ?: keyOptions.first().id
+}
+
+private fun reorderListHeight(itemHeight: Dp, itemGap: Dp, itemCount: Int): Dp {
+    return itemHeight * itemCount.toFloat() + itemGap * (itemCount - 1).coerceAtLeast(0).toFloat()
+}
+
+private fun reorderItemY(itemHeight: Dp, itemGap: Dp, index: Int): Dp {
+    return (itemHeight + itemGap) * index.toFloat()
+}
+
+private fun reorderTargetIndex(
+    currentIndex: Int,
+    dragOffset: Float,
+    itemDistancePx: Float,
+    itemCount: Int,
+): Int {
+    return (currentIndex + (dragOffset / itemDistancePx).roundToInt()).coerceIn(0, itemCount - 1)
+}
+
+private fun reorderVisualIndex(
+    index: Int,
+    draggingIndex: Int?,
+    targetIndex: Int?,
+): Int {
+    if (draggingIndex == null || targetIndex == null || draggingIndex == targetIndex) return index
+
+    return when {
+        index == draggingIndex -> index
+        draggingIndex < targetIndex && index in (draggingIndex + 1)..targetIndex -> index - 1
+        draggingIndex > targetIndex && index in targetIndex until draggingIndex -> index + 1
+        else -> index
+    }
 }
 
 private fun <T> List<T>.moveItem(fromIndex: Int, toIndex: Int): List<T> {
@@ -1971,6 +2175,8 @@ private val PICKER_MAX_HEIGHT = 280.dp
 private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp
 private val REASONING_PICKER_MAX_HEIGHT = 260.dp
 private val SKIN_TONE_PICKER_MAX_HEIGHT = 260.dp
+private val SHORTCUT_KEY_ITEM_HEIGHT = 48.dp
+private val SHORTCUT_KEY_ITEM_GAP = 8.dp
 private val ROW_ORDER_ITEM_HEIGHT = 48.dp
 private val ROW_ORDER_ITEM_GAP = 8.dp
 private val SECTION_CORNER_RADIUS = 8.dp
