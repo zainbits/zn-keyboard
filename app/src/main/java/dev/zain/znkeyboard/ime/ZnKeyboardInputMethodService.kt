@@ -45,6 +45,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
     private var defaultEmojiSkinTone = EmojiSkinTone.Default
     private var customEmojiTags: Map<String, List<String>> = emptyMap()
+    private var emojiSuggestionTags: List<EmojiSuggestionTag> = emptyList()
+    private var spacebarEmojiSuggestion: String? = null
+    private var pendingEmojiSuggestionRefresh: Runnable? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var activeSurface = KeyboardSurface.Keyboard
     private var activeRequestTarget: AgentEditTarget? = null
@@ -58,9 +61,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
         customEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
+        rebuildEmojiSuggestionTags()
         val keyboard = ZnKeyboardView(this).also { view ->
             keyboardView = view
             view.callback = this
+            view.setSpacebarEmojiSuggestion(spacebarEmojiSuggestion)
         }
         val emojiSearch = EmojiSearchView(this).also { view ->
             emojiSearchView = view
@@ -103,6 +108,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         currentEditorInfo = attribute
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
+        scheduleEmojiSuggestionRefresh(delayMillis = 0L)
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
@@ -112,17 +118,35 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         applyKeyboardSettings()
         keyboardView?.setEnterLabel(resolveEnterLabel(info))
         renderSecondRow()
+        scheduleEmojiSuggestionRefresh(delayMillis = 0L)
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboardView?.clearLatchedModifiers()
+        cancelEmojiSuggestionRefresh()
+        setSpacebarEmojiSuggestion(null)
         resetAgentState(returnToKeyboard = true)
         super.onFinishInputView(finishingInput)
     }
 
     override fun onDestroy() {
         requestGeneration++
+        cancelEmojiSuggestionRefresh()
         super.onDestroy()
+    }
+
+    override fun onUpdateSelection(
+        oldSelStart: Int,
+        oldSelEnd: Int,
+        newSelStart: Int,
+        newSelEnd: Int,
+        candidatesStart: Int,
+        candidatesEnd: Int,
+    ) {
+        super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
+        if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
+            scheduleEmojiSuggestionRefresh()
+        }
     }
 
     override fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState) {
@@ -178,6 +202,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         persistRecentEmojis(updatedRecentEmojis)
     }
 
+    override fun onSpacebarEmojiSuggestionSelected(emoji: String) {
+        handleText(emoji, ModifierState(ctrl = false, alt = false))
+        persistRecentEmojis(EmojiCatalog.promoteRecentEmoji(emoji, recentEmojis))
+    }
+
     override fun onSnippetSelected(snippet: String) {
         handleText(snippet, ModifierState(ctrl = false, alt = false))
         showKeyboardPanel()
@@ -219,8 +248,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun applyKeyboardSettings() {
         val heightScale = KeyboardSettings.readHeightScale(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
-        defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
-        customEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
+        val updatedDefaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
+        val updatedCustomEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
+        val suggestionInputsChanged = defaultEmojiSkinTone != updatedDefaultEmojiSkinTone ||
+            customEmojiTags != updatedCustomEmojiTags
+        defaultEmojiSkinTone = updatedDefaultEmojiSkinTone
+        customEmojiTags = updatedCustomEmojiTags
+        if (suggestionInputsChanged) {
+            rebuildEmojiSuggestionTags()
+            scheduleEmojiSuggestionRefresh(delayMillis = 0L)
+        }
         keyboardView?.let { view ->
             view.setHeightScale(heightScale)
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
@@ -369,6 +406,112 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
     }
 
+    private fun rebuildEmojiSuggestionTags() {
+        emojiSuggestionTags = buildList {
+            customEmojiTags.forEach { (emoji, tags) ->
+                val entry = EmojiCatalog.entryForEmoji(emoji) ?: return@forEach
+                val displayEmoji = EmojiCatalog.displayEmoji(entry, defaultEmojiSkinTone)
+                tags.forEach { tag ->
+                    val tokens = tokenizeEmojiSuggestionText(tag)
+                    if (tokens.isNotEmpty()) {
+                        add(EmojiSuggestionTag(emoji = displayEmoji, tokens = tokens))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun scheduleEmojiSuggestionRefresh(delayMillis: Long = EMOJI_SUGGESTION_REFRESH_DELAY_MS) {
+        cancelEmojiSuggestionRefresh()
+        if (isSensitiveEditor(currentEditorInfo) || emojiSuggestionTags.isEmpty()) {
+            setSpacebarEmojiSuggestion(null)
+            return
+        }
+
+        val refresh = Runnable {
+            pendingEmojiSuggestionRefresh = null
+            refreshEmojiSuggestion()
+        }
+        pendingEmojiSuggestionRefresh = refresh
+        if (delayMillis <= 0L) {
+            mainHandler.post(refresh)
+        } else {
+            mainHandler.postDelayed(refresh, delayMillis)
+        }
+    }
+
+    private fun cancelEmojiSuggestionRefresh() {
+        pendingEmojiSuggestionRefresh?.let(mainHandler::removeCallbacks)
+        pendingEmojiSuggestionRefresh = null
+    }
+
+    private fun refreshEmojiSuggestion() {
+        if (isSensitiveEditor(currentEditorInfo) || emojiSuggestionTags.isEmpty()) {
+            setSpacebarEmojiSuggestion(null)
+            return
+        }
+
+        val beforeCursor = currentInputConnection
+            ?.getTextBeforeCursor(EMOJI_SUGGESTION_CONTEXT_CHARS, 0)
+            ?.toString()
+            .orEmpty()
+        setSpacebarEmojiSuggestion(findEmojiSuggestionForContext(beforeCursor))
+    }
+
+    private fun setSpacebarEmojiSuggestion(emoji: String?) {
+        if (spacebarEmojiSuggestion == emoji) return
+        spacebarEmojiSuggestion = emoji
+        keyboardView?.setSpacebarEmojiSuggestion(emoji)
+    }
+
+    private fun findEmojiSuggestionForContext(context: String): String? {
+        val contextTokens = tokenizeEmojiSuggestionText(context)
+        if (contextTokens.isEmpty()) return null
+
+        var bestMatch: EmojiSuggestionMatch? = null
+        emojiSuggestionTags.forEach { suggestion ->
+            val startIndex = contextTokens.lastIndexOfSequence(suggestion.tokens)
+            if (startIndex < 0) return@forEach
+
+            val match = EmojiSuggestionMatch(
+                emoji = suggestion.emoji,
+                startIndex = startIndex,
+                endIndex = startIndex + suggestion.tokens.lastIndex,
+            )
+            val currentBest = bestMatch
+            if (
+                currentBest == null ||
+                match.endIndex > currentBest.endIndex ||
+                (match.endIndex == currentBest.endIndex && match.startIndex < currentBest.startIndex)
+            ) {
+                bestMatch = match
+            }
+        }
+        return bestMatch?.emoji
+    }
+
+    private fun tokenizeEmojiSuggestionText(value: String): List<String> {
+        return value
+            .lowercase(Locale.US)
+            .split(EMOJI_SUGGESTION_TOKEN_SPLIT_REGEX)
+            .filter { it.isNotBlank() }
+    }
+
+    private fun List<String>.lastIndexOfSequence(sequence: List<String>): Int {
+        if (sequence.isEmpty() || sequence.size > size) return -1
+        for (startIndex in size - sequence.size downTo 0) {
+            var matches = true
+            for (sequenceIndex in sequence.indices) {
+                if (this[startIndex + sequenceIndex] != sequence[sequenceIndex]) {
+                    matches = false
+                    break
+                }
+            }
+            if (matches) return startIndex
+        }
+        return -1
+    }
+
     private fun handleEmojiSearchKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
         if (modifiers.hasHardwareMeta) {
             return true
@@ -397,7 +540,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 return
             }
         }
-        inputConnection.commitText(value, 1)
+        if (inputConnection.commitText(value, 1)) {
+            scheduleEmojiSuggestionRefresh()
+        }
     }
 
     private fun handleBackspace(modifiers: ModifierState) {
@@ -406,6 +551,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         // TYPE_NULL editors such as terminals expect raw key events, not surrounding-text edits.
         if (isRawKeyEventEditor(currentEditorInfo)) {
             sendKey(KeyEvent.KEYCODE_DEL, modifiers)
+            scheduleEmojiSuggestionRefresh()
             return
         }
 
@@ -419,6 +565,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 }
             }
         }
+        scheduleEmojiSuggestionRefresh()
     }
 
     private fun handleEnter(modifiers: ModifierState) {
@@ -433,6 +580,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             inputConnection.performEditorAction(action)
         } else {
             sendKey(KeyEvent.KEYCODE_ENTER, modifiers)
+            scheduleEmojiSuggestionRefresh()
         }
     }
 
@@ -1139,6 +1287,17 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val selectionEnd: Int,
     )
 
+    private data class EmojiSuggestionTag(
+        val emoji: String,
+        val tokens: List<String>,
+    )
+
+    private data class EmojiSuggestionMatch(
+        val emoji: String,
+        val startIndex: Int,
+        val endIndex: Int,
+    )
+
     private data class AgentEditTarget(
         val originalText: String,
         val replaceStart: Int,
@@ -1187,6 +1346,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private companion object {
         const val TAG = "ZnKeyboardAgent"
         const val MAX_REWRITE_SOURCE_CHARS = 12_000
+        const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
+        const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
         const val REQUEST_TIMEOUT_MS = 30_000
         const val MIN_REWRITE_LLM_TOKENS = 2_000
         const val MAX_REWRITE_LLM_TOKENS = 6_000
@@ -1197,6 +1358,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val WHATSAPP_PROMPT_ASSET = "prompts/apps/whatsapp.md"
         const val WHATSAPP_PACKAGE_NAME = "com.whatsapp"
         const val WHATSAPP_BUSINESS_PACKAGE_NAME = "com.whatsapp.w4b"
+        val EMOJI_SUGGESTION_TOKEN_SPLIT_REGEX = Regex("[^\\p{L}\\p{N}]+")
         val THINK_BLOCK_REGEX = Regex("(?is)<think>.*?</think>")
         val REASONING_BLOCK_REGEX = Regex("(?is)<reasoning>.*?</reasoning>")
         val FALLBACK_REWRITE_PROMPT = """

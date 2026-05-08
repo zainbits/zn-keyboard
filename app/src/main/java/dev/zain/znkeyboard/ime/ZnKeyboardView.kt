@@ -27,6 +27,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState)
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
+        fun onSpacebarEmojiSuggestionSelected(emoji: String)
         fun onAgentRewriteRequested()
         fun onAgentHistoryRequested()
     }
@@ -55,6 +56,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
     private var secondRowState = SecondRowState(visible = true)
+    private var spacebarEmojiSuggestion: String? = null
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -127,6 +129,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun setEnterLabel(label: String) {
         if (enterLabel != label) {
             enterLabel = label
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun setSpacebarEmojiSuggestion(emoji: String?) {
+        if (spacebarEmojiSuggestion != emoji) {
+            spacebarEmojiSuggestion = emoji
             refreshHitTargets()
             invalidate()
         }
@@ -237,6 +247,11 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
             "period" -> scheduleLongPress(pointerId, "period") {
                 callback?.onSnippetPanelRequested()
+            }
+            "space" -> spacebarEmojiSuggestion?.let { emoji ->
+                scheduleLongPress(pointerId, "space") {
+                    callback?.onSpacebarEmojiSuggestionSelected(emoji)
+                }
             }
         }
         key?.takeIf(::isBackspaceKey)?.let { key ->
@@ -411,7 +426,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         key.icon?.let {
             drawIcon(canvas, it, bounds, contentColor, contentAlpha)
         } ?: run {
-            val textSize = fitTextSize(key.label, bounds, key.role)
+            val textSize = fitTextSize(key.label, bounds, key.role, key.largeLabel)
             textPaint.textSize = textSize
             textPaint.color = contentColor
             textPaint.alpha = contentAlpha
@@ -566,9 +581,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         return hitTargets.firstOrNull { it.hitBounds.contains(x, y) }
     }
 
-    private fun fitTextSize(label: String, bounds: RectF, role: KeyRole): Float {
+    private fun fitTextSize(label: String, bounds: RectF, role: KeyRole, largeLabel: Boolean): Float {
         val base = when (role) {
+            KeyRole.Character if largeLabel -> sp(24f)
             KeyRole.Character -> sp(20f)
+            KeyRole.Function if largeLabel -> sp(24f)
             KeyRole.Function -> sp(12.5f)
             KeyRole.Action -> sp(13.5f)
         }
@@ -868,11 +885,19 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun bottomRow(): RowSpec {
         val switchLabel = if (layoutMode == LayoutMode.Letters) "123" else "ABC"
+        val spacebarSuggestion = spacebarEmojiSuggestion
         return RowSpec(
             listOf(
                 KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), 0.9f, KeyRole.Character),
-                KeySpec("space", "space", KeyIntent.Dispatch(KeyboardAction.Text(" ")), 4.2f, KeyRole.Function),
+                KeySpec(
+                    "space",
+                    spacebarSuggestion ?: "space",
+                    KeyIntent.Dispatch(KeyboardAction.Text(" ")),
+                    4.2f,
+                    KeyRole.Function,
+                    largeLabel = spacebarSuggestion != null,
+                ),
                 KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), 0.9f, KeyRole.Character),
                 KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
             ),
@@ -970,6 +995,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val consumesOneShotShift: Boolean = false,
         val enabled: Boolean = true,
         val emphasizedWhenDisabled: Boolean = false,
+        val largeLabel: Boolean = false,
     )
 
     private data class KeyHit(
