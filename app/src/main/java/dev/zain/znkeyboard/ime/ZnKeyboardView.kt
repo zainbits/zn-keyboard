@@ -55,7 +55,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
-    private var secondRowState = SecondRowState(visible = true)
+    private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
     private var spacebarEmojiSuggestion: String? = null
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
@@ -117,9 +117,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    fun renderSecondRow(state: SecondRowState) {
-        if (secondRowState != state) {
-            secondRowState = state
+    fun renderShortcutRows(state: ShortcutRowState) {
+        if (shortcutRowState != state) {
+            shortcutRowState = state
             requestLayout()
             refreshHitTargets()
             invalidate()
@@ -749,52 +749,23 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun secondRow(): RowSpec? {
         if (!hasVisibleSecondRow()) return null
         val keys = secondRowButtonIds.mapIndexedNotNull { index, buttonId ->
-            secondRowButtonSpec(
-                buttonId = buttonId,
+            upperRowKeySpec(
+                keyId = buttonId,
                 index = index,
                 weight = upperRowKeyWeight(index, secondRowButtonIds.lastIndex),
+                rowPrefix = "second",
+                enabled = true,
             )
         }
         return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT) }
     }
 
     private fun hasVisibleSecondRow(): Boolean {
-        return secondRowState.visible && secondRowButtonIds.isNotEmpty()
+        return shortcutRowState.secondRowVisible && secondRowButtonIds.isNotEmpty()
     }
 
     private fun upperRowKeyWeight(index: Int, lastIndex: Int): Float {
         return if (index == 0 || index == lastIndex) 1.4f else 1f
-    }
-
-    private fun secondRowButtonSpec(buttonId: String, index: Int, weight: Float): KeySpec? {
-        val id = "second_${index}_$buttonId"
-        return when (buttonId) {
-            "rewrite" -> KeySpec(
-                id = id,
-                label = "Rewrite",
-                intent = KeyIntent.AgentRewrite,
-                weight = weight,
-                role = KeyRole.Action,
-                active = secondRowState.loading,
-                enabled = secondRowState.rewriteEnabled && !secondRowState.loading,
-                emphasizedWhenDisabled = secondRowState.loading,
-            )
-            "history" -> KeySpec(
-                id = id,
-                label = "History",
-                intent = KeyIntent.AgentHistory,
-                weight = weight,
-                role = KeyRole.Function,
-                enabled = secondRowState.historyEnabled && !secondRowState.loading,
-            )
-            else -> upperRowKeySpec(
-                keyId = buttonId,
-                index = index,
-                weight = weight,
-                rowPrefix = "second",
-                enabled = !secondRowState.loading,
-            )
-        }
     }
 
     private fun upperRowKeySpec(
@@ -806,6 +777,24 @@ class ZnKeyboardView @JvmOverloads constructor(
     ): KeySpec? {
         val id = "${rowPrefix}_${index}_$keyId"
         return when (keyId) {
+            "rewrite" -> KeySpec(
+                id = id,
+                label = "Rewrite",
+                intent = KeyIntent.AgentRewrite,
+                weight = weight,
+                role = KeyRole.Action,
+                active = shortcutRowState.loading,
+                enabled = enabled && shortcutRowState.rewriteEnabled && !shortcutRowState.loading,
+                emphasizedWhenDisabled = shortcutRowState.loading,
+            )
+            "history" -> KeySpec(
+                id = id,
+                label = "History",
+                intent = KeyIntent.AgentHistory,
+                weight = weight,
+                role = KeyRole.Function,
+                enabled = enabled && shortcutRowState.historyEnabled && !shortcutRowState.loading,
+            )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
             "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt, enabled = enabled)
             "tab" -> KeySpec(id, "Tab", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_TAB)), weight, KeyRole.Function, enabled = enabled)
@@ -1035,8 +1024,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val mutedText = Color.rgb(230, 230, 230)
     }
 
-    data class SecondRowState(
-        val visible: Boolean,
+    data class ShortcutRowState(
+        val secondRowVisible: Boolean,
         val loading: Boolean = false,
         val rewriteEnabled: Boolean = false,
         val historyEnabled: Boolean = false,

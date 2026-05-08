@@ -1196,9 +1196,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val providerConfigured = KeyboardSettings.readAgentProviderSettings(this).isConfigured
         val sensitiveEditor = isSensitiveEditor(currentEditorInfo)
 
-        keyboardView?.renderSecondRow(
-            ZnKeyboardView.SecondRowState(
-                visible = visible,
+        keyboardView?.renderShortcutRows(
+            ZnKeyboardView.ShortcutRowState(
+                secondRowVisible = visible,
                 loading = agentLoading,
                 rewriteEnabled = visible && isRewriteAvailable() && providerConfigured,
                 historyEnabled = visible && !sensitiveEditor,

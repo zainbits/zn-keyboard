@@ -23,7 +23,7 @@ object KeyboardSettings {
     const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
     const val MAX_UPPER_ROW_KEYS = 9
     private const val LEGACY_MAX_AGENT_ROW_KEYS = 5
-    const val MAX_SECOND_ROW_BUTTONS = LEGACY_MAX_AGENT_ROW_KEYS + 2
+    const val MAX_SECOND_ROW_BUTTONS = MAX_UPPER_ROW_KEYS
     const val MAX_TEXT_SNIPPETS = 60
     const val MAX_TEXT_SNIPPET_CHARS = 2_000
     const val MAX_CUSTOM_EMOJI_TAGGED_EMOJIS = 250
@@ -65,7 +65,7 @@ object KeyboardSettings {
         KeyboardRow.Upper.id,
     )
 
-    val UPPER_ROW_KEY_OPTIONS = listOf(
+    private val FUNCTION_KEY_OPTIONS = listOf(
         UpperRowKeyOption("ctrl", "Ctrl"),
         UpperRowKeyOption("alt", "Alt"),
         UpperRowKeyOption("tab", "Tab"),
@@ -106,13 +106,16 @@ object KeyboardSettings {
         UpperRowKeyOption("greater_than", ">"),
     )
 
-    private val upperRowKeyOptionIds = UPPER_ROW_KEY_OPTIONS.mapTo(mutableSetOf()) { it.id }
-    val SECOND_ROW_BUTTON_OPTIONS = listOf(
+    val SHORTCUT_ROW_KEY_OPTIONS = listOf(
         UpperRowKeyOption("rewrite", "Rewrite"),
-    ) + UPPER_ROW_KEY_OPTIONS + listOf(
+    ) + FUNCTION_KEY_OPTIONS + listOf(
         UpperRowKeyOption("history", "History"),
     )
-    private val secondRowButtonOptionIds = SECOND_ROW_BUTTON_OPTIONS.mapTo(mutableSetOf()) { it.id }
+    val UPPER_ROW_KEY_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS
+    val SECOND_ROW_BUTTON_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS
+    private val shortcutRowKeyOptionIds = SHORTCUT_ROW_KEY_OPTIONS.mapTo(mutableSetOf()) { it.id }
+    private val upperRowKeyOptionIds = shortcutRowKeyOptionIds
+    private val secondRowButtonOptionIds = shortcutRowKeyOptionIds
     private val keyboardRowIds = KeyboardRow.entries.mapTo(mutableSetOf()) { it.id }
     private val whitespaceRegex = Regex("\\s+")
 
@@ -183,6 +186,10 @@ object KeyboardSettings {
 
     fun labelForSecondRowButton(buttonId: String): String {
         return SECOND_ROW_BUTTON_OPTIONS.firstOrNull { it.id == buttonId }?.label.orEmpty()
+    }
+
+    fun labelForShortcutRowKey(keyId: String): String {
+        return SHORTCUT_ROW_KEY_OPTIONS.firstOrNull { it.id == keyId }?.label.orEmpty()
     }
 
     fun readKeyboardRowOrder(context: Context): List<String> {
@@ -711,8 +718,8 @@ object KeyboardSettings {
         val id: String,
         val label: String,
     ) {
-        Upper("upper", "Function row"),
-        Second("second", "Tools row"),
+        Upper("upper", "Shortcut row A"),
+        Second("second", "Shortcut row B"),
     }
 
     enum class AgentProviderType(

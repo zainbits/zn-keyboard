@@ -296,22 +296,22 @@ private fun SettingsScreen() {
             )
 
             RowButtonsSection(
-                title = "Tools row buttons",
+                title = "Shortcut row B keys",
                 keyIds = secondRowButtonIds,
                 maxKeys = KeyboardSettings.MAX_SECOND_ROW_BUTTONS,
                 defaultKeyIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS,
-                keyOptions = KeyboardSettings.SECOND_ROW_BUTTON_OPTIONS,
-                labelForKey = KeyboardSettings::labelForSecondRowButton,
+                keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
+                labelForKey = KeyboardSettings::labelForShortcutRowKey,
                 onKeyIdsChange = ::updateSecondRowButtonIds,
             )
 
             RowButtonsSection(
-                title = "Function row keys",
+                title = "Shortcut row A keys",
                 keyIds = upperRowKeyIds,
                 maxKeys = KeyboardSettings.MAX_UPPER_ROW_KEYS,
                 defaultKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
-                keyOptions = KeyboardSettings.UPPER_ROW_KEY_OPTIONS,
-                labelForKey = KeyboardSettings::labelForUpperRowKey,
+                keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
+                labelForKey = KeyboardSettings::labelForShortcutRowKey,
                 onKeyIdsChange = ::updateUpperRowKeyIds,
             )
 
