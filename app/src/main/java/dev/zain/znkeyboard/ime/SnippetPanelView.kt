@@ -159,10 +159,13 @@ class SnippetPanelView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textKey("‹", KeyRole.Function) { callback?.onSnippetPanelClosed() }.apply {
-                    contentDescription = "Back to keyboard"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                },
+                ImePanelChrome.backButton(
+                    context = context,
+                    contentDescription = "Back to keyboard",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = { callback?.onSnippetPanelClosed() },
+                ),
                 LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
             addView(

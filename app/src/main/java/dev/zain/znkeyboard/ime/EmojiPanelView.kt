@@ -98,7 +98,7 @@ class EmojiPanelView @JvmOverloads constructor(
         buildBrowseHeader()
         buildBottomToolbar()
 
-        addView(browseHeaderStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
+        addView(browseHeaderStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(ImePanelChrome.BROWSE_HEADER_HEIGHT_DP)))
         addView(
             emojiList,
             LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 4, bottom = 4),
@@ -170,24 +170,25 @@ class EmojiPanelView @JvmOverloads constructor(
 
     private fun buildBrowseHeader() {
         browseHeaderRow.addView(
-            textKey("‹", KeyRole.Function) { closePanel() }.apply {
-                contentDescription = "Back to keyboard"
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-            },
-            LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+            ImePanelChrome.backButton(
+                context = context,
+                contentDescription = "Back to keyboard",
+                backgroundColor = PALETTE.function,
+                textColor = PALETTE.mutedText,
+                onClick = ::closePanel,
+            ),
+            LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
         )
 
         browseHeaderRow.addView(
-            textKey("Search", KeyRole.Function) {
-                callback?.onEmojiSearchRequested()
-            }.apply {
-                gravity = Gravity.CENTER_VERTICAL
-                contentDescription = "Search emoji"
-                setPadding(dp(14), 0, dp(16), 0)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                background = pillBackground(active = false)
-            },
-            LayoutParams(dp(124), LayoutParams.MATCH_PARENT).withMargins(end = 6),
+            ImePanelChrome.searchButton(
+                context = context,
+                contentDescription = "Search emoji",
+                backgroundColor = PALETTE.function,
+                textColor = PALETTE.mutedText,
+                onClick = { callback?.onEmojiSearchRequested() },
+            ),
+            LayoutParams(dp(ImePanelChrome.SEARCH_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 6),
         )
 
         recentShortcutButton = categoryShortcut(RECENT_TAB_ICON, "Recently used") {

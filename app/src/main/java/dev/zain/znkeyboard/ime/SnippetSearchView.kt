@@ -105,13 +105,14 @@ class SnippetSearchView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textButton("‹") {
-                    callback?.onSnippetSearchClosed()
-                }.apply {
-                    contentDescription = "Back to snippets"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                },
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+                ImePanelChrome.backButton(
+                    context = context,
+                    contentDescription = "Back to snippets",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = { callback?.onSnippetSearchClosed() },
+                ),
+                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
             queryText.apply {

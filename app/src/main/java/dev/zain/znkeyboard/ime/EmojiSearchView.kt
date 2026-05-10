@@ -125,13 +125,14 @@ class EmojiSearchView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textButton("‹") {
-                    callback?.onEmojiSearchClosed()
-                }.apply {
-                    contentDescription = "Back to emoji"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                },
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+                ImePanelChrome.backButton(
+                    context = context,
+                    contentDescription = "Back to emoji",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = { callback?.onEmojiSearchClosed() },
+                ),
+                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
             queryText.apply {

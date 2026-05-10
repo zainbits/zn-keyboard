@@ -124,7 +124,7 @@ class GifSearchView @JvmOverloads constructor(
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
         visibility = GONE
 
-        addView(browseHeader, LayoutParams(LayoutParams.MATCH_PARENT, dp(44)))
+        addView(browseHeader, LayoutParams(LayoutParams.MATCH_PARENT, dp(ImePanelChrome.BROWSE_HEADER_HEIGHT_DP)))
         addView(searchHeader, LayoutParams(LayoutParams.MATCH_PARENT, dp(44)))
         suggestionStrip.addView(
             suggestionRow,
@@ -321,25 +321,25 @@ class GifSearchView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textButton("‹") {
-                    callback?.onGifSearchClosed()
-                }.apply {
-                    contentDescription = "Back to emoji"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                },
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+                ImePanelChrome.backButton(
+                    context = context,
+                    contentDescription = "Back to emoji",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = { callback?.onGifSearchClosed() },
+                ),
+                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
             addView(
-                textButton("Search") {
-                    callback?.onGifSearchRequested()
-                }.apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    contentDescription = "Search GIFs"
-                    setPadding(dp(14), 0, dp(16), 0)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                },
-                LayoutParams(dp(124), LayoutParams.MATCH_PARENT).withMargins(end = 6),
+                ImePanelChrome.searchButton(
+                    context = context,
+                    contentDescription = "Search GIFs",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = { callback?.onGifSearchRequested() },
+                ),
+                LayoutParams(dp(ImePanelChrome.SEARCH_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 6),
             )
 
             addView(
@@ -393,17 +393,20 @@ class GifSearchView @JvmOverloads constructor(
             orientation = HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(
-                textButton("‹") {
-                    if (mode == Mode.Search) {
-                        callback?.onGifSearchBackToBrowse()
-                    } else {
-                        showBrowseMode()
-                    }
-                }.apply {
-                    contentDescription = "Back to GIFs"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                },
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(end = 4),
+                ImePanelChrome.backButton(
+                    context = context,
+                    contentDescription = "Back to GIFs",
+                    backgroundColor = PALETTE.function,
+                    textColor = PALETTE.mutedText,
+                    onClick = {
+                        if (mode == Mode.Search) {
+                            callback?.onGifSearchBackToBrowse()
+                        } else {
+                            showBrowseMode()
+                        }
+                    },
+                ),
+                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
             queryText.apply {
