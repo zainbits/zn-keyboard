@@ -18,6 +18,7 @@ import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiCategory
 import dev.zain.znkeyboard.EmojiEntry
 import dev.zain.znkeyboard.EmojiSkinTone
+import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
 class EmojiSearchView @JvmOverloads constructor(
@@ -322,11 +323,11 @@ class EmojiSearchView @JvmOverloads constructor(
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
     private object PALETTE {
-        const val background = Color.BLACK
-        val function = Color.rgb(48, 48, 48)
-        const val text = Color.WHITE
-        val mutedText = Color.rgb(230, 230, 230)
-        val placeholderText = Color.rgb(170, 170, 170)
+        const val background = ImeColors.BACKGROUND
+        val function = ImeColors.KEY
+        const val text = ImeColors.TEXT
+        val mutedText = ImeColors.MUTED_TEXT
+        val placeholderText = ImeColors.SECONDARY_TEXT
     }
 
     private companion object {

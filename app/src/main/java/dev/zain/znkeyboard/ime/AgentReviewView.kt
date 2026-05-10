@@ -10,6 +10,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
 class AgentReviewView @JvmOverloads constructor(
@@ -133,10 +134,10 @@ class AgentReviewView @JvmOverloads constructor(
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
     private object PALETTE {
-        val background = Color.BLACK
-        val field = Color.rgb(42, 42, 42)
-        val border = Color.rgb(62, 62, 62)
-        const val text = Color.WHITE
+        val background = ImeColors.BACKGROUND
+        val field = ImeColors.KEY_DARK
+        val border = ImeColors.BORDER
+        const val text = ImeColors.TEXT
     }
 
 }

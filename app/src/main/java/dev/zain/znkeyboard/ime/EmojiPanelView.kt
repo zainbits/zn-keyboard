@@ -21,6 +21,7 @@ import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiCategory
 import dev.zain.znkeyboard.EmojiEntry
 import dev.zain.znkeyboard.EmojiSkinTone
+import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
 class EmojiPanelView @JvmOverloads constructor(
@@ -719,14 +720,14 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        const val background = Color.BLACK
+        const val background = ImeColors.BACKGROUND
         const val key = Color.TRANSPARENT
-        val function = Color.rgb(48, 48, 48)
-        val selected = Color.rgb(78, 78, 78)
-        const val text = Color.WHITE
-        val mutedText = Color.rgb(230, 230, 230)
-        val disabledText = Color.rgb(130, 130, 130)
-        val sectionText = Color.rgb(145, 145, 145)
+        val function = ImeColors.KEY
+        val selected = ImeColors.SELECTED
+        const val text = ImeColors.TEXT
+        val mutedText = ImeColors.MUTED_TEXT
+        val disabledText = ImeColors.DISABLED_TEXT
+        val sectionText = ImeColors.SECTION_TEXT
     }
 
     private companion object {

@@ -78,6 +78,10 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
+import dev.zain.znkeyboard.constants.SettingsBackupDefaults
+import dev.zain.znkeyboard.constants.SettingsThemeColors
+import dev.zain.znkeyboard.constants.SettingsUiDimensions
+import dev.zain.znkeyboard.constants.SettingsUiTimings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -87,7 +91,6 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -2358,23 +2361,23 @@ private data class PickerItem(
     val subtitle: String? = null,
 )
 
-private const val MODEL_LOAD_DEBOUNCE_MS = 500L
-private const val MODEL_QUERY_DEBOUNCE_MS = 1_000L
-private const val MODEL_LOAD_TIMEOUT_MS = 10_000
-private val BACKUP_FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US)
-private val BACKUP_IMPORT_MIME_TYPES = arrayOf("application/json", "text/json", "text/plain")
-private val PICKER_MENU_WIDTH = 320.dp
-private val PICKER_MAX_HEIGHT = 280.dp
-private val PROVIDER_PICKER_MAX_HEIGHT = 140.dp
-private val REASONING_PICKER_MAX_HEIGHT = 260.dp
-private val SKIN_TONE_PICKER_MAX_HEIGHT = 260.dp
-private val SHORTCUT_KEY_ITEM_HEIGHT = 48.dp
-private val SHORTCUT_KEY_ITEM_GAP = 8.dp
-private val ROW_ORDER_ITEM_HEIGHT = 48.dp
-private val ROW_ORDER_ITEM_GAP = 8.dp
-private val SECTION_CORNER_RADIUS = 8.dp
-private val COMPACT_ITEM_CORNER_RADIUS = 6.dp
-private val PICKER_CORNER_RADIUS = 10.dp
+private const val MODEL_LOAD_DEBOUNCE_MS = SettingsUiTimings.MODEL_LOAD_DEBOUNCE_MS
+private const val MODEL_QUERY_DEBOUNCE_MS = SettingsUiTimings.MODEL_QUERY_DEBOUNCE_MS
+private const val MODEL_LOAD_TIMEOUT_MS = SettingsUiTimings.MODEL_LOAD_TIMEOUT_MS
+private val BACKUP_FILE_TIMESTAMP_FORMAT = SettingsBackupDefaults.FILE_TIMESTAMP_FORMAT
+private val BACKUP_IMPORT_MIME_TYPES = SettingsBackupDefaults.IMPORT_MIME_TYPES
+private val PICKER_MENU_WIDTH = SettingsUiDimensions.PICKER_MENU_WIDTH
+private val PICKER_MAX_HEIGHT = SettingsUiDimensions.PICKER_MAX_HEIGHT
+private val PROVIDER_PICKER_MAX_HEIGHT = SettingsUiDimensions.PROVIDER_PICKER_MAX_HEIGHT
+private val REASONING_PICKER_MAX_HEIGHT = SettingsUiDimensions.REASONING_PICKER_MAX_HEIGHT
+private val SKIN_TONE_PICKER_MAX_HEIGHT = SettingsUiDimensions.SKIN_TONE_PICKER_MAX_HEIGHT
+private val SHORTCUT_KEY_ITEM_HEIGHT = SettingsUiDimensions.SHORTCUT_KEY_ITEM_HEIGHT
+private val SHORTCUT_KEY_ITEM_GAP = SettingsUiDimensions.SHORTCUT_KEY_ITEM_GAP
+private val ROW_ORDER_ITEM_HEIGHT = SettingsUiDimensions.ROW_ORDER_ITEM_HEIGHT
+private val ROW_ORDER_ITEM_GAP = SettingsUiDimensions.ROW_ORDER_ITEM_GAP
+private val SECTION_CORNER_RADIUS = SettingsUiDimensions.SECTION_CORNER_RADIUS
+private val COMPACT_ITEM_CORNER_RADIUS = SettingsUiDimensions.COMPACT_ITEM_CORNER_RADIUS
+private val PICKER_CORNER_RADIUS = SettingsUiDimensions.PICKER_CORNER_RADIUS
 
 @Composable
 private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
@@ -2394,11 +2397,11 @@ private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
 }
 
 private object ZnKeyboardColors {
-    val Background = Color.Black
-    val Surface = Color(0xFF222222)
-    val Key = Color(0xFF2A2A2A)
-    val FunctionKey = Color(0xFF323232)
-    val Accent = Color(0xFF30ACE2)
-    val OnSurface = Color(0xFFFFFFFF)
-    val Muted = Color(0xFFB3B3B3)
+    val Background = SettingsThemeColors.Background
+    val Surface = SettingsThemeColors.Surface
+    val Key = SettingsThemeColors.Key
+    val FunctionKey = SettingsThemeColors.FunctionKey
+    val Accent = SettingsThemeColors.Accent
+    val OnSurface = SettingsThemeColors.OnSurface
+    val Muted = SettingsThemeColors.Muted
 }

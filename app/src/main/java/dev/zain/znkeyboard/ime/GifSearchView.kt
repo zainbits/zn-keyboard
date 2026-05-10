@@ -24,10 +24,15 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import com.bumptech.glide.Glide
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.constants.GifDefaults
+import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+
+private const val GIF_CARD_SPACING_DP = GifDefaults.CARD_SPACING_DP
+private const val GIF_CARD_RADIUS_DP = GifDefaults.CARD_RADIUS_DP
 
 class GifSearchView @JvmOverloads constructor(
     context: Context,
@@ -678,7 +683,7 @@ class GifSearchView @JvmOverloads constructor(
             )
             .minus(resultList.paddingLeft + resultList.paddingRight)
             .coerceAtLeast(dp(240))
-        val gapPx = dp(MASONRY_GAP_DP)
+        val gapPx = dp(GIF_CARD_SPACING_DP)
         return ((availableWidth - gapPx * (columnCount - 1)) / columnCount).coerceAtLeast(dp(96))
     }
 
@@ -912,33 +917,32 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        const val background = Color.BLACK
-        val key = Color.rgb(48, 48, 48)
-        val function = Color.rgb(56, 56, 56)
-        val selected = Color.rgb(78, 78, 78)
-        const val text = Color.WHITE
-        val mutedText = Color.rgb(230, 230, 230)
-        val disabledText = Color.rgb(130, 130, 130)
-        val placeholderText = Color.rgb(150, 150, 150)
-        val sectionText = Color.rgb(145, 145, 145)
+        const val background = ImeColors.BACKGROUND
+        val key = ImeColors.KEY
+        val function = ImeColors.FUNCTION
+        val selected = ImeColors.SELECTED
+        const val text = ImeColors.TEXT
+        val mutedText = ImeColors.MUTED_TEXT
+        val disabledText = ImeColors.DISABLED_TEXT
+        val placeholderText = ImeColors.PLACEHOLDER_TEXT
+        val sectionText = ImeColors.SECTION_TEXT
     }
 
     private companion object {
-        const val FIRST_PAGE = 1
-        const val PAGE_SIZE = 24
-        const val LOAD_MORE_THRESHOLD_ITEMS = 8
-        const val MASONRY_GAP_DP = 4
-        const val MIN_GIF_CELL_HEIGHT_DP = 88
-        const val MAX_GIF_CELL_HEIGHT_DP = 190
-        const val DEFAULT_GIF_ASPECT_HEIGHT = 0.8f
-        const val SEARCH_RESULT_LIST_HEIGHT_DP = 190
-        const val MAX_QUERY_LENGTH = 80
-        const val MIN_AUTOCOMPLETE_CHARS = 2
-        const val MAX_VISIBLE_SUGGESTIONS = 6
-        const val SEARCH_DEBOUNCE_MS = 450L
-        const val SEARCH_PLACEHOLDER = "Search KLIPY"
-        const val SEARCH_PROMPT = "Type a GIF search and tap Search"
-        const val POWERED_BY_KLIPY = "Powered by KLIPY"
+        const val FIRST_PAGE = GifDefaults.FIRST_PAGE
+        const val PAGE_SIZE = GifDefaults.PAGE_SIZE
+        const val LOAD_MORE_THRESHOLD_ITEMS = GifDefaults.LOAD_MORE_THRESHOLD_ITEMS
+        const val MIN_GIF_CELL_HEIGHT_DP = GifDefaults.MIN_CELL_HEIGHT_DP
+        const val MAX_GIF_CELL_HEIGHT_DP = GifDefaults.MAX_CELL_HEIGHT_DP
+        const val DEFAULT_GIF_ASPECT_HEIGHT = GifDefaults.DEFAULT_ASPECT_HEIGHT
+        const val SEARCH_RESULT_LIST_HEIGHT_DP = GifDefaults.SEARCH_RESULT_LIST_HEIGHT_DP
+        const val MAX_QUERY_LENGTH = GifDefaults.SEARCH_MAX_QUERY_LENGTH
+        const val MIN_AUTOCOMPLETE_CHARS = GifDefaults.SEARCH_MIN_AUTOCOMPLETE_CHARS
+        const val MAX_VISIBLE_SUGGESTIONS = GifDefaults.MAX_VISIBLE_SUGGESTIONS
+        const val SEARCH_DEBOUNCE_MS = GifDefaults.SEARCH_DEBOUNCE_MS
+        const val SEARCH_PLACEHOLDER = GifDefaults.SEARCH_PLACEHOLDER
+        const val SEARCH_PROMPT = GifDefaults.SEARCH_PROMPT
+        const val POWERED_BY_KLIPY = GifDefaults.POWERED_BY_LABEL
     }
 }
 
@@ -1043,20 +1047,21 @@ private class GifResultAdapter(
     private fun createResultCell(context: Context): GifResultCell {
         val image = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(Color.rgb(48, 48, 48))
+            setBackgroundColor(ImeColors.KEY)
         }
         val badge = TextView(context).apply {
             text = "GIF"
             gravity = Gravity.CENTER
             includeFontPadding = false
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
+            setTextColor(ImeColors.TEXT)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
             background = roundedBackground(Color.argb(176, 0, 0, 0), radiusDp = 5)
             setPadding(dp(5), 0, dp(5), 0)
         }
         val container = FrameLayout(context).apply {
-            background = roundedBackground(Color.rgb(48, 48, 48))
+            background = roundedBackground(ImeColors.KEY, radiusDp = GIF_CARD_RADIUS_DP)
+            clipToOutline = true
             isFocusable = false
             addView(
                 image,
@@ -1079,7 +1084,7 @@ private class GifResultAdapter(
         return TextView(context).apply {
             gravity = Gravity.CENTER
             includeFontPadding = false
-            setTextColor(Color.rgb(145, 145, 145))
+            setTextColor(ImeColors.SECTION_TEXT)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             setPadding(dp(10), dp(14), dp(10), dp(18))
         }
@@ -1120,7 +1125,7 @@ private class GifResultAdapter(
                 .override(MAX_DECODE_DIMENSION_PX)
                 .centerCrop()
                 .placeholder(placeholderDrawable())
-                .error(ColorDrawable(Color.rgb(48, 48, 48)))
+                .error(ColorDrawable(ImeColors.KEY))
             if (fallbackUrl != null && fallbackUrl != gif.previewUrl) {
                 request.error(
                     manager
@@ -1128,7 +1133,7 @@ private class GifResultAdapter(
                         .override(MAX_DECODE_DIMENSION_PX)
                         .centerCrop()
                         .placeholder(placeholderDrawable())
-                        .error(ColorDrawable(Color.rgb(48, 48, 48))),
+                        .error(ColorDrawable(ImeColors.KEY)),
                 )
             }
             request.into(cell.image)
@@ -1141,7 +1146,8 @@ private class GifResultAdapter(
                     heightPx,
                 )
             params.height = heightPx
-            params.bottomMargin = dp(4)
+            val margin = dp(GIF_CARD_SPACING_DP / 2)
+            params.setMargins(margin, margin, margin, margin)
             itemView.layoutParams = params
         }
 
@@ -1149,11 +1155,11 @@ private class GifResultAdapter(
             boundGif = null
             itemView.setOnClickListener(null)
             Glide.with(cell.image).clear(cell.image)
-            cell.image.setImageDrawable(ColorDrawable(Color.rgb(48, 48, 48)))
+            cell.image.setImageDrawable(ColorDrawable(ImeColors.KEY))
         }
 
         private fun placeholderDrawable(): ColorDrawable {
-            return ColorDrawable(Color.rgb(48, 48, 48))
+            return ColorDrawable(ImeColors.KEY)
         }
     }
 

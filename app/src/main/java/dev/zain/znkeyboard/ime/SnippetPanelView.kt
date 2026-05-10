@@ -19,6 +19,7 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.R
+import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
 class SnippetPanelView @JvmOverloads constructor(
@@ -393,13 +394,13 @@ class SnippetPanelView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.BLACK
-        val key = Color.rgb(42, 42, 42)
-        val function = Color.rgb(50, 50, 50)
-        val border = Color.rgb(62, 62, 62)
-        const val text = Color.WHITE
-        val tagText = Color.rgb(170, 210, 255)
-        val mutedText = Color.rgb(230, 230, 230)
+        val background = ImeColors.BACKGROUND
+        val key = ImeColors.KEY_DARK
+        val function = ImeColors.FUNCTION_DARK
+        val border = ImeColors.BORDER
+        const val text = ImeColors.TEXT
+        val tagText = ImeColors.TAG_TEXT
+        val mutedText = ImeColors.MUTED_TEXT
     }
 
     private companion object {

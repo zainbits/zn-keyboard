@@ -20,6 +20,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -1272,15 +1273,15 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.BLACK
-        val key = Color.rgb(48, 48, 48)
-        val function = Color.rgb(56, 56, 56)
-        val action = Color.rgb(48, 48, 48)
-        val pressedKey = Color.rgb(26, 26, 26)
-        val pressedText = Color.rgb(142, 142, 142)
-        val aiLoadingSurface = Color.rgb(24, 24, 31)
-        const val text = Color.WHITE
-        val mutedText = Color.rgb(230, 230, 230)
+        val background = ImeColors.BACKGROUND
+        val key = ImeColors.KEY
+        val function = ImeColors.FUNCTION
+        val action = ImeColors.ACTION
+        val pressedKey = ImeColors.PRESSED_KEY
+        val pressedText = ImeColors.PRESSED_TEXT
+        val aiLoadingSurface = ImeColors.AI_LOADING_SURFACE
+        const val text = ImeColors.TEXT
+        val mutedText = ImeColors.MUTED_TEXT
     }
 
     data class ShortcutRowState(

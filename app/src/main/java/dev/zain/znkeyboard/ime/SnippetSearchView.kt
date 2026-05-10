@@ -16,6 +16,7 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.R
+import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -274,13 +275,13 @@ class SnippetSearchView @JvmOverloads constructor(
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
 
     private object PALETTE {
-        val background = Color.BLACK
-        val key = Color.rgb(42, 42, 42)
-        val function = Color.rgb(50, 50, 50)
-        const val text = Color.WHITE
-        val tagText = Color.rgb(170, 210, 255)
-        val mutedText = Color.rgb(230, 230, 230)
-        val placeholderText = Color.rgb(150, 150, 150)
+        val background = ImeColors.BACKGROUND
+        val key = ImeColors.KEY_DARK
+        val function = ImeColors.FUNCTION_DARK
+        const val text = ImeColors.TEXT
+        val tagText = ImeColors.TAG_TEXT
+        val mutedText = ImeColors.MUTED_TEXT
+        val placeholderText = ImeColors.PLACEHOLDER_TEXT
     }
 
     private companion object {

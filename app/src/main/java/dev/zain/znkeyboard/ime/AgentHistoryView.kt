@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import dev.zain.znkeyboard.constants.ImeColors
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.roundToInt
@@ -210,10 +211,10 @@ class AgentHistoryView @JvmOverloads constructor(
     }
 
     private object PALETTE {
-        val background = Color.BLACK
-        val divider = Color.rgb(58, 58, 58)
-        const val text = Color.WHITE
-        val mutedText = Color.rgb(170, 170, 170)
+        val background = ImeColors.BACKGROUND
+        val divider = ImeColors.DIVIDER
+        const val text = ImeColors.TEXT
+        val mutedText = ImeColors.SECONDARY_TEXT
     }
 
 }

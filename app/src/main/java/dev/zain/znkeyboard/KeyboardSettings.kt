@@ -5,6 +5,9 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import dev.zain.znkeyboard.constants.AgentDefaults
+import dev.zain.znkeyboard.constants.GifDefaults
+import dev.zain.znkeyboard.constants.KeyboardDefaults
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -15,23 +18,23 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 object KeyboardSettings {
-    const val MIN_HEIGHT_SCALE = 0.82f
-    const val MAX_HEIGHT_SCALE = 1.24f
-    const val DEFAULT_HEIGHT_SCALE = 1.0f
-    const val DEFAULT_AGENT_API_BASE_URL = "https://api.openai.com/v1"
-    const val OPENROUTER_API_BASE_URL = "https://openrouter.ai/api/v1"
-    const val DEFAULT_AGENT_MODEL = "gpt-4o-mini"
-    const val DEFAULT_GIF_API_BASE_URL = "https://api.klipy.com"
-    const val MAX_UPPER_ROW_KEYS = 9
+    const val MIN_HEIGHT_SCALE = KeyboardDefaults.MIN_HEIGHT_SCALE
+    const val MAX_HEIGHT_SCALE = KeyboardDefaults.MAX_HEIGHT_SCALE
+    const val DEFAULT_HEIGHT_SCALE = KeyboardDefaults.DEFAULT_HEIGHT_SCALE
+    const val DEFAULT_AGENT_API_BASE_URL = AgentDefaults.DEFAULT_API_BASE_URL
+    const val OPENROUTER_API_BASE_URL = AgentDefaults.OPENROUTER_API_BASE_URL
+    const val DEFAULT_AGENT_MODEL = AgentDefaults.DEFAULT_MODEL
+    const val DEFAULT_GIF_API_BASE_URL = GifDefaults.DEFAULT_API_BASE_URL
+    const val MAX_UPPER_ROW_KEYS = KeyboardDefaults.MAX_UPPER_ROW_KEYS
     private const val LEGACY_MAX_AGENT_ROW_KEYS = 5
-    const val MAX_SECOND_ROW_BUTTONS = MAX_UPPER_ROW_KEYS
-    const val MAX_TEXT_SNIPPETS = 60
-    const val MAX_TEXT_SNIPPET_CHARS = 2_000
-    const val MAX_TEXT_SNIPPET_TAGS = 8
-    const val MAX_TEXT_SNIPPET_TAG_CHARS = 32
-    const val MAX_CUSTOM_EMOJI_TAGGED_EMOJIS = 250
-    const val MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI = 12
-    const val MAX_CUSTOM_EMOJI_TAG_CHARS = 32
+    const val MAX_SECOND_ROW_BUTTONS = KeyboardDefaults.MAX_SECOND_ROW_BUTTONS
+    const val MAX_TEXT_SNIPPETS = KeyboardDefaults.MAX_TEXT_SNIPPETS
+    const val MAX_TEXT_SNIPPET_CHARS = KeyboardDefaults.MAX_TEXT_SNIPPET_CHARS
+    const val MAX_TEXT_SNIPPET_TAGS = KeyboardDefaults.MAX_TEXT_SNIPPET_TAGS
+    const val MAX_TEXT_SNIPPET_TAG_CHARS = KeyboardDefaults.MAX_TEXT_SNIPPET_TAG_CHARS
+    const val MAX_CUSTOM_EMOJI_TAGGED_EMOJIS = KeyboardDefaults.MAX_CUSTOM_EMOJI_TAGGED_EMOJIS
+    const val MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI = KeyboardDefaults.MAX_CUSTOM_EMOJI_TAGS_PER_EMOJI
+    const val MAX_CUSTOM_EMOJI_TAG_CHARS = KeyboardDefaults.MAX_CUSTOM_EMOJI_TAG_CHARS
 
     private const val BACKUP_FORMAT = "dev.zain.znkeyboard.settings-backup"
     private const val BACKUP_SCHEMA_VERSION = 1
@@ -68,12 +71,9 @@ object KeyboardSettings {
     private const val KEYSTORE_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_LENGTH_BITS = 128
 
-    val DEFAULT_UPPER_ROW_KEY_IDS = listOf("ctrl", "tab", "pipe", "slash", "left", "up", "down", "right", "esc")
-    val DEFAULT_SECOND_ROW_BUTTON_IDS = listOf("rewrite", "left", "right", "backspace", "history")
-    val DEFAULT_KEYBOARD_ROW_ORDER = listOf(
-        KeyboardRow.Second.id,
-        KeyboardRow.Upper.id,
-    )
+    val DEFAULT_UPPER_ROW_KEY_IDS = KeyboardDefaults.DEFAULT_UPPER_ROW_KEY_IDS
+    val DEFAULT_SECOND_ROW_BUTTON_IDS = KeyboardDefaults.DEFAULT_SECOND_ROW_BUTTON_IDS
+    val DEFAULT_KEYBOARD_ROW_ORDER = KeyboardDefaults.DEFAULT_KEYBOARD_ROW_ORDER
 
     private val FUNCTION_KEY_OPTIONS = listOf(
         UpperRowKeyOption("ctrl", "Ctrl"),

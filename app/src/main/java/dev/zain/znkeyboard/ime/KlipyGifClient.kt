@@ -3,6 +3,7 @@ package dev.zain.znkeyboard.ime
 import android.content.Context
 import android.net.Uri
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.constants.GifDefaults
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -236,18 +237,18 @@ internal class KlipyGifClient(
     )
 
     private companion object {
-        const val CONTENT_FILTER = "medium"
-        const val MIN_RESULT_COUNT = 8
-        const val MAX_RESULT_COUNT = 50
-        const val DEFAULT_RESULT_COUNT = 16
-        const val DEFAULT_SUGGESTION_COUNT = 8
-        const val MAX_SUGGESTION_COUNT = 20
-        const val MIN_AUTOCOMPLETE_CHARS = 2
-        const val REQUEST_TIMEOUT_MS = 12_000
-        const val ERROR_PREVIEW_CHARS = 160
-        const val MAX_SHARE_BYTES = 8_000_000L
-        const val MAX_PREVIEW_BYTES = 2_500_000L
-        const val MAX_PREVIEW_FALLBACK_BYTES = 1_500_000L
+        const val CONTENT_FILTER = GifDefaults.CONTENT_FILTER
+        const val MIN_RESULT_COUNT = GifDefaults.CLIENT_MIN_RESULT_COUNT
+        const val MAX_RESULT_COUNT = GifDefaults.CLIENT_MAX_RESULT_COUNT
+        const val DEFAULT_RESULT_COUNT = GifDefaults.CLIENT_DEFAULT_RESULT_COUNT
+        const val DEFAULT_SUGGESTION_COUNT = GifDefaults.CLIENT_DEFAULT_SUGGESTION_COUNT
+        const val MAX_SUGGESTION_COUNT = GifDefaults.CLIENT_MAX_SUGGESTION_COUNT
+        const val MIN_AUTOCOMPLETE_CHARS = GifDefaults.CLIENT_MIN_AUTOCOMPLETE_CHARS
+        const val REQUEST_TIMEOUT_MS = GifDefaults.CLIENT_REQUEST_TIMEOUT_MS
+        const val ERROR_PREVIEW_CHARS = GifDefaults.CLIENT_ERROR_PREVIEW_CHARS
+        const val MAX_SHARE_BYTES = GifDefaults.MAX_SHARE_BYTES
+        const val MAX_PREVIEW_BYTES = GifDefaults.MAX_PREVIEW_BYTES
+        const val MAX_PREVIEW_FALLBACK_BYTES = GifDefaults.MAX_PREVIEW_FALLBACK_BYTES
     }
 }
 
@@ -316,11 +317,11 @@ internal object GifCacheStore {
         }
     }
 
-    private const val GIF_CACHE_DIR = "gif_cache"
-    private const val DOWNLOAD_TIMEOUT_MS = 20_000
-    private const val MAX_CACHED_GIF_BYTES = 8_000_000L
-    private const val MAX_CACHE_FILES = 40
-    private const val BUFFER_SIZE = 16 * 1024
+    private const val GIF_CACHE_DIR = GifDefaults.CACHE_DIR
+    private const val DOWNLOAD_TIMEOUT_MS = GifDefaults.CACHE_DOWNLOAD_TIMEOUT_MS
+    private const val MAX_CACHED_GIF_BYTES = GifDefaults.MAX_CACHED_GIF_BYTES
+    private const val MAX_CACHE_FILES = GifDefaults.MAX_CACHE_FILES
+    private const val BUFFER_SIZE = GifDefaults.CACHE_BUFFER_SIZE
 }
 
 private fun String.stableId(): String {

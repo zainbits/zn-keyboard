@@ -24,6 +24,7 @@ import androidx.core.content.FileProvider
 import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiSkinTone
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.constants.AgentDefaults
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -1889,20 +1890,20 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private companion object {
         const val TAG = "ZnKeyboardAgent"
-        const val MAX_REWRITE_SOURCE_CHARS = 12_000
+        const val MAX_REWRITE_SOURCE_CHARS = AgentDefaults.MAX_REWRITE_SOURCE_CHARS
         const val GESTURE_DELETE_CONTEXT_CHARS = 4_096
         const val MAX_GESTURE_DELETE_WORDS = 80
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
         const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
-        const val REQUEST_TIMEOUT_MS = 30_000
-        const val MIN_REWRITE_LLM_TOKENS = 2_000
-        const val MAX_REWRITE_LLM_TOKENS = 6_000
-        const val CHARS_PER_OUTPUT_TOKEN_ESTIMATE = 2
-        const val ERROR_PREVIEW_CHARS = 160
+        const val REQUEST_TIMEOUT_MS = AgentDefaults.REQUEST_TIMEOUT_MS
+        const val MIN_REWRITE_LLM_TOKENS = AgentDefaults.MIN_REWRITE_LLM_TOKENS
+        const val MAX_REWRITE_LLM_TOKENS = AgentDefaults.MAX_REWRITE_LLM_TOKENS
+        const val CHARS_PER_OUTPUT_TOKEN_ESTIMATE = AgentDefaults.CHARS_PER_OUTPUT_TOKEN_ESTIMATE
+        const val ERROR_PREVIEW_CHARS = AgentDefaults.ERROR_PREVIEW_CHARS
         const val GIF_MIME_TYPE = "image/gif"
-        const val STRUCTURED_OUTPUT_TEXT_FIELD = "text"
-        const val REWRITE_BASE_PROMPT_ASSET = "prompts/rewrite_base.md"
-        const val WHATSAPP_PROMPT_ASSET = "prompts/apps/whatsapp.md"
+        const val STRUCTURED_OUTPUT_TEXT_FIELD = AgentDefaults.STRUCTURED_OUTPUT_TEXT_FIELD
+        const val REWRITE_BASE_PROMPT_ASSET = AgentDefaults.REWRITE_BASE_PROMPT_ASSET
+        const val WHATSAPP_PROMPT_ASSET = AgentDefaults.WHATSAPP_PROMPT_ASSET
         const val WHATSAPP_PACKAGE_NAME = "com.whatsapp"
         const val WHATSAPP_BUSINESS_PACKAGE_NAME = "com.whatsapp.w4b"
         val EMOJI_SUGGESTION_TOKEN_SPLIT_REGEX = Regex("[^\\p{L}\\p{N}]+")

@@ -9,12 +9,13 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.R
+import dev.zain.znkeyboard.constants.ImeDimensions
 import kotlin.math.roundToInt
 
 internal object ImePanelChrome {
-    const val BROWSE_HEADER_HEIGHT_DP = 42
-    const val BACK_BUTTON_WIDTH_DP = 44
-    const val SEARCH_BUTTON_WIDTH_DP = 124
+    const val BROWSE_HEADER_HEIGHT_DP = ImeDimensions.BROWSE_HEADER_HEIGHT_DP
+    const val BACK_BUTTON_WIDTH_DP = ImeDimensions.BACK_BUTTON_WIDTH_DP
+    const val SEARCH_BUTTON_WIDTH_DP = ImeDimensions.SEARCH_BUTTON_WIDTH_DP
 
     fun backButton(
         context: Context,
@@ -50,7 +51,7 @@ internal object ImePanelChrome {
             isClickable = true
             isFocusable = false
             setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, SEARCH_TEXT_SIZE_SP)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, ImeDimensions.PANEL_SEARCH_TEXT_SIZE_SP)
             setPadding(dp(context, 14), 0, dp(context, 16), 0)
             background = roundedBackground(context, backgroundColor)
             setOnClickListener { onClick() }
@@ -75,5 +76,4 @@ internal object ImePanelChrome {
     }
 
     private const val SEARCH_LABEL = "Search"
-    private const val SEARCH_TEXT_SIZE_SP = 15f
 }

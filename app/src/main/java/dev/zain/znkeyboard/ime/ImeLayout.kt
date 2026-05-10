@@ -1,30 +1,27 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
+import dev.zain.znkeyboard.constants.ImeDimensions
 import kotlin.math.roundToInt
 
 internal object ImeLayout {
-    const val BASE_HEIGHT_DP = 282f
-    const val EXTENDED_PANEL_EXTRA_HEIGHT_DP = 224f
-    const val HORIZONTAL_PADDING_DP = 6
-    const val TOP_PADDING_DP = 6
-    const val BASE_BOTTOM_PADDING_DP = 8
-    const val KEY_GAP_DP = 5
-    const val ROW_GAP_DP = 6
-    const val KEY_RADIUS_DP = 8
-    const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = 16
-    const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = 2.0f
-    const val ICON_VIEWPORT = 24f
+    const val BASE_HEIGHT_DP = ImeDimensions.BASE_HEIGHT_DP
+    const val EXTENDED_PANEL_EXTRA_HEIGHT_DP = ImeDimensions.EXTENDED_PANEL_EXTRA_HEIGHT_DP
+    const val HORIZONTAL_PADDING_DP = ImeDimensions.HORIZONTAL_PADDING_DP
+    const val TOP_PADDING_DP = ImeDimensions.TOP_PADDING_DP
+    const val BASE_BOTTOM_PADDING_DP = ImeDimensions.BASE_BOTTOM_PADDING_DP
+    const val KEY_GAP_DP = ImeDimensions.KEY_GAP_DP
+    const val ROW_GAP_DP = ImeDimensions.ROW_GAP_DP
+    const val KEY_RADIUS_DP = ImeDimensions.KEY_RADIUS_DP
+    const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = ImeDimensions.MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP
+    const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = ImeDimensions.BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER
+    const val ICON_VIEWPORT = ImeDimensions.ICON_VIEWPORT
 
-    const val COMPACT_ROW_WEIGHT = 0.78f
-    const val STANDARD_ROW_WEIGHT = 1f
-    const val BOTTOM_ROW_WEIGHT = 1.08f
-    const val ROW_COUNT_WITH_UPPER_ROW = 5
-    const val ROW_WEIGHT_SUM_WITH_UPPER_ROW = COMPACT_ROW_WEIGHT +
-        STANDARD_ROW_WEIGHT +
-        STANDARD_ROW_WEIGHT +
-        STANDARD_ROW_WEIGHT +
-        BOTTOM_ROW_WEIGHT
+    const val COMPACT_ROW_WEIGHT = ImeDimensions.COMPACT_ROW_WEIGHT
+    const val STANDARD_ROW_WEIGHT = ImeDimensions.STANDARD_ROW_WEIGHT
+    const val BOTTOM_ROW_WEIGHT = ImeDimensions.BOTTOM_ROW_WEIGHT
+    const val ROW_COUNT_WITH_UPPER_ROW = ImeDimensions.ROW_COUNT_WITH_UPPER_ROW
+    const val ROW_WEIGHT_SUM_WITH_UPPER_ROW = ImeDimensions.ROW_WEIGHT_SUM_WITH_UPPER_ROW
 
     fun bottomSystemControlGapPx(context: Context): Float {
         val resourceId = context.resources.getIdentifier("navigation_bar_height", "dimen", "android")
