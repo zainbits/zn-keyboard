@@ -2,17 +2,13 @@ package dev.zain.znkeyboard.ime
 
 import android.content.Context
 import android.graphics.Color
-import android.graphics.ImageDecoder
 import android.graphics.Typeface
-import android.graphics.drawable.AnimatedImageDrawable
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.text.TextUtils
 import android.util.AttributeSet
-import android.util.LruCache
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -21,13 +17,13 @@ import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
+import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.StaggeredGridLayoutManager
+import com.bumptech.glide.Glide
 import dev.zain.znkeyboard.KeyboardSettings
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -68,7 +64,6 @@ class GifSearchView @JvmOverloads constructor(
     private val requestExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "ZnKeyboardGifSearch")
     }
-    private val previewLoader = GifPreviewLoader(mainHandler)
     private val suggestionButtons = mutableListOf<TextView>()
 
     private val queryText = TextView(context)
@@ -76,20 +71,52 @@ class GifSearchView @JvmOverloads constructor(
     private val searchHeader = searchRow().apply {
         visibility = GONE
     }
-    private val resultContent = LinearLayout(context).apply {
-        orientation = VERTICAL
-        clipToPadding = false
+    private val resultLayoutManager = StaggeredGridLayoutManager(2, RecyclerView.VERTICAL).apply {
+        gapStrategy = StaggeredGridLayoutManager.GAP_HANDLING_MOVE_ITEMS_BETWEEN_SPANS
     }
-    private val resultScroll = ScrollView(context).apply {
+    private val resultAdapter = GifResultAdapter(
+        onGifSelected = { gif -> callback?.onGifSelected(gif) },
+        cellHeightProvider = ::masonryCellHeightForCurrentWidth,
+        dp = ::dp,
+    )
+    private val resultList = RecyclerView(context).apply {
         clipToPadding = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         setPadding(0, dp(4), 0, dp(8))
-        setOnScrollChangeListener { view, _, scrollY, _, _ ->
-            val child = (view as? ScrollView)?.getChildAt(0) ?: return@setOnScrollChangeListener
-            if (scrollY + height >= child.height - dp(LOAD_MORE_THRESHOLD_DP)) {
-                loadNextPageIfNeeded()
+        itemAnimator = null
+        layoutManager = resultLayoutManager
+        adapter = resultAdapter
+        addOnScrollListener(
+            object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (dy < 0) return
+                    val lastVisible = resultLayoutManager
+                        .findLastVisibleItemPositions(null)
+                        .maxOrNull()
+                        ?: RecyclerView.NO_POSITION
+                    if (lastVisible >= resultAdapter.itemCount - LOAD_MORE_THRESHOLD_ITEMS) {
+                        loadNextPageIfNeeded()
+                    }
+                }
+            },
+        )
+    }
+    private val resultMessage = messageTextView("").apply {
+        minHeight = dp(140)
+        visibility = GONE
+    }
+    private val resultFrame = FrameLayout(context).apply {
+        clipToPadding = false
+        addView(
+            resultList,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+        )
+        addView(
+            resultMessage,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.CENTER
             }
-        }
+        )
     }
     private val suggestionStrip = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
@@ -131,11 +158,7 @@ class GifSearchView @JvmOverloads constructor(
             LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT),
         )
         addView(suggestionStrip, LayoutParams(LayoutParams.MATCH_PARENT, dp(34)).withMargins(top = 6))
-        resultScroll.addView(
-            resultContent,
-            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
-        )
-        addView(resultScroll, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 4))
+        addView(resultFrame, LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 4))
         addView(statusText, LayoutParams(LayoutParams.MATCH_PARENT, dp(24)).withMargins(top = 4))
         buildBottomToolbar()
         addView(bottomToolbar, LayoutParams(LayoutParams.MATCH_PARENT, dp(48)).withMargins(top = 4))
@@ -164,6 +187,13 @@ class GifSearchView @JvmOverloads constructor(
         }
 
         super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+    }
+
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (width != oldWidth) {
+            updateResultGridSizing()
+        }
     }
 
     fun setProviderSettings(settings: KeyboardSettings.GifProviderSettings) {
@@ -293,15 +323,14 @@ class GifSearchView @JvmOverloads constructor(
     fun dispose() {
         requestGeneration++
         cancelPendingRefresh()
-        stopAnimatedPreviews(resultContent)
+        clearResultContent()
         requestExecutor.shutdownNow()
-        previewLoader.shutdown()
     }
 
     override fun onDetachedFromWindow() {
         requestGeneration++
         cancelPendingRefresh()
-        stopAnimatedPreviews(resultContent)
+        clearResultContent()
         super.onDetachedFromWindow()
     }
 
@@ -309,9 +338,10 @@ class GifSearchView @JvmOverloads constructor(
         super.onVisibilityChanged(changedView, visibility)
         if (changedView == this) {
             if (visibility == VISIBLE) {
-                startAnimatedPreviews(resultContent)
+                updateResultGridSizing()
+                resultAdapter.reloadVisibleItems(resultList)
             } else {
-                pauseAnimatedPreviews(resultContent)
+                resultAdapter.clearVisibleRequests(resultList)
             }
         }
     }
@@ -597,139 +627,31 @@ class GifSearchView @JvmOverloads constructor(
         if (results.isEmpty()) {
             renderResultMessage(if (mode == Mode.Browse) "No trending GIFs found" else "No GIFs found")
         } else {
-            renderResultMasonry(results, footer, resetScroll)
+            renderResultGrid(results, footer, resetScroll)
         }
     }
 
-    private fun renderResultMasonry(results: List<GifSearchResult>, footer: String?, resetScroll: Boolean) {
-        val previousScrollY = resultScroll.scrollY
-        clearResultContent()
-
-        val columnCount = masonryColumnCount()
-        val gapPx = dp(MASONRY_GAP_DP)
-        val availableWidth = (
-            resultScroll.width
-                .takeIf { it > 0 }
-                ?: (resources.displayMetrics.widthPixels - paddingLeft - paddingRight)
-            )
-            .minus(resultScroll.paddingLeft + resultScroll.paddingRight)
-            .coerceAtLeast(dp(240))
-        val columnWidth = ((availableWidth - gapPx * (columnCount - 1)) / columnCount).coerceAtLeast(dp(96))
-        val columns = List(columnCount) { mutableListOf<MasonryCell>() }
-        val columnHeights = IntArray(columnCount)
-
-        results.forEach { gif ->
-            val targetColumn = columnHeights.indices.minBy { columnHeights[it] }
-            val cellHeight = masonryCellHeight(gif, columnWidth)
-            columns[targetColumn] += MasonryCell(gif = gif, heightPx = cellHeight)
-            columnHeights[targetColumn] += cellHeight + gapPx
-        }
-
-        val grid = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.TOP
-        }
-        columns.forEachIndexed { index, columnCells ->
-            val column = LinearLayout(context).apply {
-                orientation = VERTICAL
-            }
-            columnCells.forEach { cell ->
-                column.addView(
-                    createResultCellView(cell.gif),
-                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, cell.heightPx).apply {
-                        bottomMargin = gapPx
-                    },
-                )
-            }
-            grid.addView(
-                column,
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                    if (index < columns.lastIndex) {
-                        marginEnd = gapPx
-                    }
-                },
-            )
-        }
-
-        resultContent.addView(
-            grid,
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-        )
-        footer?.let(::addFooterMessage)
-        resultScroll.post {
+    private fun renderResultGrid(results: List<GifSearchResult>, footer: String?, resetScroll: Boolean) {
+        updateResultGridSizing()
+        resultMessage.visibility = GONE
+        resultList.visibility = VISIBLE
+        resultAdapter.submitList(
+            buildList {
+                results.forEach { gif -> add(GifListItem.Result(gif)) }
+                footer?.let { add(GifListItem.Footer(it)) }
+            },
+        ) {
             if (resetScroll) {
-                resultScroll.scrollTo(0, 0)
-            } else {
-                val maxScrollY = (resultContent.height - resultScroll.height).coerceAtLeast(0)
-                resultScroll.scrollTo(0, previousScrollY.coerceAtMost(maxScrollY))
+                resultList.scrollToPosition(0)
             }
         }
-    }
-
-    private fun createResultCellView(gif: GifSearchResult): View {
-        val cell = createResultCell()
-        return cell.container.apply {
-            visibility = VISIBLE
-            isClickable = true
-            contentDescription = gif.title
-            setOnClickListener { callback?.onGifSelected(gif) }
-            previewLoader.load(gif.previewUrl, cell.image, gif.previewFallbackUrl)
-        }
-    }
-
-    private fun createResultCell(): GifResultCell {
-        val image = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setBackgroundColor(PALETTE.key)
-        }
-        val badge = TextView(context).apply {
-            text = "GIF"
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(PALETTE.text)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
-            background = roundedBackground(Color.argb(176, 0, 0, 0), radiusDp = 5)
-            setPadding(dp(5), 0, dp(5), 0)
-        }
-        val container = FrameLayout(context).apply {
-            background = roundedBackground(PALETTE.key)
-            isFocusable = false
-            addView(
-                image,
-                FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                ),
-            )
-            addView(
-                badge,
-                FrameLayout.LayoutParams(dp(34), dp(20), Gravity.TOP or Gravity.START).apply {
-                    setMargins(dp(5), dp(5), 0, 0)
-                },
-            )
-        }
-        return GifResultCell(container = container, image = image)
     }
 
     private fun renderResultMessage(message: String) {
         clearResultContent()
-        resultContent.addView(
-            messageTextView(message).apply {
-                minHeight = dp(140)
-            },
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-        )
-        resultScroll.post { resultScroll.scrollTo(0, 0) }
-    }
-
-    private fun addFooterMessage(message: String) {
-        resultContent.addView(
-            messageTextView(message).apply {
-                setPadding(dp(10), dp(14), dp(10), dp(18))
-            },
-            LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT),
-        )
+        resultMessage.text = message
+        resultMessage.visibility = VISIBLE
+        resultList.visibility = GONE
     }
 
     private fun messageTextView(message: String): TextView {
@@ -744,8 +666,32 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private fun masonryColumnCount(): Int {
-        val availableWidth = resultScroll.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
+        val availableWidth = resultList.width.takeIf { it > 0 } ?: resources.displayMetrics.widthPixels
         return if (availableWidth >= dp(460)) 3 else 2
+    }
+
+    private fun masonryColumnWidth(columnCount: Int = masonryColumnCount()): Int {
+        val availableWidth = (
+            resultList.width
+                .takeIf { it > 0 }
+                ?: (resources.displayMetrics.widthPixels - paddingLeft - paddingRight)
+            )
+            .minus(resultList.paddingLeft + resultList.paddingRight)
+            .coerceAtLeast(dp(240))
+        val gapPx = dp(MASONRY_GAP_DP)
+        return ((availableWidth - gapPx * (columnCount - 1)) / columnCount).coerceAtLeast(dp(96))
+    }
+
+    private fun updateResultGridSizing() {
+        val columnCount = masonryColumnCount()
+        if (resultLayoutManager.spanCount != columnCount) {
+            resultLayoutManager.spanCount = columnCount
+        }
+        resultAdapter.setCellWidth(masonryColumnWidth(columnCount))
+    }
+
+    private fun masonryCellHeightForCurrentWidth(gif: GifSearchResult): Int {
+        return masonryCellHeight(gif, masonryColumnWidth())
     }
 
     private fun masonryCellHeight(gif: GifSearchResult, columnWidth: Int): Int {
@@ -758,46 +704,9 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private fun clearResultContent() {
-        stopAnimatedPreviews(resultContent)
-        resultContent.removeAllViews()
-    }
-
-    private fun startAnimatedPreviews(view: View) {
-        if (view is ImageView) {
-            (view.drawable as? AnimatedImageDrawable)?.start()
-            return
-        }
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                startAnimatedPreviews(view.getChildAt(index))
-            }
-        }
-    }
-
-    private fun pauseAnimatedPreviews(view: View) {
-        if (view is ImageView) {
-            (view.drawable as? AnimatedImageDrawable)?.stop()
-            return
-        }
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                pauseAnimatedPreviews(view.getChildAt(index))
-            }
-        }
-    }
-
-    private fun stopAnimatedPreviews(view: View) {
-        if (view is ImageView) {
-            (view.drawable as? AnimatedImageDrawable)?.stop()
-            view.setImageDrawable(null)
-            view.tag = null
-            return
-        }
-        if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                stopAnimatedPreviews(view.getChildAt(index))
-            }
-        }
+        resultAdapter.clearVisibleRequests(resultList)
+        resultAdapter.submitList(emptyList())
+        resultList.recycledViewPool.clear()
     }
 
     private fun renderSuggestions(suggestions: List<String>) {
@@ -939,7 +848,7 @@ class GifSearchView @JvmOverloads constructor(
         bottomToolbar.visibility = if (mode == Mode.Browse) VISIBLE else GONE
         updatePanelPadding()
 
-        val listParams = resultScroll.layoutParams as? LayoutParams
+        val listParams = resultFrame.layoutParams as? LayoutParams
         if (listParams != null) {
             if (mode == Mode.Browse) {
                 listParams.height = 0
@@ -948,7 +857,7 @@ class GifSearchView @JvmOverloads constructor(
                 listParams.height = dp(SEARCH_RESULT_LIST_HEIGHT_DP)
                 listParams.weight = 0f
             }
-            resultScroll.layoutParams = listParams
+            resultFrame.layoutParams = listParams
         }
         requestLayout()
     }
@@ -997,16 +906,6 @@ class GifSearchView @JvmOverloads constructor(
         val append: Boolean,
     )
 
-    private data class MasonryCell(
-        val gif: GifSearchResult,
-        val heightPx: Int,
-    )
-
-    private data class GifResultCell(
-        val container: FrameLayout,
-        val image: ImageView,
-    )
-
     private enum class Mode {
         Browse,
         Search,
@@ -1027,7 +926,7 @@ class GifSearchView @JvmOverloads constructor(
     private companion object {
         const val FIRST_PAGE = 1
         const val PAGE_SIZE = 24
-        const val LOAD_MORE_THRESHOLD_DP = 180
+        const val LOAD_MORE_THRESHOLD_ITEMS = 8
         const val MASONRY_GAP_DP = 4
         const val MIN_GIF_CELL_HEIGHT_DP = 88
         const val MAX_GIF_CELL_HEIGHT_DP = 190
@@ -1043,154 +942,250 @@ class GifSearchView @JvmOverloads constructor(
     }
 }
 
-private class GifPreviewLoader(
-    private val mainHandler: Handler,
-) {
-    private val executor: ExecutorService = Executors.newFixedThreadPool(3) { runnable ->
-        Thread(runnable, "ZnKeyboardGifPreview")
+private sealed class GifListItem {
+    abstract val stableId: String
+
+    data class Result(val gif: GifSearchResult) : GifListItem() {
+        override val stableId: String = gif.id
     }
-    private val cache = object : LruCache<String, ByteArray>(CACHE_SIZE_KB) {
-        override fun sizeOf(key: String, value: ByteArray): Int {
-            return (value.size / 1024).coerceAtLeast(1)
+
+    data class Footer(val message: String) : GifListItem() {
+        override val stableId: String = "footer:$message"
+    }
+}
+
+private class GifResultAdapter(
+    private val onGifSelected: (GifSearchResult) -> Unit,
+    private val cellHeightProvider: (GifSearchResult) -> Int,
+    private val dp: (Int) -> Int,
+) : ListAdapter<GifListItem, RecyclerView.ViewHolder>(DiffCallback) {
+    private var cellWidthPx = 0
+
+    init {
+        setHasStableIds(true)
+    }
+
+    fun setCellWidth(widthPx: Int) {
+        if (cellWidthPx == widthPx) return
+        cellWidthPx = widthPx
+        if (itemCount > 0) {
+            notifyItemRangeChanged(0, itemCount, PAYLOAD_SIZE_CHANGED)
         }
     }
 
-    fun load(url: String, imageView: ImageView, fallbackUrl: String? = null) {
-        val request = PreviewRequest(primaryUrl = url, fallbackUrl = fallbackUrl)
-        imageView.tag = request
-        (imageView.drawable as? AnimatedImageDrawable)?.stop()
-        imageView.setImageDrawable(ColorDrawable(PALETTE.key))
-
-        cache.get(url)?.let { bytes ->
-            decodeAndApply(request, bytes, imageView, isFallback = false)
-            return
+    fun clearVisibleRequests(recyclerView: RecyclerView) {
+        for (index in 0 until recyclerView.childCount) {
+            (recyclerView.getChildViewHolder(recyclerView.getChildAt(index)) as? GifViewHolder)?.clear()
         }
+    }
 
-        executor.execute {
-            val bytes = runCatching { downloadPreviewBytes(url) }.getOrNull()
-            if (bytes != null) {
-                cache.put(url, bytes)
+    fun reloadVisibleItems(recyclerView: RecyclerView) {
+        for (index in 0 until recyclerView.childCount) {
+            val position = recyclerView.getChildAdapterPosition(recyclerView.getChildAt(index))
+            if (position != RecyclerView.NO_POSITION) {
+                notifyItemChanged(position)
             }
-            val drawable = bytes?.let { runCatching { decodePreviewDrawable(it) }.getOrNull() }
-            if (drawable == null && fallbackUrl != null && fallbackUrl != url) {
-                loadFallback(request, imageView, fallbackUrl)
-            } else {
-                apply(request, imageView, drawable)
-            }
         }
     }
 
-    fun shutdown() {
-        executor.shutdownNow()
+    override fun getItemId(position: Int): Long {
+        return getItem(position).stableId.hashCode().toLong()
     }
 
-    private fun decodeAndApply(
-        request: PreviewRequest,
-        bytes: ByteArray,
-        imageView: ImageView,
-        isFallback: Boolean,
+    override fun getItemViewType(position: Int): Int {
+        return when (getItem(position)) {
+            is GifListItem.Result -> VIEW_TYPE_GIF
+            is GifListItem.Footer -> VIEW_TYPE_FOOTER
+        }
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        return when (viewType) {
+            VIEW_TYPE_GIF -> GifViewHolder(createResultCell(parent.context), onGifSelected, dp)
+            else -> FooterViewHolder(createFooterView(parent.context))
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        bindHolder(holder, getItem(position))
+    }
+
+    override fun onBindViewHolder(
+        holder: RecyclerView.ViewHolder,
+        position: Int,
+        payloads: MutableList<Any>,
     ) {
-        executor.execute {
-            val drawable = runCatching { decodePreviewDrawable(bytes) }.getOrNull()
-            if (drawable == null && !isFallback && request.fallbackUrl != null) {
-                loadFallback(request, imageView, request.fallbackUrl)
-            } else {
-                apply(request, imageView, drawable)
-            }
-        }
-    }
-
-    private fun loadFallback(request: PreviewRequest, imageView: ImageView, fallbackUrl: String) {
-        cache.get(fallbackUrl)?.let { bytes ->
-            decodeAndApply(request, bytes, imageView, isFallback = true)
+        if (payloads.contains(PAYLOAD_SIZE_CHANGED) && holder is GifViewHolder) {
+            val item = getItem(position) as? GifListItem.Result ?: return
+            holder.updateHeight(cellHeightProvider(item.gif))
             return
         }
-        val bytes = runCatching { downloadPreviewBytes(fallbackUrl) }.getOrNull()
-        if (bytes != null) {
-            cache.put(fallbackUrl, bytes)
-        }
-        val drawable = bytes?.let { runCatching { decodePreviewDrawable(it) }.getOrNull() }
-        apply(request, imageView, drawable)
+        bindHolder(holder, getItem(position))
     }
 
-    private fun apply(request: PreviewRequest, imageView: ImageView, drawable: Drawable?) {
-        mainHandler.post {
-            if (imageView.tag != request) return@post
-            if (drawable != null) {
-                imageView.setImageDrawable(drawable)
-                if (drawable is AnimatedImageDrawable) {
-                    drawable.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
-                    drawable.start()
-                }
-            } else {
-                imageView.setImageDrawable(ColorDrawable(PALETTE.key))
-            }
-        }
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+        (holder as? GifViewHolder)?.clear()
+        super.onViewRecycled(holder)
     }
 
-    private fun decodePreviewDrawable(bytes: ByteArray): Drawable {
-        val source = ImageDecoder.createSource(bytes)
-        return ImageDecoder.decodeDrawable(source) { decoder, info, _ ->
-            val width = info.size.width
-            val height = info.size.height
-            val longestEdge = maxOf(width, height)
-            if (longestEdge > MAX_DECODE_DIMENSION_PX && width > 0 && height > 0) {
-                val scale = MAX_DECODE_DIMENSION_PX.toFloat() / longestEdge.toFloat()
-                decoder.setTargetSize(
-                    (width * scale).roundToInt().coerceAtLeast(1),
-                    (height * scale).roundToInt().coerceAtLeast(1),
+    private fun bindHolder(holder: RecyclerView.ViewHolder, item: GifListItem) {
+        when {
+            holder is GifViewHolder && item is GifListItem.Result -> {
+                holder.bind(
+                    gif = item.gif,
+                    heightPx = cellHeightProvider(item.gif),
                 )
             }
+            holder is FooterViewHolder && item is GifListItem.Footer -> holder.bind(item.message)
         }
     }
 
-    private fun downloadPreviewBytes(url: String): ByteArray {
-        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = PREVIEW_TIMEOUT_MS
-            readTimeout = PREVIEW_TIMEOUT_MS
-            setRequestProperty("Accept", "image/*,*/*")
+    private fun createResultCell(context: Context): GifResultCell {
+        val image = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setBackgroundColor(Color.rgb(48, 48, 48))
         }
+        val badge = TextView(context).apply {
+            text = "GIF"
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 10f)
+            background = roundedBackground(Color.argb(176, 0, 0, 0), radiusDp = 5)
+            setPadding(dp(5), 0, dp(5), 0)
+        }
+        val container = FrameLayout(context).apply {
+            background = roundedBackground(Color.rgb(48, 48, 48))
+            isFocusable = false
+            addView(
+                image,
+                FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                ),
+            )
+            addView(
+                badge,
+                FrameLayout.LayoutParams(dp(34), dp(20), Gravity.TOP or Gravity.START).apply {
+                    setMargins(dp(5), dp(5), 0, 0)
+                },
+            )
+        }
+        return GifResultCell(container = container, image = image)
+    }
 
-        return try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw IOException("Preview download failed ($responseCode).")
-            }
-            val output = ByteArrayOutputStream()
-            var total = 0
-            connection.inputStream.use { input ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    if (total > MAX_PREVIEW_BYTES) {
-                        throw IOException("Preview is too large.")
-                    }
-                    output.write(buffer, 0, read)
-                }
-            }
-            output.toByteArray()
-        } finally {
-            connection.disconnect()
+    private fun createFooterView(context: Context): TextView {
+        return TextView(context).apply {
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setTextColor(Color.rgb(145, 145, 145))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            setPadding(dp(10), dp(14), dp(10), dp(18))
         }
     }
 
-    private data class PreviewRequest(
-        val primaryUrl: String,
-        val fallbackUrl: String?,
+    private fun roundedBackground(color: Int, radiusDp: Int = ImeLayout.KEY_RADIUS_DP): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radiusDp).toFloat()
+            setColor(color)
+        }
+    }
+
+    private data class GifResultCell(
+        val container: FrameLayout,
+        val image: ImageView,
     )
 
-    private object PALETTE {
-        val key = Color.rgb(48, 48, 48)
+    private class GifViewHolder(
+        private val cell: GifResultCell,
+        private val onGifSelected: (GifSearchResult) -> Unit,
+        private val dp: (Int) -> Int,
+    ) : RecyclerView.ViewHolder(cell.container) {
+        private var boundGif: GifSearchResult? = null
+
+        fun bind(gif: GifSearchResult, heightPx: Int) {
+            boundGif = gif
+            itemView.visibility = View.VISIBLE
+            itemView.isClickable = true
+            itemView.contentDescription = gif.title
+            itemView.setOnClickListener { onGifSelected(gif) }
+            updateHeight(heightPx)
+
+            val fallbackUrl = gif.previewFallbackUrl
+            val manager = Glide.with(cell.image)
+            val request = manager
+                .load(gif.previewUrl)
+                .override(MAX_DECODE_DIMENSION_PX)
+                .centerCrop()
+                .placeholder(placeholderDrawable())
+                .error(ColorDrawable(Color.rgb(48, 48, 48)))
+            if (fallbackUrl != null && fallbackUrl != gif.previewUrl) {
+                request.error(
+                    manager
+                        .load(fallbackUrl)
+                        .override(MAX_DECODE_DIMENSION_PX)
+                        .centerCrop()
+                        .placeholder(placeholderDrawable())
+                        .error(ColorDrawable(Color.rgb(48, 48, 48))),
+                )
+            }
+            request.into(cell.image)
+        }
+
+        fun updateHeight(heightPx: Int) {
+            val params = (itemView.layoutParams as? RecyclerView.LayoutParams)
+                ?: RecyclerView.LayoutParams(
+                    RecyclerView.LayoutParams.MATCH_PARENT,
+                    heightPx,
+                )
+            params.height = heightPx
+            params.bottomMargin = dp(4)
+            itemView.layoutParams = params
+        }
+
+        fun clear() {
+            boundGif = null
+            itemView.setOnClickListener(null)
+            Glide.with(cell.image).clear(cell.image)
+            cell.image.setImageDrawable(ColorDrawable(Color.rgb(48, 48, 48)))
+        }
+
+        private fun placeholderDrawable(): ColorDrawable {
+            return ColorDrawable(Color.rgb(48, 48, 48))
+        }
+    }
+
+    private class FooterViewHolder(
+        private val textView: TextView,
+    ) : RecyclerView.ViewHolder(textView) {
+        fun bind(message: String) {
+            textView.text = message
+            val params = (itemView.layoutParams as? StaggeredGridLayoutManager.LayoutParams)
+                ?: StaggeredGridLayoutManager.LayoutParams(
+                    RecyclerView.LayoutParams.MATCH_PARENT,
+                    RecyclerView.LayoutParams.WRAP_CONTENT,
+                )
+            params.isFullSpan = true
+            itemView.layoutParams = params
+        }
+    }
+
+    private object DiffCallback : DiffUtil.ItemCallback<GifListItem>() {
+        override fun areItemsTheSame(oldItem: GifListItem, newItem: GifListItem): Boolean {
+            return oldItem.stableId == newItem.stableId
+        }
+
+        override fun areContentsTheSame(oldItem: GifListItem, newItem: GifListItem): Boolean {
+            return oldItem == newItem
+        }
     }
 
     private companion object {
-        const val CACHE_SIZE_KB = 12 * 1024
-        const val PREVIEW_TIMEOUT_MS = 10_000
-        const val MAX_PREVIEW_BYTES = 2_500_000
+        const val VIEW_TYPE_GIF = 1
+        const val VIEW_TYPE_FOOTER = 2
         const val MAX_DECODE_DIMENSION_PX = 360
-        const val BUFFER_SIZE = 8 * 1024
+        const val PAYLOAD_SIZE_CHANGED = "size"
     }
 }

@@ -66,9 +66,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var agentError: String? = null
     private var agentLoading = false
     private var requestGeneration = 0
+    private var gifShareGeneration = 0
     private var backspaceGestureDeleteState: BackspaceGestureDeleteState? = null
 
     override fun onCreateInputView(): View {
+        gifSearchView?.dispose()
+        gifSearchView = null
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         defaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
@@ -167,8 +170,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onDestroy() {
         requestGeneration++
+        gifShareGeneration++
         cancelEmojiSuggestionRefresh()
         gifSearchView?.dispose()
+        gifSearchView = null
         super.onDestroy()
     }
 
@@ -1034,14 +1039,20 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
 
         val targetPackage = info?.packageName
+        val appContext = applicationContext
+        val authority = "$packageName.gifprovider"
+        val generation = ++gifShareGeneration
         Toast.makeText(this, "Preparing GIF...", Toast.LENGTH_SHORT).show()
         Thread {
             val result = runCatching {
-                val file = GifCacheStore.downloadGif(this, gif)
-                FileProvider.getUriForFile(this, "$packageName.gifprovider", file)
+                val file = GifCacheStore.downloadGif(appContext, gif)
+                FileProvider.getUriForFile(appContext, authority, file)
             }
 
             mainHandler.post {
+                if (generation != gifShareGeneration) {
+                    return@post
+                }
                 if (targetPackage != currentEditorInfo?.packageName) {
                     return@post
                 }
