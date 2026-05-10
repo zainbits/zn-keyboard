@@ -323,7 +323,7 @@ class GifSearchView @JvmOverloads constructor(
             addView(
                 ImePanelChrome.backButton(
                     context = context,
-                    contentDescription = "Back to emoji",
+                    contentDescription = "Back to keyboard",
                     backgroundColor = PALETTE.function,
                     textColor = PALETTE.mutedText,
                     onClick = { callback?.onGifSearchClosed() },
@@ -395,16 +395,10 @@ class GifSearchView @JvmOverloads constructor(
             addView(
                 ImePanelChrome.backButton(
                     context = context,
-                    contentDescription = "Back to GIFs",
+                    contentDescription = "Back",
                     backgroundColor = PALETTE.function,
                     textColor = PALETTE.mutedText,
-                    onClick = {
-                        if (mode == Mode.Search) {
-                            callback?.onGifSearchBackToBrowse()
-                        } else {
-                            showBrowseMode()
-                        }
-                    },
+                    onClick = ::navigateBackFromSearchHeader,
                 ),
                 LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
@@ -441,6 +435,14 @@ class GifSearchView @JvmOverloads constructor(
                 },
                 LayoutParams(dp(72), LayoutParams.MATCH_PARENT).withMargins(start = 4),
             )
+        }
+    }
+
+    private fun navigateBackFromSearchHeader() {
+        if (mode == Mode.Search) {
+            callback?.onGifSearchBackToBrowse()
+        } else {
+            callback?.onGifSearchClosed()
         }
     }
 

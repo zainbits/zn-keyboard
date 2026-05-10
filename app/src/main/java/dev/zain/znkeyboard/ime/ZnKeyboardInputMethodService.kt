@@ -282,7 +282,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onGifSearchClosed() {
-        showEmojiPanel()
+        showKeyboardPanel()
     }
 
     override fun onGifSearchBackToBrowse() {
