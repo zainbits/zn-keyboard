@@ -20,7 +20,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import dev.zain.znkeyboard.KeyboardSettings
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sin
@@ -31,6 +33,10 @@ class ZnKeyboardView @JvmOverloads constructor(
 ) : View(context, attrs) {
     interface Callback {
         fun onKeyboardAction(action: KeyboardAction, modifiers: ModifierState)
+        fun onBackspaceGestureDeleteStarted(): Boolean
+        fun onBackspaceGestureDeleteChanged(wordCount: Int)
+        fun onBackspaceGestureDeleteFinished()
+        fun onBackspaceGestureDeleteCancelled()
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
         fun onSpacebarEmojiSuggestionSelected(emoji: String)
@@ -91,6 +97,9 @@ class ZnKeyboardView @JvmOverloads constructor(
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
+    }
+    private val touchSlopPx by lazy(LazyThreadSafetyMode.NONE) {
+        ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     }
     private val activeTouches = SparseArray<ActiveTouch>()
     private val pointerQueue = mutableListOf<Int>()
@@ -272,7 +281,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val pointerId = event.getPointerId(pointerIndex)
         val hit = findHit(event.getX(pointerIndex), event.getY(pointerIndex))
         val key = hit?.key?.takeIf { it.enabled }
-        activeTouches.put(pointerId, ActiveTouch(key))
+        val touch = ActiveTouch(key)
+        activeTouches.put(pointerId, touch)
         pointerQueue.remove(pointerId)
         pointerQueue.add(pointerId)
         when (key?.id) {
@@ -289,6 +299,12 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
         }
         key?.takeIf(::isBackspaceKey)?.let { key ->
+            touch.backspaceGesture = BackspaceGestureTouch(
+                key = key,
+                startX = event.getX(pointerIndex),
+                startY = event.getY(pointerIndex),
+                wordStepPx = max(dp(GESTURE_DELETE_WORD_STEP_DP), hit.visualBounds.width() * 0.72f),
+            )
             scheduleBackspaceRepeat(pointerId, key)
         }
     }
@@ -298,7 +314,14 @@ class ZnKeyboardView @JvmOverloads constructor(
         for (pointerIndex in 0 until event.pointerCount) {
             val pointerId = event.getPointerId(pointerIndex)
             val touch = activeTouches.get(pointerId) ?: continue
-            val key = findHit(event.getX(pointerIndex), event.getY(pointerIndex))?.key?.takeIf { it.enabled }
+            val x = event.getX(pointerIndex)
+            val y = event.getY(pointerIndex)
+            if (updateBackspaceGesture(pointerId, touch, x, y)) {
+                changed = true
+                continue
+            }
+
+            val key = findHit(x, y)?.key?.takeIf { it.enabled }
             if (touch.currentKey?.id != key?.id) {
                 touch.currentKey = key
                 if (pendingLongPressPointerId == pointerId && key?.id != pendingLongPressKeyId) {
@@ -318,11 +341,66 @@ class ZnKeyboardView @JvmOverloads constructor(
         return changed
     }
 
+    private fun updateBackspaceGesture(
+        pointerId: Int,
+        touch: ActiveTouch,
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val gesture = touch.backspaceGesture ?: return false
+        if (gesture.consumedWithoutGesture) {
+            return true
+        }
+        if (touch.repeatConsumed && !gesture.active) {
+            touch.backspaceGesture = null
+            return false
+        }
+
+        val dx = x - gesture.startX
+        val dy = y - gesture.startY
+        val activationDistance = max(touchSlopPx, dp(GESTURE_DELETE_ACTIVATION_DP))
+        if (!gesture.active) {
+            val leftDistance = -dx
+            if (leftDistance < activationDistance || leftDistance < abs(dy) * 1.2f) {
+                return false
+            }
+
+            cancelBackspaceRepeatFor(pointerId)
+            touch.repeatConsumed = true
+            touch.currentKey = gesture.key
+            if (callback?.onBackspaceGestureDeleteStarted() == true) {
+                gesture.active = true
+            } else {
+                gesture.consumedWithoutGesture = true
+                touch.currentKey = null
+                return true
+            }
+        }
+
+        val wordCount = backspaceGestureWordCount(gesture, activationDistance, x)
+        if (wordCount != gesture.lastWordCount) {
+            gesture.lastWordCount = wordCount
+            callback?.onBackspaceGestureDeleteChanged(wordCount)
+        }
+        return true
+    }
+
+    private fun backspaceGestureWordCount(
+        gesture: BackspaceGestureTouch,
+        activationDistance: Float,
+        x: Float,
+    ): Int {
+        val leftDistance = (gesture.startX - x).coerceAtLeast(0f)
+        if (leftDistance < activationDistance) return 0
+        return 1 + ((leftDistance - activationDistance) / gesture.wordStepPx).toInt()
+    }
+
     private fun releasePointersThrough(pointerId: Int) {
         while (pointerQueue.isNotEmpty()) {
             val nextPointerId = pointerQueue.removeAt(0)
             val touch = activeTouches.get(nextPointerId)
             activeTouches.remove(nextPointerId)
+            finishBackspaceGesture(touch)
             cancelLongPressFor(nextPointerId)
             cancelBackspaceRepeatFor(nextPointerId)
             if (touch?.longPressConsumed != true && touch?.repeatConsumed != true) {
@@ -340,8 +418,26 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun cancelActiveTouches() {
         cancelPendingLongPress()
         cancelBackspaceRepeat()
+        cancelBackspaceGestures()
         activeTouches.clear()
         pointerQueue.clear()
+    }
+
+    private fun finishBackspaceGesture(touch: ActiveTouch?) {
+        val gesture = touch?.backspaceGesture ?: return
+        if (gesture.active) {
+            callback?.onBackspaceGestureDeleteFinished()
+        }
+        touch.backspaceGesture = null
+    }
+
+    private fun cancelBackspaceGestures() {
+        for (index in 0 until activeTouches.size()) {
+            val gesture = activeTouches.valueAt(index).backspaceGesture
+            if (gesture?.active == true) {
+                callback?.onBackspaceGestureDeleteCancelled()
+            }
+        }
     }
 
     private fun scheduleLongPress(
@@ -407,6 +503,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
 
         touch.repeatConsumed = true
+        touch.backspaceGesture = null
         backspaceRepeatCount += 1
         handleKey(key)
         invalidate()
@@ -1151,6 +1248,17 @@ class ZnKeyboardView @JvmOverloads constructor(
         var currentKey: KeySpec?,
         var longPressConsumed: Boolean = false,
         var repeatConsumed: Boolean = false,
+        var backspaceGesture: BackspaceGestureTouch? = null,
+    )
+
+    private data class BackspaceGestureTouch(
+        val key: KeySpec,
+        val startX: Float,
+        val startY: Float,
+        val wordStepPx: Float,
+        var active: Boolean = false,
+        var consumedWithoutGesture: Boolean = false,
+        var lastWordCount: Int = 0,
     )
 
     private sealed class KeyIntent {
@@ -1185,6 +1293,8 @@ class ZnKeyboardView @JvmOverloads constructor(
     private companion object {
         const val DISABLED_KEY_ALPHA = 118
         const val DISABLED_CONTENT_ALPHA = 130
+        const val GESTURE_DELETE_ACTIVATION_DP = 10f
+        const val GESTURE_DELETE_WORD_STEP_DP = 42f
         const val AI_LOADING_CYCLE_MS = 2200L
         const val TWO_PI = 6.2831855f
         val AI_LOADING_COLORS = intArrayOf(

@@ -66,6 +66,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var agentError: String? = null
     private var agentLoading = false
     private var requestGeneration = 0
+    private var backspaceGestureDeleteState: BackspaceGestureDeleteState? = null
 
     override fun onCreateInputView(): View {
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
@@ -204,6 +205,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
             is KeyboardAction.Text -> handleText(action.value, modifiers)
         }
+    }
+
+    override fun onBackspaceGestureDeleteStarted(): Boolean {
+        return startBackspaceGestureDelete()
+    }
+
+    override fun onBackspaceGestureDeleteChanged(wordCount: Int) {
+        updateBackspaceGestureDeleteSelection(wordCount)
+    }
+
+    override fun onBackspaceGestureDeleteFinished() {
+        finishBackspaceGestureDelete()
+    }
+
+    override fun onBackspaceGestureDeleteCancelled() {
+        cancelBackspaceGestureDelete()
     }
 
     override fun onEmojiPanelRequested() {
@@ -823,6 +840,170 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
         }
         scheduleEmojiSuggestionRefresh()
+    }
+
+    private fun startBackspaceGestureDelete(): Boolean {
+        val inputConnection = currentInputConnection ?: return false
+        val info = currentEditorInfo
+        if (
+            activeSurface != KeyboardSurface.Keyboard ||
+            isRawKeyEventEditor(info) ||
+            isSensitiveEditor(info)
+        ) {
+            return false
+        }
+
+        val snapshot = captureEditorSnapshot(GESTURE_DELETE_CONTEXT_CHARS + 1) ?: return false
+        val cursorOffset = snapshot.selectionStart
+        if (cursorOffset != snapshot.selectionEnd) return false
+
+        val localCursorOffset = cursorOffset - snapshot.textStartOffset
+        if (localCursorOffset !in 0..snapshot.text.length) return false
+
+        val beforeCursor = snapshot.text
+            .substring(0, localCursorOffset)
+            .takeLast(GESTURE_DELETE_CONTEXT_CHARS)
+        val wordSelectionStarts = previousGestureDeleteWordStarts(
+            beforeCursor = beforeCursor,
+            cursorOffset = cursorOffset,
+        )
+        if (wordSelectionStarts.isEmpty()) return false
+        val wordSelectionTexts = wordSelectionStarts.map { selectionStart ->
+            beforeCursor.takeLast(cursorOffset - selectionStart)
+        }
+
+        cancelActiveAgentForEditorChange()
+        inputConnection.finishComposingText()
+        backspaceGestureDeleteState = BackspaceGestureDeleteState(
+            anchorOffset = cursorOffset,
+            originalSelectionStart = snapshot.selectionStart,
+            originalSelectionEnd = snapshot.selectionEnd,
+            wordSelectionStarts = wordSelectionStarts,
+            wordSelectionTexts = wordSelectionTexts,
+        )
+        return true
+    }
+
+    private fun updateBackspaceGestureDeleteSelection(wordCount: Int) {
+        val state = backspaceGestureDeleteState ?: return
+        val inputConnection = currentInputConnection ?: return
+        val coercedWordCount = wordCount.coerceIn(0, state.wordSelectionStarts.size)
+        if (coercedWordCount == state.currentWordCount) return
+
+        val selectionStart = if (coercedWordCount == 0) {
+            state.anchorOffset
+        } else {
+            state.wordSelectionStarts[coercedWordCount - 1]
+        }
+        var selectionUpdated = false
+        inputConnection.beginBatchEdit()
+        try {
+            selectionUpdated = inputConnection.setSelection(selectionStart, state.anchorOffset)
+        } finally {
+            inputConnection.endBatchEdit()
+        }
+        if (selectionUpdated) {
+            state.currentWordCount = coercedWordCount
+        } else {
+            cancelBackspaceGestureDelete()
+        }
+    }
+
+    private fun finishBackspaceGestureDelete() {
+        val state = backspaceGestureDeleteState ?: return
+        backspaceGestureDeleteState = null
+        val inputConnection = currentInputConnection ?: return
+        val selectedWordCount = state.currentWordCount.coerceIn(0, state.wordSelectionStarts.size)
+        if (selectedWordCount == 0) {
+            restoreBackspaceGestureDeleteSelection(inputConnection, state)
+            return
+        }
+
+        val selectionStart = state.wordSelectionStarts[selectedWordCount - 1]
+        val expectedText = state.wordSelectionTexts[selectedWordCount - 1]
+        if (!isBackspaceGestureDeleteTargetCurrent(state, selectionStart, expectedText)) {
+            restoreBackspaceGestureDeleteSelection(inputConnection, state)
+            return
+        }
+
+        var committed = false
+        inputConnection.beginBatchEdit()
+        try {
+            if (inputConnection.setSelection(selectionStart, state.anchorOffset)) {
+                committed = inputConnection.commitText("", 1)
+            }
+        } finally {
+            inputConnection.endBatchEdit()
+        }
+
+        if (committed) {
+            scheduleEmojiSuggestionRefresh()
+        } else {
+            restoreBackspaceGestureDeleteSelection(inputConnection, state)
+        }
+    }
+
+    private fun cancelBackspaceGestureDelete() {
+        val state = backspaceGestureDeleteState ?: return
+        backspaceGestureDeleteState = null
+        currentInputConnection?.let { inputConnection ->
+            restoreBackspaceGestureDeleteSelection(inputConnection, state)
+        }
+    }
+
+    private fun isBackspaceGestureDeleteTargetCurrent(
+        state: BackspaceGestureDeleteState,
+        selectionStart: Int,
+        expectedText: String,
+    ): Boolean {
+        val snapshot = captureEditorSnapshot(GESTURE_DELETE_CONTEXT_CHARS + 1) ?: return false
+        val localStart = selectionStart - snapshot.textStartOffset
+        val localEnd = state.anchorOffset - snapshot.textStartOffset
+        if (localStart < 0 || localEnd > snapshot.text.length || localStart > localEnd) {
+            return false
+        }
+        return snapshot.text.substring(localStart, localEnd) == expectedText
+    }
+
+    private fun restoreBackspaceGestureDeleteSelection(
+        inputConnection: InputConnection,
+        state: BackspaceGestureDeleteState,
+    ) {
+        val maxOffset = captureEditorSnapshot(GESTURE_DELETE_CONTEXT_CHARS + 1)
+            ?.let { snapshot -> snapshot.textStartOffset + snapshot.text.length }
+            ?: state.originalSelectionEnd
+        val selectionStart = state.originalSelectionStart.coerceIn(0, maxOffset)
+        val selectionEnd = state.originalSelectionEnd.coerceIn(0, maxOffset)
+        inputConnection.beginBatchEdit()
+        try {
+            inputConnection.setSelection(selectionStart, selectionEnd)
+        } finally {
+            inputConnection.endBatchEdit()
+        }
+    }
+
+    private fun previousGestureDeleteWordStarts(
+        beforeCursor: String,
+        cursorOffset: Int,
+    ): List<Int> {
+        val starts = mutableListOf<Int>()
+        var scanOffset = beforeCursor.length
+        while (scanOffset > 0 && starts.size < MAX_GESTURE_DELETE_WORDS) {
+            while (scanOffset > 0 && beforeCursor[scanOffset - 1].isWhitespace()) {
+                scanOffset--
+            }
+            if (scanOffset == 0) break
+
+            while (scanOffset > 0 && !beforeCursor[scanOffset - 1].isWhitespace()) {
+                scanOffset--
+            }
+
+            val selectedCharCount = beforeCursor.length - scanOffset
+            val absoluteStart = cursorOffset - selectedCharCount
+            if (absoluteStart < 0) break
+            starts += absoluteStart
+        }
+        return starts
     }
 
     private fun handleEnter(modifiers: ModifierState) {
@@ -1652,6 +1833,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val replacementText: String,
     )
 
+    private data class BackspaceGestureDeleteState(
+        val anchorOffset: Int,
+        val originalSelectionStart: Int,
+        val originalSelectionEnd: Int,
+        val wordSelectionStarts: List<Int>,
+        val wordSelectionTexts: List<String>,
+        var currentWordCount: Int = 0,
+    )
+
     private enum class KeyboardSurface {
         Keyboard,
         Emoji,
@@ -1689,6 +1879,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private companion object {
         const val TAG = "ZnKeyboardAgent"
         const val MAX_REWRITE_SOURCE_CHARS = 12_000
+        const val GESTURE_DELETE_CONTEXT_CHARS = 4_096
+        const val MAX_GESTURE_DELETE_WORDS = 80
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
         const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
         const val REQUEST_TIMEOUT_MS = 30_000
