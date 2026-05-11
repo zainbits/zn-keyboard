@@ -40,6 +40,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onBackspaceGestureDeleteCancelled()
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
+        fun onEmojiKeySuggestionSelected(emoji: String)
         fun onAgentRewriteRequested()
         fun onAgentHistoryRequested()
     }
@@ -93,6 +94,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
     private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
+    private var emojiKeySuggestion: String? = null
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -168,6 +170,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun setEnterLabel(label: String) {
         if (enterLabel != label) {
             enterLabel = label
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun setEmojiKeySuggestion(emoji: String?) {
+        if (emojiKeySuggestion != emoji) {
+            emojiKeySuggestion = emoji
             refreshHitTargets()
             invalidate()
         }
@@ -279,6 +289,14 @@ class ZnKeyboardView @JvmOverloads constructor(
         when (key?.id) {
             "comma" -> scheduleLongPress(pointerId, "comma") {
                 callback?.onEmojiPanelRequested()
+            }
+            "emoji" -> emojiKeySuggestion?.let { emoji ->
+                scheduleLongPress(pointerId, "emoji") {
+                    callback?.onEmojiKeySuggestionSelected(emoji)
+                }
+            }
+            "apostrophe" -> scheduleLongPress(pointerId, "apostrophe") {
+                handleKey(KeySpec("backtick_long_press", "`", KeyIntent.Dispatch(KeyboardAction.Text("`"))))
             }
             "space" -> scheduleLongPress(pointerId, "space") {
                 callback?.onSnippetPanelRequested()
@@ -561,10 +579,30 @@ class ZnKeyboardView @JvmOverloads constructor(
             val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
             canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
         }
+        drawLongPressHint(canvas, key.longPressHint, bounds, active, contentAlpha)
 
         if (key.id == "shift" && shiftState == ShiftState.Locked) {
             drawShiftLockIndicator(canvas, bounds, contentColor)
         }
+    }
+
+    private fun drawLongPressHint(
+        canvas: Canvas,
+        hint: String?,
+        bounds: RectF,
+        active: Boolean,
+        alpha: Int,
+    ) {
+        if (hint == null) return
+
+        textPaint.textSize = sp(8f).coerceAtMost(bounds.height() * 0.22f)
+        textPaint.color = if (active) PALETTE.pressedText else PALETTE.mutedText
+        textPaint.alpha = min(alpha, LONG_PRESS_HINT_ALPHA)
+        textPaint.textAlign = Paint.Align.RIGHT
+        val metrics = textPaint.fontMetrics
+        val baseline = bounds.top + dp(5f) - metrics.ascent
+        canvas.drawText(hint, bounds.right - dp(6f), baseline, textPaint)
+        textPaint.textAlign = Paint.Align.CENTER
     }
 
     private fun drawRewriteLoadingWash(canvas: Canvas, bounds: RectF, radius: Float) {
@@ -1120,7 +1158,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
-                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
                 KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
             ),
             heightWeight = 1f,
@@ -1135,7 +1173,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
-                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
                 KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
             ),
             heightWeight = 1f,
@@ -1148,13 +1186,14 @@ class ZnKeyboardView @JvmOverloads constructor(
             return RowSpec(
                 listOf(
                     KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
-                    KeySpec("emoji", "Emoji", KeyIntent.OpenEmojiPanel, 0.9f, KeyRole.Function, icon = KeyIcon.Emoji),
+                    emojiKeySpec(),
                     KeySpec(
                         "space",
                         "space",
                         KeyIntent.Dispatch(KeyboardAction.Text(" ")),
                         5.1f,
                         KeyRole.Function,
+                        longPressHint = "Snip",
                     ),
                     KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
                 ),
@@ -1164,17 +1203,31 @@ class ZnKeyboardView @JvmOverloads constructor(
         return RowSpec(
             listOf(
                 KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
-                KeySpec("emoji", "Emoji", KeyIntent.OpenEmojiPanel, 0.9f, KeyRole.Function, icon = KeyIcon.Emoji),
+                emojiKeySpec(),
                 KeySpec(
                     "space",
                     "space",
                     KeyIntent.Dispatch(KeyboardAction.Text(" ")),
                     5.1f,
                     KeyRole.Function,
+                    longPressHint = "Snip",
                 ),
                 KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
             ),
             heightWeight = 1.08f,
+        )
+    }
+
+    private fun emojiKeySpec(): KeySpec {
+        val suggestion = emojiKeySuggestion
+        return KeySpec(
+            id = "emoji",
+            label = suggestion ?: "Emoji",
+            intent = KeyIntent.OpenEmojiPanel,
+            weight = 0.9f,
+            role = KeyRole.Function,
+            icon = if (suggestion == null) KeyIcon.Emoji else null,
+            largeLabel = suggestion != null,
         )
     }
 
@@ -1271,6 +1324,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val enabled: Boolean = true,
         val emphasizedWhenDisabled: Boolean = false,
         val largeLabel: Boolean = false,
+        val longPressHint: String? = null,
     )
 
     private data class KeyHit(
@@ -1335,6 +1389,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private companion object {
         const val DISABLED_KEY_ALPHA = 118
         const val DISABLED_CONTENT_ALPHA = 130
+        const val LONG_PRESS_HINT_ALPHA = 170
         const val GESTURE_DELETE_ACTIVATION_DP = 10f
         const val GESTURE_DELETE_WORD_STEP_DP = 42f
         const val AI_LOADING_CYCLE_MS = 2200L
