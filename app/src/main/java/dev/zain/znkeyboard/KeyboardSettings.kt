@@ -119,7 +119,7 @@ object KeyboardSettings {
     val SHORTCUT_ROW_KEY_OPTIONS = listOf(
         UpperRowKeyOption("rewrite", "Rewrite"),
     ) + FUNCTION_KEY_OPTIONS + listOf(
-        UpperRowKeyOption("history", "History"),
+        UpperRowKeyOption("history", "Clipboard"),
     )
     val UPPER_ROW_KEY_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS
     val SECOND_ROW_BUTTON_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS

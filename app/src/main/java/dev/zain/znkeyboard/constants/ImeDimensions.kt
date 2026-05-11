@@ -29,4 +29,5 @@ object ImeDimensions {
     const val BACK_BUTTON_WIDTH_DP = 44
     const val SEARCH_BUTTON_WIDTH_DP = 124
     const val PANEL_SEARCH_TEXT_SIZE_SP = 15f
+    const val CLIPBOARD_HISTORY_TITLE_START_GAP_DP = 10
 }

@@ -42,7 +42,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onSnippetPanelRequested()
         fun onEmojiKeySuggestionSelected(emoji: String)
         fun onAgentRewriteRequested()
-        fun onAgentHistoryRequested()
+        fun onClipboardHistoryRequested()
     }
 
     var callback: Callback? = null
@@ -738,6 +738,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIcon.Delete -> drawDeleteIcon(canvas)
             KeyIcon.Search -> drawSearchIcon(canvas)
             KeyIcon.Enter -> drawEnterIcon(canvas)
+            KeyIcon.Clipboard -> drawClipboardIcon(canvas)
         }
         canvas.restore()
     }
@@ -854,6 +855,36 @@ class ZnKeyboardView @JvmOverloads constructor(
         canvas.drawPath(path, iconPaint)
     }
 
+    private fun drawClipboardIcon(canvas: Canvas) {
+        val board = Path().apply {
+            addRoundRect(6f, 5.5f, 18f, 21f, 2.2f, 2.2f, Path.Direction.CW)
+        }
+        val clip = Path().apply {
+            addRoundRect(9f, 3f, 15f, 7.5f, 1.5f, 1.5f, Path.Direction.CW)
+        }
+        val lines = Path().apply {
+            moveTo(9f, 11f)
+            lineTo(15f, 11f)
+            moveTo(9f, 15f)
+            lineTo(15f, 15f)
+        }
+        canvas.drawPath(board, iconPaint)
+        canvas.drawPath(clip, iconPaint)
+        canvas.drawPath(lines, iconPaint)
+    }
+
+    private fun Path.addRoundRect(
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        rx: Float,
+        ry: Float,
+        dir: Path.Direction,
+    ) {
+        addRoundRect(RectF(left, top, right, bottom), rx, ry, dir)
+    }
+
     private fun isKeyPressed(keyId: String): Boolean {
         for (index in 0 until activeTouches.size()) {
             if (activeTouches.valueAt(index).currentKey?.id == keyId) {
@@ -909,7 +940,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
             KeyIntent.OpenEmojiPanel -> callback?.onEmojiPanelRequested()
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
-            KeyIntent.AgentHistory -> callback?.onAgentHistoryRequested()
+            KeyIntent.ClipboardHistory -> callback?.onClipboardHistoryRequested()
             is KeyIntent.Dispatch -> {
                 callback?.onKeyboardAction(intent.action, ModifierState(ctrl = ctrl, alt = alt))
                 if (shiftState == ShiftState.OneShot && key.consumesOneShotShift) {
@@ -1088,10 +1119,11 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
             "history" -> KeySpec(
                 id = id,
-                label = "History",
-                intent = KeyIntent.AgentHistory,
+                label = "Clipboard",
+                intent = KeyIntent.ClipboardHistory,
                 weight = weight,
                 role = KeyRole.Function,
+                icon = KeyIcon.Clipboard,
                 enabled = enabled && shortcutRowState.historyEnabled && !shortcutRowState.loading,
             )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
@@ -1302,6 +1334,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         Delete,
         Search,
         Enter,
+        Clipboard,
     }
 
     private enum class ArrowDirection {
@@ -1368,7 +1401,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object ToggleCtrl : KeyIntent()
         data object OpenEmojiPanel : KeyIntent()
         data object AgentRewrite : KeyIntent()
-        data object AgentHistory : KeyIntent()
+        data object ClipboardHistory : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
 

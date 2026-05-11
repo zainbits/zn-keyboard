@@ -7,19 +7,22 @@ import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.File
 import java.io.FileNotFoundException
+import java.io.FileOutputStream
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-object AgentRewriteHistoryStore {
+object ClipboardHistoryStore {
     const val MAX_HISTORY = 30
-    const val HISTORY_FILE_NAME = "agent_rewrite_history.enc"
+    const val MAX_ENTRY_CHARS = 20_000
+    const val HISTORY_FILE_NAME = "clipboard_history.enc"
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
-    private const val KEYSTORE_ALIAS = "znkeyboard_agent_rewrite_history"
+    private const val KEYSTORE_ALIAS = "znkeyboard_clipboard_history"
     private const val KEYSTORE_TRANSFORMATION = "AES/GCM/NoPadding"
     private const val GCM_TAG_LENGTH_BITS = 128
     private const val JSON_ENTRIES = "entries"
@@ -27,6 +30,9 @@ object AgentRewriteHistoryStore {
     private const val JSON_TIMESTAMP_MILLIS = "timestampMillis"
     private const val JSON_CIPHERTEXT = "ciphertext"
     private const val JSON_IV = "iv"
+
+    private const val LEGACY_REWRITE_HISTORY_FILE_NAME = "agent_rewrite_history.enc"
+    private const val LEGACY_REWRITE_KEYSTORE_ALIAS = "znkeyboard_agent_rewrite_history"
 
     fun read(context: Context): List<Entry> {
         return runCatching {
@@ -37,19 +43,46 @@ object AgentRewriteHistoryStore {
         }
     }
 
-    fun recordReplacement(context: Context, originalText: String) {
-        if (originalText.isBlank()) return
+    fun recordText(context: Context, text: String) {
+        if (text.isBlank() || text.length > MAX_ENTRY_CHARS) return
 
+        val now = System.currentTimeMillis()
         val entries = buildList {
-            add(Entry(originalText = originalText, timestampMillis = System.currentTimeMillis()))
-            addAll(read(context))
+            add(Entry(text = text, timestampMillis = now))
+            addAll(read(context).filterNot { it.text == text })
         }.take(MAX_HISTORY)
 
         write(context, entries)
     }
 
+    fun clear(context: Context) {
+        historyFile(context).delete()
+    }
+
+    fun deleteText(context: Context, text: String) {
+        if (text.isBlank()) return
+        val entries = read(context).filterNot { it.text == text }
+        if (entries.isEmpty()) {
+            clear(context)
+        } else {
+            write(context, entries)
+        }
+    }
+
+    fun deleteLegacyRewriteHistory(context: Context) {
+        context.noBackupFilesDir.resolve(LEGACY_REWRITE_HISTORY_FILE_NAME).delete()
+        runCatching {
+            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
+                .deleteEntry(LEGACY_REWRITE_KEYSTORE_ALIAS)
+        }
+    }
+
+    private fun historyFile(context: Context): File {
+        return context.noBackupFilesDir.resolve(HISTORY_FILE_NAME)
+    }
+
     private fun readEncryptedFile(context: Context): JSONObject? {
-        val historyFile = context.noBackupFilesDir.resolve(HISTORY_FILE_NAME)
+        val historyFile = historyFile(context)
         return try {
             historyFile.inputStream().use { input ->
                 JSONObject(String(input.readBytes(), Charsets.UTF_8))
@@ -67,7 +100,7 @@ object AgentRewriteHistoryStore {
                     entries.take(MAX_HISTORY).forEach { entry ->
                         put(
                             JSONObject()
-                                .put(JSON_TEXT, entry.originalText)
+                                .put(JSON_TEXT, entry.text)
                                 .put(JSON_TIMESTAMP_MILLIS, entry.timestampMillis),
                         )
                     }
@@ -76,10 +109,23 @@ object AgentRewriteHistoryStore {
             .toString()
 
         val encrypted = encrypt(plainText)
-        val historyFile = context.noBackupFilesDir.resolve(HISTORY_FILE_NAME)
-        historyFile.parentFile?.mkdirs()
-        historyFile.outputStream().use { output ->
+        val historyFile = historyFile(context)
+        val parent = historyFile.parentFile
+        parent?.mkdirs()
+        val tempFile = File(parent, "${historyFile.name}.tmp")
+
+        FileOutputStream(tempFile).use { output ->
             output.write(encrypted.toString().toByteArray(Charsets.UTF_8))
+            output.fd.sync()
+        }
+        tempFile.setReadable(false, false)
+        tempFile.setWritable(false, false)
+        tempFile.setReadable(true, true)
+        tempFile.setWritable(true, true)
+
+        if (!tempFile.renameTo(historyFile)) {
+            tempFile.copyTo(historyFile, overwrite = true)
+            tempFile.delete()
         }
     }
 
@@ -90,9 +136,10 @@ object AgentRewriteHistoryStore {
                 for (index in 0 until entries.length()) {
                     val item = entries.optJSONObject(index) ?: continue
                     val text = item.optString(JSON_TEXT).takeIf { it.isNotBlank() } ?: continue
+                    if (text.length > MAX_ENTRY_CHARS) continue
                     add(
                         Entry(
-                            originalText = text,
+                            text = text,
                             timestampMillis = item.optLong(JSON_TIMESTAMP_MILLIS, 0L),
                         ),
                     )
@@ -142,7 +189,7 @@ object AgentRewriteHistoryStore {
     }
 
     data class Entry(
-        val originalText: String,
+        val text: String,
         val timestampMillis: Long,
     )
 }

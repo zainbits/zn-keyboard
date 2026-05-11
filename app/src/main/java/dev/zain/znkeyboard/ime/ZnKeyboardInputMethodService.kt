@@ -1,6 +1,8 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.ClipDescription
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.inputmethodservice.InputMethodService
@@ -41,7 +43,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     SnippetPanelView.Callback,
     SnippetSearchView.Callback,
     AgentReviewView.Callback,
-    AgentHistoryView.Callback {
+    ClipboardHistoryView.Callback {
     private var keyboardView: ZnKeyboardView? = null
     private var inputRoot: LinearLayout? = null
     private var keyboardContainer: FrameLayout? = null
@@ -51,7 +53,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var snippetPanelView: SnippetPanelView? = null
     private var snippetSearchView: SnippetSearchView? = null
     private var agentReviewView: AgentReviewView? = null
-    private var agentHistoryView: AgentHistoryView? = null
+    private var clipboardHistoryView: ClipboardHistoryView? = null
     private var currentEditorInfo: EditorInfo? = null
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
@@ -69,6 +71,21 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var requestGeneration = 0
     private var gifShareGeneration = 0
     private var backspaceGestureDeleteState: BackspaceGestureDeleteState? = null
+    private var lastCapturedClipboardSnapshot: ClipboardSnapshot? = null
+    private val clipboardChangeListener = ClipboardManager.OnPrimaryClipChangedListener {
+        capturePrimaryClipboardText()
+    }
+    private var clipboardListenerRegistered = false
+    private val clipboardManager: ClipboardManager by lazy(LazyThreadSafetyMode.NONE) {
+        getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        ClipboardHistoryStore.deleteLegacyRewriteHistory(this)
+        registerClipboardListener()
+        capturePrimaryClipboardText()
+    }
 
     override fun onCreateInputView(): View {
         gifSearchView?.dispose()
@@ -158,6 +175,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         applyKeyboardSettings()
         keyboardView?.setEnterLabel(resolveEnterLabel(info))
         renderSecondRow()
+        capturePrimaryClipboardText()
         scheduleEmojiSuggestionRefresh(delayMillis = 0L)
     }
 
@@ -172,6 +190,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onDestroy() {
         requestGeneration++
         gifShareGeneration++
+        unregisterClipboardListener()
         cancelEmojiSuggestionRefresh()
         gifSearchView?.dispose()
         gifSearchView = null
@@ -338,9 +357,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         startRewriteFromCurrentEditor()
     }
 
-    override fun onAgentHistoryRequested() {
+    override fun onClipboardHistoryRequested() {
         if (isSensitiveEditor(currentEditorInfo)) return
-        showAgentHistoryPanel()
+        showClipboardHistoryPanel()
     }
 
     override fun onAgentReviewApply() {
@@ -351,8 +370,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         cancelAgentReview()
     }
 
-    override fun onAgentHistoryClosed() {
+    override fun onClipboardHistoryClosed() {
         showKeyboardPanel()
+    }
+
+    override fun onClipboardHistoryItemSelected(text: String) {
+        pasteClipboardHistoryText(text)
+    }
+
+    override fun onClipboardHistoryItemDeleted(text: String) {
+        ClipboardHistoryStore.deleteText(this, text)
+        clipboardHistoryView?.submitHistory(ClipboardHistoryStore.read(this))
+    }
+
+    override fun onClipboardHistoryCleared() {
+        ClipboardHistoryStore.clear(this)
+        clipboardHistoryView?.submitHistory(emptyList())
     }
 
     private fun applyKeyboardSettings() {
@@ -397,7 +430,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         snippetSearchView?.setSnippets(KeyboardSettings.readTextSnippets(this))
         agentReviewView?.setHeightScale(heightScale)
-        agentHistoryView?.setHeightScale(heightScale)
+        clipboardHistoryView?.setHeightScale(heightScale)
         renderSecondRow()
     }
 
@@ -569,17 +602,18 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderSecondRow()
     }
 
-    private fun showAgentHistoryPanel() {
+    private fun showClipboardHistoryPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
         hideSnippetSearchView()
-        val historyView = agentHistoryView ?: AgentHistoryView(this).also { view ->
-            agentHistoryView = view
+        capturePrimaryClipboardText()
+        val historyView = clipboardHistoryView ?: ClipboardHistoryView(this).also { view ->
+            clipboardHistoryView = view
             view.callback = this
         }
         historyView.setHeightScale(KeyboardSettings.readHeightScale(this))
-        historyView.submitHistory(AgentRewriteHistoryStore.read(this))
-        activeSurface = KeyboardSurface.History
+        historyView.submitHistory(ClipboardHistoryStore.read(this))
+        activeSurface = KeyboardSurface.ClipboardHistory
         swapKeyboardSurface(historyView)
         renderSecondRow()
     }
@@ -1129,6 +1163,53 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             } == true
     }
 
+    private fun registerClipboardListener() {
+        if (clipboardListenerRegistered) return
+        clipboardManager.addPrimaryClipChangedListener(clipboardChangeListener)
+        clipboardListenerRegistered = true
+    }
+
+    private fun unregisterClipboardListener() {
+        if (!clipboardListenerRegistered) return
+        clipboardManager.removePrimaryClipChangedListener(clipboardChangeListener)
+        clipboardListenerRegistered = false
+    }
+
+    private fun capturePrimaryClipboardText() {
+        val snapshot = readPrimaryPlainClipboardText() ?: return
+        if (snapshot == lastCapturedClipboardSnapshot) return
+        lastCapturedClipboardSnapshot = snapshot
+
+        ClipboardHistoryStore.recordText(this, snapshot.text)
+        if (activeSurface == KeyboardSurface.ClipboardHistory) {
+            clipboardHistoryView?.submitHistory(ClipboardHistoryStore.read(this))
+        }
+    }
+
+    private fun readPrimaryPlainClipboardText(): ClipboardSnapshot? {
+        return runCatching {
+            val description = clipboardManager.primaryClipDescription ?: return@runCatching null
+            if (description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false) == true) {
+                return@runCatching null
+            }
+            val hasTextMimeType = description.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN) ||
+                description.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)
+            if (!hasTextMimeType) return@runCatching null
+
+            val clip = clipboardManager.primaryClip ?: return@runCatching null
+            if (clip.itemCount <= 0) return@runCatching null
+            val text = clip.getItemAt(0)
+                ?.text
+                ?.toString()
+                ?.takeIf { it.isNotBlank() && it.length <= ClipboardHistoryStore.MAX_ENTRY_CHARS }
+                ?: return@runCatching null
+            ClipboardSnapshot(
+                text = text,
+                timestampMillis = description.timestamp,
+            )
+        }.getOrNull()
+    }
+
     private fun sendKey(keyCode: Int, modifiers: ModifierState) {
         val inputConnection = currentInputConnection ?: return
         val downTime = SystemClock.uptimeMillis()
@@ -1160,6 +1241,28 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 flags,
             ),
         )
+    }
+
+    private fun pasteClipboardHistoryText(text: String) {
+        if (isSensitiveEditor(currentEditorInfo)) return
+        val inputConnection = currentInputConnection ?: return
+        cancelActiveAgentForEditorChange()
+
+        var committed = false
+        inputConnection.beginBatchEdit()
+        try {
+            inputConnection.finishComposingText()
+            committed = inputConnection.commitText(text, 1)
+        } finally {
+            inputConnection.endBatchEdit()
+        }
+
+        if (committed) {
+            scheduleEmojiSuggestionRefresh()
+            showKeyboardPanel()
+        } else {
+            Toast.makeText(this, "Couldn't paste clipboard item.", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun startRewriteFromCurrentEditor() {
@@ -1199,7 +1302,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             return
         }
 
-        AgentRewriteHistoryStore.recordReplacement(this, review.target.originalText)
         requestGeneration++
         agentError = null
         agentLoading = false
@@ -1866,6 +1968,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         var currentWordCount: Int = 0,
     )
 
+    private data class ClipboardSnapshot(
+        val text: String,
+        val timestampMillis: Long,
+    )
+
     private data class SelectionWrapPair(
         val open: String,
         val close: String,
@@ -1880,7 +1987,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         Snippets,
         SnippetSearch,
         Review,
-        History,
+        ClipboardHistory,
     }
 
     private class LlmHttpException(
