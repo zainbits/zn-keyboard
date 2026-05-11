@@ -446,7 +446,7 @@ class GifSearchView @JvmOverloads constructor(
                 setTextColor(PALETTE.text)
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
                 setPadding(dp(14), 0, dp(14), 0)
-                background = roundedBackground(PALETTE.function)
+                background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.text)
                 isClickable = true
                 isFocusable = false
                 contentDescription = "Edit GIF search"
@@ -775,7 +775,7 @@ class GifSearchView @JvmOverloads constructor(
             isFocusable = false
             setTextColor(PALETTE.mutedText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = roundedBackground(PALETTE.function)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
@@ -797,7 +797,11 @@ class GifSearchView @JvmOverloads constructor(
             typeface = if (label == "GIF") Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             setTextColor(if (enabled) PALETTE.text else PALETTE.disabledText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label == "GIF") 14f else 22f)
-            background = roundedBackground(if (active) PALETTE.selected else PALETTE.function)
+            background = ImePressFeedback.roundedBackground(
+                context = context,
+                containerColor = if (active) PALETTE.selected else PALETTE.function,
+                contentColor = if (enabled) PALETTE.text else PALETTE.disabledText,
+            )
             onClick?.let { click -> setOnClickListener { click() } }
         }
     }
@@ -812,7 +816,7 @@ class GifSearchView @JvmOverloads constructor(
             isFocusable = false
             setTextColor(if (enabled) PALETTE.mutedText else PALETTE.disabledText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = ColorDrawable(Color.TRANSPARENT)
+            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
@@ -829,7 +833,7 @@ class GifSearchView @JvmOverloads constructor(
             setTextColor(PALETTE.mutedText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             setPadding(dp(12), 0, dp(12), 0)
-            background = roundedBackground(PALETTE.function)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
             setOnClickListener {
                 setQuery(label)
                 scheduleRefresh(immediate = true)

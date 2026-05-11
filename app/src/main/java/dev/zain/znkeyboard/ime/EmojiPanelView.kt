@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
@@ -470,7 +469,7 @@ class EmojiPanelView @JvmOverloads constructor(
             isFocusable = false
             setTextColor(if (enabled) PALETTE.mutedText else PALETTE.disabledText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = ColorDrawable(Color.TRANSPARENT)
+            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
@@ -489,30 +488,33 @@ class EmojiPanelView @JvmOverloads constructor(
         }
     }
 
-    private fun keyBackground(active: Boolean, role: KeyRole): GradientDrawable {
-        val color = when {
-            active -> PALETTE.selected
-            role == KeyRole.Function -> PALETTE.function
-            else -> PALETTE.key
-        }
-        return roundedBackground(color)
-    }
+    private fun keyBackground(active: Boolean, role: KeyRole) =
+        ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = when {
+                active -> PALETTE.selected
+                role == KeyRole.Function -> PALETTE.function
+                else -> PALETTE.key
+            },
+            contentColor = if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText,
+        )
 
-    private fun pillBackground(active: Boolean): GradientDrawable {
-        return roundedBackground(if (active) PALETTE.selected else PALETTE.function)
-    }
+    private fun pillBackground(active: Boolean) =
+        ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = if (active) PALETTE.selected else PALETTE.function,
+            contentColor = PALETTE.text,
+        )
 
-    private fun categoryShortcutBackground(active: Boolean): GradientDrawable {
-        return roundedBackground(if (active) PALETTE.selected else Color.TRANSPARENT)
-    }
+    private fun categoryShortcutBackground(active: Boolean) =
+        ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = if (active) PALETTE.selected else Color.TRANSPARENT,
+            contentColor = PALETTE.text,
+        )
 
-    private fun roundedBackground(color: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
-            setColor(color)
-        }
-    }
+    private fun roundedBackground(color: Int) =
+        ImePressFeedback.roundedShape(context, color)
 
     private fun LinearLayout.LayoutParams.withMargins(
         horizontal: Int = 0,
@@ -673,7 +675,7 @@ class EmojiPanelView @JvmOverloads constructor(
                             setTextColor(PALETTE.text)
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
                             minHeight = dp(42)
-                            background = ColorDrawable(Color.TRANSPARENT)
+                            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
                         },
                         LinearLayout.LayoutParams(0, dp(44), 1f).withMargins(horizontal = 1),
                     )

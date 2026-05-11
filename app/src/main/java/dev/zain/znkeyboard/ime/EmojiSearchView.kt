@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -170,7 +169,7 @@ class EmojiSearchView @JvmOverloads constructor(
                         typeface = Typeface.DEFAULT
                         setTextColor(PALETTE.text)
                         setTextSize(TypedValue.COMPLEX_UNIT_SP, 25f)
-                        background = ColorDrawable(Color.TRANSPARENT)
+                        background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
                     },
                     LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 1),
                 )
@@ -260,6 +259,7 @@ class EmojiSearchView @JvmOverloads constructor(
                     typeface = Typeface.DEFAULT
                     setTextColor(PALETTE.text)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+                    background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
                     contentDescription = variant.name
                     setOnClickListener { selectEmoji(variant.emoji) }
                 },
@@ -295,18 +295,13 @@ class EmojiSearchView @JvmOverloads constructor(
             isFocusable = false
             setTextColor(PALETTE.mutedText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = roundedBackground(PALETTE.function)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
 
-    private fun roundedBackground(color: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
-            setColor(color)
-        }
-    }
+    private fun roundedBackground(color: Int) =
+        ImePressFeedback.roundedShape(context, color)
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,

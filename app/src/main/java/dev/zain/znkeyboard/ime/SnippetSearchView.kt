@@ -1,8 +1,6 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -188,7 +186,7 @@ class SnippetSearchView @JvmOverloads constructor(
         return LinearLayout(context).apply {
             orientation = VERTICAL
             setPadding(dp(12), dp(9), dp(12), dp(9))
-            background = roundedBackground(PALETTE.key)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.key, PALETTE.text)
             isClickable = true
             isFocusable = false
             contentDescription = snippet.text
@@ -230,7 +228,7 @@ class SnippetSearchView @JvmOverloads constructor(
             isFocusable = false
             setTextColor(PALETTE.mutedText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            background = roundedBackground(PALETTE.function)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
@@ -238,7 +236,7 @@ class SnippetSearchView @JvmOverloads constructor(
     private fun iconButton(iconResId: Int, description: String, onClick: () -> Unit): ImageButton {
         return ImageButton(context).apply {
             contentDescription = description
-            background = roundedBackground(PALETTE.function)
+            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
             isClickable = true
             isFocusable = false
             scaleType = ImageView.ScaleType.CENTER
@@ -252,13 +250,8 @@ class SnippetSearchView @JvmOverloads constructor(
         setTint(PALETTE.mutedText)
     }
 
-    private fun roundedBackground(color: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
-            setColor(color)
-        }
-    }
+    private fun roundedBackground(color: Int) =
+        ImePressFeedback.roundedShape(context, color)
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,

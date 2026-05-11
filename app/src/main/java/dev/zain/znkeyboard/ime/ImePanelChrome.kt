@@ -1,7 +1,6 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.drawable.GradientDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.widget.ImageButton
@@ -31,7 +30,7 @@ internal object ImePanelChrome {
             scaleType = ImageView.ScaleType.CENTER
             setPadding(0, 0, 0, 0)
             setImageDrawable(tintedIcon(context, R.drawable.ic_chevron_left_24, textColor))
-            background = roundedBackground(context, backgroundColor)
+            background = ImePressFeedback.roundedBackground(context, backgroundColor, textColor)
             setOnClickListener { onClick() }
         }
     }
@@ -53,16 +52,8 @@ internal object ImePanelChrome {
             setTextColor(textColor)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, ImeDimensions.PANEL_SEARCH_TEXT_SIZE_SP)
             setPadding(dp(context, 14), 0, dp(context, 16), 0)
-            background = roundedBackground(context, backgroundColor)
+            background = ImePressFeedback.roundedBackground(context, backgroundColor, textColor)
             setOnClickListener { onClick() }
-        }
-    }
-
-    private fun roundedBackground(context: Context, color: Int): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(context, ImeLayout.KEY_RADIUS_DP).toFloat()
-            setColor(color)
         }
     }
 

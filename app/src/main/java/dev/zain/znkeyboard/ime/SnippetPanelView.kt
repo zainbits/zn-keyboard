@@ -1,9 +1,7 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.Rect
-import android.graphics.drawable.GradientDrawable
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -261,26 +259,25 @@ class SnippetPanelView @JvmOverloads constructor(
         setTint(PALETTE.mutedText)
     }
 
-    private fun cardBackground(): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(7).toFloat()
-            setColor(PALETTE.key)
-            setStroke(dp(1), PALETTE.border)
-        }
-    }
+    private fun cardBackground() =
+        ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = PALETTE.key,
+            contentColor = PALETTE.text,
+            radiusDp = 7,
+            strokeWidthDp = 1,
+            strokeColor = PALETTE.border,
+        )
 
-    private fun keyBackground(role: KeyRole): GradientDrawable {
-        val color = when (role) {
-            KeyRole.Character -> PALETTE.key
-            KeyRole.Function -> PALETTE.function
-        }
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dp(ImeLayout.KEY_RADIUS_DP).toFloat()
-            setColor(color)
-        }
-    }
+    private fun keyBackground(role: KeyRole) =
+        ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = when (role) {
+                KeyRole.Character -> PALETTE.key
+                KeyRole.Function -> PALETTE.function
+            },
+            contentColor = if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText,
+        )
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,

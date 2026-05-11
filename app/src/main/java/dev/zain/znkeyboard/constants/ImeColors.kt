@@ -12,8 +12,6 @@ object ImeColors {
     val FUNCTION_DARK = Color.rgb(50, 50, 50)
     val ACTION = Color.rgb(48, 48, 48)
     val SELECTED = Color.rgb(78, 78, 78)
-    val PRESSED_KEY = Color.rgb(26, 26, 26)
-    val PRESSED_TEXT = Color.rgb(142, 142, 142)
     val BORDER = Color.rgb(62, 62, 62)
     val DIVIDER = Color.rgb(58, 58, 58)
     val AI_LOADING_SURFACE = Color.rgb(24, 24, 31)

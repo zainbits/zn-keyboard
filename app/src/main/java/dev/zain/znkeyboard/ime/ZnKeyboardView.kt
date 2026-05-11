@@ -538,17 +538,28 @@ class ZnKeyboardView @JvmOverloads constructor(
         val key = hit.key
         val bounds = hit.visualBounds
         val rewriteLoading = key.intent == KeyIntent.AgentRewrite && shortcutRowState.loading
-        val active = if (rewriteLoading) isKeyPressed(key.id) else key.active || isKeyPressed(key.id)
+        val pressed = isKeyPressed(key.id)
+        val selected = key.active && !rewriteLoading
         val keyAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_KEY_ALPHA
         val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
-
-        keyPaint.style = Paint.Style.FILL
-        keyPaint.color = when {
+        val containerColor = when {
             rewriteLoading -> PALETTE.aiLoadingSurface
-            active -> PALETTE.pressedKey
+            selected -> PALETTE.selected
             key.role == KeyRole.Action -> PALETTE.action
             key.role == KeyRole.Function -> PALETTE.function
             else -> PALETTE.key
+        }
+        val contentColor = when {
+            rewriteLoading -> PALETTE.text
+            key.role == KeyRole.Character -> PALETTE.text
+            else -> PALETTE.mutedText
+        }
+
+        keyPaint.style = Paint.Style.FILL
+        keyPaint.color = if (pressed) {
+            ImePressFeedback.stateLayerColor(containerColor, contentColor)
+        } else {
+            containerColor
         }
         keyPaint.alpha = keyAlpha
 
@@ -558,12 +569,6 @@ class ZnKeyboardView @JvmOverloads constructor(
             drawRewriteLoadingWash(canvas, bounds, radius)
         }
 
-        val contentColor = when {
-            rewriteLoading -> PALETTE.text
-            active -> PALETTE.pressedText
-            key.role == KeyRole.Character -> PALETTE.text
-            else -> PALETTE.mutedText
-        }
         val contentAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_CONTENT_ALPHA
 
         if (rewriteLoading) {
@@ -579,7 +584,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
             canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
         }
-        drawLongPressHint(canvas, key.longPressHint, bounds, active, contentAlpha)
+        drawLongPressHint(canvas, key.longPressHint, bounds, contentColor, contentAlpha)
 
         if (key.id == "shift" && shiftState == ShiftState.Locked) {
             drawShiftLockIndicator(canvas, bounds, contentColor)
@@ -590,13 +595,13 @@ class ZnKeyboardView @JvmOverloads constructor(
         canvas: Canvas,
         hint: String?,
         bounds: RectF,
-        active: Boolean,
+        color: Int,
         alpha: Int,
     ) {
         if (hint == null) return
 
         textPaint.textSize = sp(8f).coerceAtMost(bounds.height() * 0.22f)
-        textPaint.color = if (active) PALETTE.pressedText else PALETTE.mutedText
+        textPaint.color = color
         textPaint.alpha = min(alpha, LONG_PRESS_HINT_ALPHA)
         textPaint.textAlign = Paint.Align.RIGHT
         val metrics = textPaint.fontMetrics
@@ -1372,8 +1377,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val key = ImeColors.KEY
         val function = ImeColors.FUNCTION
         val action = ImeColors.ACTION
-        val pressedKey = ImeColors.PRESSED_KEY
-        val pressedText = ImeColors.PRESSED_TEXT
+        val selected = ImeColors.SELECTED
         val aiLoadingSurface = ImeColors.AI_LOADING_SURFACE
         const val text = ImeColors.TEXT
         val mutedText = ImeColors.MUTED_TEXT
