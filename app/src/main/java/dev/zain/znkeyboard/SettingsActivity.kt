@@ -48,6 +48,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -62,6 +63,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.darkColorScheme
@@ -83,8 +85,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -586,8 +586,10 @@ private fun TextSnippetEditorRow(
     onTagsChange: (List<String>) -> Unit,
     onRemove: () -> Unit,
 ) {
+    var confirmingDelete by remember { mutableStateOf(false) }
+
     SwipeRevealDeleteRow(
-        onRemove = onRemove,
+        onRemove = { confirmingDelete = true },
     ) {
         Surface(
             color = ZnKeyboardColors.Key,
@@ -614,6 +616,38 @@ private fun TextSnippetEditorRow(
             }
         }
     }
+
+    if (confirmingDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmingDelete = false },
+            title = { Text("Delete snippet?") },
+            text = {
+                Text(
+                    text = snippet.text,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingDelete = false }) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmingDelete = false
+                        onRemove()
+                    },
+                ) {
+                    Text(
+                        text = "Delete",
+                        color = ZnKeyboardColors.DeleteContent,
+                    )
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -623,7 +657,6 @@ private fun SwipeRevealDeleteRow(
 ) {
     val density = LocalDensity.current
     val revealWidthPx = with(density) { TEXT_SNIPPET_DELETE_REVEAL_WIDTH.toPx() }
-    val stretchWidthPx = with(density) { TEXT_SNIPPET_DELETE_STRETCH_WIDTH.toPx() }
     var offsetPx by remember { mutableFloatStateOf(0f) }
     var dragging by remember { mutableStateOf(false) }
     val visualOffsetPx by animateFloatAsState(
@@ -635,17 +668,8 @@ private fun SwipeRevealDeleteRow(
         },
         label = "textSnippetDeleteRevealOffset",
     )
-    val stretchProgress = ((-visualOffsetPx - revealWidthPx) / stretchWidthPx).coerceIn(0f, 1f)
     val draggableState = rememberDraggableState { delta ->
-        val proposedOffset = offsetPx + delta
-        offsetPx = when {
-            proposedOffset >= -revealWidthPx -> proposedOffset.coerceAtMost(0f)
-            else -> {
-                val stretchedOffset = -revealWidthPx +
-                    (proposedOffset + revealWidthPx) * TEXT_SNIPPET_DELETE_STRETCH_RESISTANCE
-                stretchedOffset.coerceAtLeast(-revealWidthPx - stretchWidthPx)
-            }
-        }
+        offsetPx = (offsetPx + delta).coerceIn(-revealWidthPx, 0f)
     }
     val shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS)
 
@@ -659,12 +683,6 @@ private fun SwipeRevealDeleteRow(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
                 .clickable(onClick = onRemove)
-                .graphicsLayer {
-                    val scale = 1f + stretchProgress * 0.08f
-                    scaleX = scale
-                    scaleY = scale
-                    transformOrigin = TransformOrigin(1f, 0.5f)
-                }
                 .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -687,10 +705,6 @@ private fun SwipeRevealDeleteRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset(visualOffsetPx.roundToInt(), 0) }
-                .graphicsLayer {
-                    scaleX = 1f + stretchProgress * 0.018f
-                    transformOrigin = TransformOrigin(0f, 0.5f)
-                }
                 .draggable(
                     state = draggableState,
                     orientation = Orientation.Horizontal,
@@ -2660,9 +2674,7 @@ private val SECTION_CORNER_RADIUS = SettingsUiDimensions.SECTION_CORNER_RADIUS
 private val COMPACT_ITEM_CORNER_RADIUS = SettingsUiDimensions.COMPACT_ITEM_CORNER_RADIUS
 private val PICKER_CORNER_RADIUS = SettingsUiDimensions.PICKER_CORNER_RADIUS
 private val TEXT_SNIPPET_DELETE_REVEAL_WIDTH = 96.dp
-private val TEXT_SNIPPET_DELETE_STRETCH_WIDTH = 42.dp
 private const val TEXT_SNIPPET_DELETE_LOCK_THRESHOLD = 0.45f
-private const val TEXT_SNIPPET_DELETE_STRETCH_RESISTANCE = 0.34f
 
 @Composable
 private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
