@@ -859,6 +859,10 @@ class ZnKeyboardView @JvmOverloads constructor(
                 layoutMode = if (layoutMode == LayoutMode.Letters) LayoutMode.Symbols else LayoutMode.Letters
                 shiftState = ShiftState.Off
             }
+            KeyIntent.ToggleMoreSymbols -> {
+                layoutMode = if (layoutMode == LayoutMode.MoreSymbols) LayoutMode.Symbols else LayoutMode.MoreSymbols
+                shiftState = ShiftState.Off
+            }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
@@ -962,18 +966,23 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyboardSettings.KeyboardRow.Second.id to secondRow(),
         )
         val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
-        val mainRows = if (layoutMode == LayoutMode.Letters) {
-            listOf(
+        val mainRows = when (layoutMode) {
+            LayoutMode.Letters -> listOf(
                 RowSpec(chars("qwertyuiop"), 1f),
                 RowSpec(chars("asdfghjkl"), 1f, layoutKeyCount = 10),
                 letterBottomRow(),
                 bottomRow(),
             )
-        } else {
-            listOf(
+            LayoutMode.Symbols -> listOf(
                 RowSpec(chars("1234567890"), 1f),
-                RowSpec(symbols("@#\$_&-+()"), 1f),
+                RowSpec(symbols("@#\$_&-+()", rowPrefix = "symbol_middle"), 1f),
                 symbolBottomRow(),
+                bottomRow(),
+            )
+            LayoutMode.MoreSymbols -> listOf(
+                RowSpec(symbols("~`|•√π÷×¶∆", rowPrefix = "more_symbol_top"), 1f),
+                RowSpec(symbols("£¢€¥^°={}\\", rowPrefix = "more_symbol_middle"), 1f),
+                moreSymbolBottomRow(),
                 bottomRow(),
             )
         }
@@ -1106,6 +1115,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun symbolBottomRow(): RowSpec {
         return RowSpec(
             listOf(
+                KeySpec("more_symbols", "=<", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
                 KeySpec("star", "*", KeyIntent.Dispatch(KeyboardAction.Text("*")), role = KeyRole.Character),
                 KeySpec("quote", "\"", KeyIntent.Dispatch(KeyboardAction.Text("\"")), role = KeyRole.Character),
                 KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
@@ -1113,6 +1123,24 @@ class ZnKeyboardView @JvmOverloads constructor(
                 KeySpec("semicolon", ";", KeyIntent.Dispatch(KeyboardAction.Text(";")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
+                KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
+            ),
+            heightWeight = 1f,
+        )
+    }
+
+    private fun moreSymbolBottomRow(): RowSpec {
+        return RowSpec(
+            listOf(
+                KeySpec("more_symbols", "123", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
+                KeySpec("copyright", "©", KeyIntent.Dispatch(KeyboardAction.Text("©")), role = KeyRole.Character),
+                KeySpec("registered", "®", KeyIntent.Dispatch(KeyboardAction.Text("®")), role = KeyRole.Character),
+                KeySpec("trademark", "™", KeyIntent.Dispatch(KeyboardAction.Text("™")), role = KeyRole.Character),
+                KeySpec("check", "✓", KeyIntent.Dispatch(KeyboardAction.Text("✓")), role = KeyRole.Character),
+                KeySpec("left_bracket", "[", KeyIntent.Dispatch(KeyboardAction.Text("[")), role = KeyRole.Character),
+                KeySpec("right_bracket", "]", KeyIntent.Dispatch(KeyboardAction.Text("]")), role = KeyRole.Character),
+                KeySpec("less_than", "<", KeyIntent.Dispatch(KeyboardAction.Text("<")), role = KeyRole.Character),
+                KeySpec("greater_than", ">", KeyIntent.Dispatch(KeyboardAction.Text(">")), role = KeyRole.Character),
                 KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
             ),
             heightWeight = 1f,
@@ -1154,10 +1182,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    private fun symbols(source: String): List<KeySpec> {
+    private fun symbols(source: String, rowPrefix: String = "symbol"): List<KeySpec> {
         return source.mapIndexed { index, char ->
             KeySpec(
-                id = "symbol_$index",
+                id = "${rowPrefix}_$index",
                 label = char.toString(),
                 intent = KeyIntent.Dispatch(KeyboardAction.Text(char.toString())),
                 role = KeyRole.Character,
@@ -1182,6 +1210,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private enum class LayoutMode {
         Letters,
         Symbols,
+        MoreSymbols,
     }
 
     private enum class ShiftState {
@@ -1265,6 +1294,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private sealed class KeyIntent {
         data object Shift : KeyIntent()
         data object SwitchMode : KeyIntent()
+        data object ToggleMoreSymbols : KeyIntent()
         data object ToggleAlt : KeyIntent()
         data object ToggleCtrl : KeyIntent()
         data object AgentRewrite : KeyIntent()
