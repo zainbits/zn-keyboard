@@ -8,7 +8,7 @@ object ImeDimensions {
     const val TOP_PADDING_DP = 6
     const val BASE_BOTTOM_PADDING_DP = 8
     const val KEY_GAP_DP = 5
-    const val ROW_GAP_DP = 6
+    const val ROW_GAP_DP = 10
     const val KEY_RADIUS_DP = 8
 
     const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = 16

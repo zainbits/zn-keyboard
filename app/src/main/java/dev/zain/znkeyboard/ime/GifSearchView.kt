@@ -1050,7 +1050,7 @@ private class GifResultAdapter(
 
     private fun createResultCell(context: Context): GifResultCell {
         val image = ImageView(context).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
+            scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(ImeColors.KEY)
         }
         val badge = TextView(context).apply {
@@ -1127,7 +1127,7 @@ private class GifResultAdapter(
             val request = manager
                 .load(gif.previewUrl)
                 .override(MAX_DECODE_DIMENSION_PX)
-                .centerCrop()
+                .fitCenter()
                 .placeholder(placeholderDrawable())
                 .error(ColorDrawable(ImeColors.KEY))
             if (fallbackUrl != null && fallbackUrl != gif.previewUrl) {
@@ -1135,7 +1135,7 @@ private class GifResultAdapter(
                     manager
                         .load(fallbackUrl)
                         .override(MAX_DECODE_DIMENSION_PX)
-                        .centerCrop()
+                        .fitCenter()
                         .placeholder(placeholderDrawable())
                         .error(ColorDrawable(ImeColors.KEY)),
                 )
