@@ -11,12 +11,23 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,8 +40,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -63,13 +78,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -111,6 +133,7 @@ class SettingsActivity : ComponentActivity() {
 @Composable
 private fun SettingsScreen() {
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
     var secondRowButtonIds by remember { mutableStateOf(KeyboardSettings.readSecondRowButtonIds(context)) }
@@ -266,6 +289,9 @@ private fun SettingsScreen() {
                 .padding(padding)
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
+                .pointerInput(focusManager) {
+                    detectTapGestures(onTap = { focusManager.clearFocus() })
+                }
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
@@ -452,10 +478,8 @@ private fun TextSnippetsSection(
     onSnippetsChange: (List<KeyboardSettings.TextSnippet>) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
-    var tagDraft by remember { mutableStateOf("") }
     val normalizedDraft = KeyboardSettings.textSnippetFromText(
         text = draft,
-        tags = KeyboardSettings.parseTextSnippetTags(tagDraft),
     )
     val canAddSnippet = normalizedDraft.text.isNotBlank() &&
         snippets.none { it.text == normalizedDraft.text } &&
@@ -497,20 +521,10 @@ private fun TextSnippetsSection(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            OutlinedTextField(
-                value = tagDraft,
-                onValueChange = { tagDraft = it },
-                label = { Text("Tags") },
-                placeholder = { Text("work, address, reply") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
             Button(
                 onClick = {
                     onSnippetsChange(snippets + normalizedDraft)
                     draft = ""
-                    tagDraft = ""
                 },
                 enabled = canAddSnippet,
                 modifier = Modifier.fillMaxWidth(),
@@ -572,17 +586,14 @@ private fun TextSnippetEditorRow(
     onTagsChange: (List<String>) -> Unit,
     onRemove: () -> Unit,
 ) {
-    var tagDraft by remember(snippet) { mutableStateOf(snippet.tags.joinToString(", ")) }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.Top,
+    SwipeRevealDeleteRow(
+        onRemove = onRemove,
     ) {
         Surface(
             color = ZnKeyboardColors.Key,
             shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
             tonalElevation = 0.dp,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.fillMaxWidth(),
         ) {
             Column(
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -595,31 +606,301 @@ private fun TextSnippetEditorRow(
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
-                OutlinedTextField(
-                    value = tagDraft,
-                    onValueChange = { value ->
-                        tagDraft = value
-                        onTagsChange(KeyboardSettings.parseTextSnippetTags(value))
-                    },
-                    label = { Text("Tags") },
-                    placeholder = { Text("comma separated") },
-                    singleLine = true,
+                TextSnippetTagsEditor(
+                    tags = snippet.tags,
+                    onTagsChange = onTagsChange,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
+    }
+}
 
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier.size(44.dp),
+@Composable
+private fun SwipeRevealDeleteRow(
+    onRemove: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val revealWidthPx = with(density) { TEXT_SNIPPET_DELETE_REVEAL_WIDTH.toPx() }
+    val stretchWidthPx = with(density) { TEXT_SNIPPET_DELETE_STRETCH_WIDTH.toPx() }
+    var offsetPx by remember { mutableFloatStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    val visualOffsetPx by animateFloatAsState(
+        targetValue = offsetPx,
+        animationSpec = if (dragging) {
+            snap()
+        } else {
+            spring(stiffness = Spring.StiffnessMediumLow)
+        },
+        label = "textSnippetDeleteRevealOffset",
+    )
+    val stretchProgress = ((-visualOffsetPx - revealWidthPx) / stretchWidthPx).coerceIn(0f, 1f)
+    val draggableState = rememberDraggableState { delta ->
+        val proposedOffset = offsetPx + delta
+        offsetPx = when {
+            proposedOffset >= -revealWidthPx -> proposedOffset.coerceAtMost(0f)
+            else -> {
+                val stretchedOffset = -revealWidthPx +
+                    (proposedOffset + revealWidthPx) * TEXT_SNIPPET_DELETE_STRETCH_RESISTANCE
+                stretchedOffset.coerceAtLeast(-revealWidthPx - stretchWidthPx)
+            }
+        }
+    }
+    val shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS)
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(ZnKeyboardColors.DeleteBackground),
+    ) {
+        Row(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .clickable(onClick = onRemove)
+                .graphicsLayer {
+                    val scale = 1f + stretchProgress * 0.08f
+                    scaleX = scale
+                    scaleY = scale
+                    transformOrigin = TransformOrigin(1f, 0.5f)
+                }
+                .padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
                 painter = painterResource(R.drawable.ic_delete_24),
-                contentDescription = "Remove snippet",
-                tint = ZnKeyboardColors.Muted,
+                contentDescription = null,
+                tint = ZnKeyboardColors.DeleteContent,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = "Delete",
+                color = ZnKeyboardColors.DeleteContent,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(visualOffsetPx.roundToInt(), 0) }
+                .graphicsLayer {
+                    scaleX = 1f + stretchProgress * 0.018f
+                    transformOrigin = TransformOrigin(0f, 0.5f)
+                }
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = {
+                        dragging = true
+                    },
+                    onDragStopped = {
+                        dragging = false
+                        offsetPx = if (offsetPx <= -revealWidthPx * TEXT_SNIPPET_DELETE_LOCK_THRESHOLD) {
+                            -revealWidthPx
+                        } else {
+                            0f
+                        }
+                    },
+                ),
+        ) {
+            content()
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun TextSnippetTagsEditor(
+    tags: List<String>,
+    onTagsChange: (List<String>) -> Unit,
+    modifier: Modifier = Modifier,
+    helperText: String? = null,
+) {
+    var addingTag by remember(tags) { mutableStateOf(false) }
+    var tagDraft by remember(tags) { mutableStateOf("") }
+
+    fun submitTagDraft() {
+        val newTags = KeyboardSettings.parseTextSnippetTags(tagDraft)
+        if (newTags.isNotEmpty()) {
+            onTagsChange(KeyboardSettings.normalizeTextSnippetTags(tags + newTags))
+        }
+        tagDraft = ""
+        addingTag = false
+    }
+
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            text = "Tags",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            tags.forEach { tag ->
+                TextSnippetTagPill(
+                    tag = tag,
+                    onRemove = {
+                        onTagsChange(tags.filterNot { it.equals(tag, ignoreCase = true) })
+                    },
+                )
+            }
+
+            if (tags.size < KeyboardSettings.MAX_TEXT_SNIPPET_TAGS) {
+                if (addingTag) {
+                    TextSnippetTagInputPill(
+                        value = tagDraft,
+                        onValueChange = { tagDraft = it },
+                        onDone = ::submitTagDraft,
+                    )
+                } else {
+                    AddTextSnippetTagButton(
+                        onClick = { addingTag = true },
+                    )
+                }
+            }
+        }
+
+        helperText?.let { text ->
+            Text(
+                text = text,
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
             )
         }
     }
+}
+
+@Composable
+private fun TextSnippetTagPill(
+    tag: String,
+    onRemove: () -> Unit,
+) {
+    Surface(
+        color = ZnKeyboardColors.FunctionKey,
+        contentColor = ZnKeyboardColors.OnSurface,
+        shape = CircleShape,
+        tonalElevation = 0.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, top = 5.dp, end = 7.dp, bottom = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "#$tag",
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Icon(
+                painter = painterResource(R.drawable.ic_close_24),
+                contentDescription = "Remove $tag tag",
+                tint = ZnKeyboardColors.Muted,
+                modifier = Modifier
+                    .size(14.dp)
+                    .clickable(onClick = onRemove),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AddTextSnippetTagButton(
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = Color.Transparent,
+        contentColor = ZnKeyboardColors.Muted,
+        shape = CircleShape,
+        border = BorderStroke(1.dp, ZnKeyboardColors.Muted.copy(alpha = 0.7f)),
+        tonalElevation = 0.dp,
+        modifier = Modifier
+            .size(30.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(R.drawable.ic_add_24),
+                contentDescription = "Add tag",
+                tint = ZnKeyboardColors.Muted,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TextSnippetTagInputPill(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onDone: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    var hasFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.labelMedium.copy(color = ZnKeyboardColors.OnSurface),
+        cursorBrush = SolidColor(ZnKeyboardColors.Accent),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(
+            onDone = {
+                onDone()
+                focusManager.clearFocus()
+            },
+        ),
+        modifier = Modifier
+            .widthIn(min = 118.dp, max = 220.dp)
+            .onFocusChanged { focusState ->
+                if (hasFocused && !focusState.isFocused) {
+                    onDone()
+                }
+                if (focusState.isFocused) {
+                    hasFocused = true
+                }
+            }
+            .focusRequester(focusRequester),
+        decorationBox = { innerTextField ->
+            Surface(
+                color = Color.Transparent,
+                contentColor = ZnKeyboardColors.OnSurface,
+                shape = CircleShape,
+                border = BorderStroke(1.dp, ZnKeyboardColors.Accent.copy(alpha = 0.75f)),
+                tonalElevation = 0.dp,
+            ) {
+                Box(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (value.isBlank()) {
+                        Text(
+                            text = "tag, tag",
+                            color = ZnKeyboardColors.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                    innerTextField()
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -2378,6 +2659,10 @@ private val ROW_ORDER_ITEM_GAP = SettingsUiDimensions.ROW_ORDER_ITEM_GAP
 private val SECTION_CORNER_RADIUS = SettingsUiDimensions.SECTION_CORNER_RADIUS
 private val COMPACT_ITEM_CORNER_RADIUS = SettingsUiDimensions.COMPACT_ITEM_CORNER_RADIUS
 private val PICKER_CORNER_RADIUS = SettingsUiDimensions.PICKER_CORNER_RADIUS
+private val TEXT_SNIPPET_DELETE_REVEAL_WIDTH = 96.dp
+private val TEXT_SNIPPET_DELETE_STRETCH_WIDTH = 42.dp
+private const val TEXT_SNIPPET_DELETE_LOCK_THRESHOLD = 0.45f
+private const val TEXT_SNIPPET_DELETE_STRETCH_RESISTANCE = 0.34f
 
 @Composable
 private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
@@ -2404,4 +2689,6 @@ private object ZnKeyboardColors {
     val Accent = SettingsThemeColors.Accent
     val OnSurface = SettingsThemeColors.OnSurface
     val Muted = SettingsThemeColors.Muted
+    val DeleteBackground = Color(0xFF3A2424)
+    val DeleteContent = Color(0xFFE0A8A8)
 }
