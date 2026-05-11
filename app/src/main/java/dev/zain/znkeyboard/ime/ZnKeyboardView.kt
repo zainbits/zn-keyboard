@@ -40,7 +40,6 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onBackspaceGestureDeleteCancelled()
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
-        fun onSpacebarEmojiSuggestionSelected(emoji: String)
         fun onAgentRewriteRequested()
         fun onAgentHistoryRequested()
     }
@@ -94,7 +93,6 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
     private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
-    private var spacebarEmojiSuggestion: String? = null
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -170,14 +168,6 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun setEnterLabel(label: String) {
         if (enterLabel != label) {
             enterLabel = label
-            refreshHitTargets()
-            invalidate()
-        }
-    }
-
-    fun setSpacebarEmojiSuggestion(emoji: String?) {
-        if (spacebarEmojiSuggestion != emoji) {
-            spacebarEmojiSuggestion = emoji
             refreshHitTargets()
             invalidate()
         }
@@ -290,13 +280,8 @@ class ZnKeyboardView @JvmOverloads constructor(
             "comma" -> scheduleLongPress(pointerId, "comma") {
                 callback?.onEmojiPanelRequested()
             }
-            "period" -> scheduleLongPress(pointerId, "period") {
+            "space" -> scheduleLongPress(pointerId, "space") {
                 callback?.onSnippetPanelRequested()
-            }
-            "space" -> spacebarEmojiSuggestion?.let { emoji ->
-                scheduleLongPress(pointerId, "space") {
-                    callback?.onSpacebarEmojiSuggestionSelected(emoji)
-                }
             }
         }
         key?.takeIf(::isBackspaceKey)?.let { key ->
@@ -701,6 +686,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         canvas.translate(left, top)
         canvas.scale(iconSize / ImeLayout.ICON_VIEWPORT, iconSize / ImeLayout.ICON_VIEWPORT)
         when (icon) {
+            KeyIcon.Emoji -> drawEmojiIcon(canvas)
             KeyIcon.ArrowLeft -> drawArrowIcon(canvas, ArrowDirection.Left)
             KeyIcon.ArrowUp -> drawArrowIcon(canvas, ArrowDirection.Up)
             KeyIcon.ArrowDown -> drawArrowIcon(canvas, ArrowDirection.Down)
@@ -711,6 +697,19 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIcon.Enter -> drawEnterIcon(canvas)
         }
         canvas.restore()
+    }
+
+    private fun drawEmojiIcon(canvas: Canvas) {
+        canvas.drawCircle(12f, 12f, 7f, iconPaint)
+        iconPaint.style = Paint.Style.FILL
+        canvas.drawCircle(9.2f, 10.4f, 0.9f, iconPaint)
+        canvas.drawCircle(14.8f, 10.4f, 0.9f, iconPaint)
+        iconPaint.style = Paint.Style.STROKE
+        val smile = Path().apply {
+            moveTo(8.6f, 14f)
+            cubicTo(10.2f, 16f, 13.8f, 16f, 15.4f, 14f)
+        }
+        canvas.drawPath(smile, iconPaint)
     }
 
     private fun drawArrowIcon(canvas: Canvas, direction: ArrowDirection) {
@@ -865,6 +864,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
+            KeyIntent.OpenEmojiPanel -> callback?.onEmojiPanelRequested()
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
             KeyIntent.AgentHistory -> callback?.onAgentHistoryRequested()
             is KeyIntent.Dispatch -> {
@@ -975,13 +975,13 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
             LayoutMode.Symbols -> listOf(
                 RowSpec(chars("1234567890"), 1f),
-                RowSpec(symbols("@#\$_&-+()", rowPrefix = "symbol_middle"), 1f),
+                RowSpec(symbols("-/:;()\$&@\"", rowPrefix = "symbol_middle"), 1f),
                 symbolBottomRow(),
                 bottomRow(),
             )
             LayoutMode.MoreSymbols -> listOf(
-                RowSpec(symbols("~`|•√π÷×¶∆", rowPrefix = "more_symbol_top"), 1f),
-                RowSpec(symbols("£¢€¥^°={}\\", rowPrefix = "more_symbol_middle"), 1f),
+                RowSpec(symbols("[]{}#%^*+=", rowPrefix = "more_symbol_top"), 1f),
+                RowSpec(symbols("_\\|~<>€£¥•", rowPrefix = "more_symbol_middle"), 1f),
                 moreSymbolBottomRow(),
                 bottomRow(),
             )
@@ -1115,14 +1115,12 @@ class ZnKeyboardView @JvmOverloads constructor(
     private fun symbolBottomRow(): RowSpec {
         return RowSpec(
             listOf(
-                KeySpec("more_symbols", "=<", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
-                KeySpec("star", "*", KeyIntent.Dispatch(KeyboardAction.Text("*")), role = KeyRole.Character),
-                KeySpec("quote", "\"", KeyIntent.Dispatch(KeyboardAction.Text("\"")), role = KeyRole.Character),
-                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
-                KeySpec("colon", ":", KeyIntent.Dispatch(KeyboardAction.Text(":")), role = KeyRole.Character),
-                KeySpec("semicolon", ";", KeyIntent.Dispatch(KeyboardAction.Text(";")), role = KeyRole.Character),
-                KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
+                KeySpec("more_symbols", "#+=", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
+                KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), role = KeyRole.Character),
+                KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
+                KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
                 KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
             ),
             heightWeight = 1f,
@@ -1133,14 +1131,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         return RowSpec(
             listOf(
                 KeySpec("more_symbols", "123", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
-                KeySpec("copyright", "©", KeyIntent.Dispatch(KeyboardAction.Text("©")), role = KeyRole.Character),
-                KeySpec("registered", "®", KeyIntent.Dispatch(KeyboardAction.Text("®")), role = KeyRole.Character),
-                KeySpec("trademark", "™", KeyIntent.Dispatch(KeyboardAction.Text("™")), role = KeyRole.Character),
-                KeySpec("check", "✓", KeyIntent.Dispatch(KeyboardAction.Text("✓")), role = KeyRole.Character),
-                KeySpec("left_bracket", "[", KeyIntent.Dispatch(KeyboardAction.Text("[")), role = KeyRole.Character),
-                KeySpec("right_bracket", "]", KeyIntent.Dispatch(KeyboardAction.Text("]")), role = KeyRole.Character),
-                KeySpec("less_than", "<", KeyIntent.Dispatch(KeyboardAction.Text("<")), role = KeyRole.Character),
-                KeySpec("greater_than", ">", KeyIntent.Dispatch(KeyboardAction.Text(">")), role = KeyRole.Character),
+                KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), role = KeyRole.Character),
+                KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
+                KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
+                KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
                 KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
             ),
             heightWeight = 1f,
@@ -1149,20 +1144,34 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun bottomRow(): RowSpec {
         val switchLabel = if (layoutMode == LayoutMode.Letters) "123" else "ABC"
-        val spacebarSuggestion = spacebarEmojiSuggestion
+        if (layoutMode != LayoutMode.Letters) {
+            return RowSpec(
+                listOf(
+                    KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
+                    KeySpec("emoji", "Emoji", KeyIntent.OpenEmojiPanel, 0.9f, KeyRole.Function, icon = KeyIcon.Emoji),
+                    KeySpec(
+                        "space",
+                        "space",
+                        KeyIntent.Dispatch(KeyboardAction.Text(" ")),
+                        5.1f,
+                        KeyRole.Function,
+                    ),
+                    KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
+                ),
+                heightWeight = 1.08f,
+            )
+        }
         return RowSpec(
             listOf(
                 KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
-                KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), 0.9f, KeyRole.Character),
+                KeySpec("emoji", "Emoji", KeyIntent.OpenEmojiPanel, 0.9f, KeyRole.Function, icon = KeyIcon.Emoji),
                 KeySpec(
                     "space",
-                    spacebarSuggestion ?: "space",
+                    "space",
                     KeyIntent.Dispatch(KeyboardAction.Text(" ")),
-                    4.2f,
+                    5.1f,
                     KeyRole.Function,
-                    largeLabel = spacebarSuggestion != null,
                 ),
-                KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), 0.9f, KeyRole.Character),
                 KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
             ),
             heightWeight = 1.08f,
@@ -1226,6 +1235,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private enum class KeyIcon {
+        Emoji,
         ArrowLeft,
         ArrowUp,
         ArrowDown,
@@ -1297,6 +1307,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object ToggleMoreSymbols : KeyIntent()
         data object ToggleAlt : KeyIntent()
         data object ToggleCtrl : KeyIntent()
+        data object OpenEmojiPanel : KeyIntent()
         data object AgentRewrite : KeyIntent()
         data object AgentHistory : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
