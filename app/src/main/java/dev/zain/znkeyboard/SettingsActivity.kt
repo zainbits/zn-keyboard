@@ -1342,17 +1342,9 @@ private fun AgentModeSection(
             )
         } else {
             Text(
-                text = "OpenRouter endpoint is managed automatically. Leave pin empty for automatic routing.",
+                text = "OpenRouter endpoint is managed automatically. Pick a model first, then optionally pin a provider for that model.",
                 color = ZnKeyboardColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
-            )
-            OutlinedTextField(
-                value = openRouterProviderSlug,
-                onValueChange = onOpenRouterProviderSlugChange,
-                label = { Text("Provider pin") },
-                placeholder = { Text("Example: deepinfra") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
             )
         }
 
@@ -1363,6 +1355,15 @@ private fun AgentModeSection(
             value = agentModel,
             onValueChange = onAgentModelChange,
         )
+
+        if (agentProviderType == KeyboardSettings.AgentProviderType.OpenRouter) {
+            OpenRouterProviderSelector(
+                modelId = agentModel,
+                apiKey = agentApiKey,
+                value = openRouterProviderSlug,
+                onValueChange = onOpenRouterProviderSlugChange,
+            )
+        }
 
         ReasoningControls(
             providerType = agentProviderType,
@@ -1381,6 +1382,108 @@ private fun AgentModeSection(
             emptySupportingText = "Enter your provider's API key.",
             lockContentDescription = "Lock API key",
             unlockContentDescription = "Unlock API key",
+        )
+    }
+}
+
+@Composable
+private fun OpenRouterProviderSelector(
+    modelId: String,
+    apiKey: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var providerOptions by remember { mutableStateOf<List<OpenRouterProviderOption>>(emptyList()) }
+    var providerLoadStatus by remember { mutableStateOf("Pick a model to load OpenRouter providers.") }
+    val currentValue by rememberUpdatedState(value)
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val normalizedModelId = modelId.trim()
+
+    LaunchedEffect(normalizedModelId, apiKey) {
+        providerOptions = emptyList()
+        if (normalizedModelId.isBlank()) {
+            providerLoadStatus = "Pick a model to load OpenRouter providers."
+            return@LaunchedEffect
+        }
+        if (apiKey.isBlank()) {
+            providerLoadStatus = "Enter your OpenRouter API key to load providers."
+            return@LaunchedEffect
+        }
+        if (!normalizedModelId.contains("/")) {
+            providerLoadStatus = "Use an OpenRouter model ID like openai/gpt-4o to load providers."
+            return@LaunchedEffect
+        }
+
+        providerLoadStatus = "Loading providers..."
+        delay(MODEL_LOAD_DEBOUNCE_MS)
+        val result = withContext(Dispatchers.IO) {
+            fetchOpenRouterProviderOptions(
+                baseUrl = KeyboardSettings.OPENROUTER_API_BASE_URL,
+                modelId = normalizedModelId,
+                apiKey = apiKey,
+            )
+        }
+        result
+            .onSuccess { providers ->
+                providerOptions = providers
+                if (currentValue.isNotBlank() && providers.none { it.slug == currentValue }) {
+                    currentOnValueChange("")
+                }
+                providerLoadStatus = if (providers.isEmpty()) {
+                    "No provider pins found for this model. Automatic routing is still available."
+                } else {
+                    "Loaded ${providers.size} providers for this model."
+                }
+            }
+            .onFailure { error ->
+                providerLoadStatus = error.message?.takeIf { it.isNotBlank() }
+                    ?: "Could not load providers. Automatic routing is still available."
+            }
+    }
+
+    val selectedLabel = providerOptions.firstOrNull { it.slug == value }?.name
+        ?: value.takeIf { it.isNotBlank() }
+        ?: "Automatic routing"
+    val pickerItems = remember(providerOptions) {
+        listOf(
+            PickerItem(
+                id = "",
+                title = "Automatic routing",
+                subtitle = "Let OpenRouter choose the provider.",
+            ),
+        ) + providerOptions.map { option ->
+            PickerItem(
+                id = option.slug,
+                title = option.name,
+                subtitle = option.slug,
+            )
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            SettingsPickerLauncherButton(
+                label = "OpenRouter provider",
+                value = selectedLabel,
+                onClick = { expanded = true },
+            )
+
+            FloatingPickerMenu(
+                expanded = expanded,
+                items = pickerItems,
+                onDismissRequest = { expanded = false },
+                onItemSelected = { item ->
+                    expanded = false
+                    onValueChange(item.id)
+                },
+            )
+        }
+
+        Text(
+            text = providerLoadStatus,
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
         )
     }
 }
