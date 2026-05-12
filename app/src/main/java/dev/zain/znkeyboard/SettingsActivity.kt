@@ -104,6 +104,7 @@ import dev.zain.znkeyboard.constants.SettingsBackupDefaults
 import dev.zain.znkeyboard.constants.SettingsThemeColors
 import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
+import dev.zain.znkeyboard.ime.ClipboardHistoryStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -154,6 +155,7 @@ private fun SettingsScreen() {
     var agentApiKey by remember { mutableStateOf(KeyboardSettings.readAgentApiKey(context, agentProviderType)) }
     var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
+    var clipboardHistoryCount by remember { mutableStateOf(ClipboardHistoryStore.read(context).size) }
 
     fun refreshSettingsFromStorage() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
@@ -177,6 +179,7 @@ private fun SettingsScreen() {
         agentApiKey = KeyboardSettings.readAgentApiKey(context, nextProviderType)
         agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, nextProviderType)
         textSnippets = KeyboardSettings.readTextSnippets(context)
+        clipboardHistoryCount = ClipboardHistoryStore.read(context).size
     }
 
     val scope = rememberCoroutineScope()
@@ -305,6 +308,15 @@ private fun SettingsScreen() {
             TextSnippetsSection(
                 snippets = textSnippets,
                 onSnippetsChange = ::updateTextSnippets,
+            )
+
+            ClipboardHistorySettingsSection(
+                entryCount = clipboardHistoryCount,
+                onClearConfirmed = {
+                    ClipboardHistoryStore.clear(context)
+                    clipboardHistoryCount = 0
+                    Toast.makeText(context, "Clipboard history cleared", Toast.LENGTH_SHORT).show()
+                },
             )
 
             AgentModeSection(
@@ -577,6 +589,101 @@ private fun TextSnippetsSection(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ClipboardHistorySettingsSection(
+    entryCount: Int,
+    onClearConfirmed: () -> Unit,
+) {
+    var confirmingClear by remember { mutableStateOf(false) }
+
+    Surface(
+        color = ZnKeyboardColors.Surface,
+        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
+        tonalElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_history_24),
+                        contentDescription = null,
+                        tint = ZnKeyboardColors.Accent,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Clipboard history",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = "$entryCount/${ClipboardHistoryStore.MAX_HISTORY}",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+
+            Text(
+                text = "Clipboard history is available from the spacebar long-press saved text panel. Clearing it requires confirmation here.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+
+            OutlinedButton(
+                onClick = { confirmingClear = true },
+                enabled = entryCount > 0,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.DeleteContent),
+                border = BorderStroke(1.dp, ZnKeyboardColors.DeleteContent.copy(alpha = 0.55f)),
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_delete_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Clear clipboard history")
+            }
+        }
+    }
+
+    if (confirmingClear) {
+        AlertDialog(
+            onDismissRequest = { confirmingClear = false },
+            title = { Text("Clear clipboard history?") },
+            text = {
+                Text("This removes $entryCount saved clipboard item${if (entryCount == 1) "" else "s"} from this keyboard.")
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingClear = false }) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmingClear = false
+                        onClearConfirmed()
+                    },
+                ) {
+                    Text(
+                        text = "Clear",
+                        color = ZnKeyboardColors.DeleteContent,
+                    )
+                }
+            },
+        )
     }
 }
 

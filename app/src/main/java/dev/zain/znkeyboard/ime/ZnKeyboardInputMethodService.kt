@@ -41,9 +41,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     EmojiSearchView.Callback,
     GifSearchView.Callback,
     SnippetPanelView.Callback,
-    SnippetSearchView.Callback,
-    AgentReviewView.Callback,
-    ClipboardHistoryView.Callback {
+    SavedTextSearchView.Callback,
+    AgentReviewView.Callback {
     private var keyboardView: ZnKeyboardView? = null
     private var inputRoot: LinearLayout? = null
     private var keyboardContainer: FrameLayout? = null
@@ -51,9 +50,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var emojiSearchView: EmojiSearchView? = null
     private var gifSearchView: GifSearchView? = null
     private var snippetPanelView: SnippetPanelView? = null
-    private var snippetSearchView: SnippetSearchView? = null
+    private var savedTextSearchView: SavedTextSearchView? = null
     private var agentReviewView: AgentReviewView? = null
-    private var clipboardHistoryView: ClipboardHistoryView? = null
     private var currentEditorInfo: EditorInfo? = null
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
@@ -109,8 +107,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.callback = this
             view.setProviderSettings(KeyboardSettings.readGifProviderSettings(this))
         }
-        val snippetSearch = SnippetSearchView(this).also { view ->
-            snippetSearchView = view
+        val savedTextSearch = SavedTextSearchView(this).also { view ->
+            savedTextSearchView = view
             view.callback = this
         }
         val keyboardSlot = FrameLayout(this).also { container ->
@@ -141,7 +139,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 ),
             )
             addView(
-                snippetSearch,
+                savedTextSearch,
                 LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -218,7 +216,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (activeSurface == KeyboardSurface.GifSearch && handleGifSearchKeyboardAction(action, modifiers)) {
             return
         }
-        if (activeSurface == KeyboardSurface.SnippetSearch && handleSnippetSearchKeyboardAction(action, modifiers)) {
+        if (activeSurface == KeyboardSurface.SavedTextSearch && handleSavedTextSearchKeyboardAction(action, modifiers)) {
             return
         }
         when (action) {
@@ -332,8 +330,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
-    override fun onSnippetSearchRequested() {
-        showSnippetSearchPanel()
+    override fun onSnippetSearchRequested(tab: KeyboardSettings.SavedTextPanelTab) {
+        showSavedTextSearchPanel(tab)
     }
 
     override fun onSnippetSaveCurrentInput() {
@@ -344,22 +342,29 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
-    override fun onSnippetSearchClosed() {
+    override fun onSavedTextPanelTabChanged(tab: KeyboardSettings.SavedTextPanelTab) {
+        KeyboardSettings.saveSavedTextPanelTab(this, tab)
+    }
+
+    override fun onSavedTextSearchClosed() {
         showSnippetPanel()
     }
 
-    override fun onSnippetSearchSnippetSelected(snippet: String) {
+    override fun onSavedTextSearchSnippetSelected(snippet: String) {
         handleText(snippet, ModifierState(ctrl = false, alt = false))
         showKeyboardPanel()
     }
 
-    override fun onAgentRewriteRequested() {
-        startRewriteFromCurrentEditor()
+    override fun onSavedTextSearchClipboardSelected(text: String) {
+        pasteClipboardHistoryText(text)
     }
 
-    override fun onClipboardHistoryRequested() {
-        if (isSensitiveEditor(currentEditorInfo)) return
-        showClipboardHistoryPanel()
+    override fun onSavedTextSearchClipboardDeleted(text: String) {
+        deleteClipboardHistoryText(text)
+    }
+
+    override fun onAgentRewriteRequested() {
+        startRewriteFromCurrentEditor()
     }
 
     override fun onAgentReviewApply() {
@@ -370,22 +375,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         cancelAgentReview()
     }
 
-    override fun onClipboardHistoryClosed() {
-        showKeyboardPanel()
-    }
-
     override fun onClipboardHistoryItemSelected(text: String) {
         pasteClipboardHistoryText(text)
     }
 
     override fun onClipboardHistoryItemDeleted(text: String) {
-        ClipboardHistoryStore.deleteText(this, text)
-        clipboardHistoryView?.submitHistory(ClipboardHistoryStore.read(this))
-    }
-
-    override fun onClipboardHistoryCleared() {
-        ClipboardHistoryStore.clear(this)
-        clipboardHistoryView?.submitHistory(emptyList())
+        deleteClipboardHistoryText(text)
     }
 
     private fun applyKeyboardSettings() {
@@ -427,17 +422,21 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         snippetPanelView?.let { view ->
             view.setHeightScale(heightScale)
             view.setSnippets(KeyboardSettings.readTextSnippets(this))
+            view.setClipboardEnabled(!isSensitiveEditor(currentEditorInfo))
+            view.submitClipboardHistory(ClipboardHistoryStore.read(this))
         }
-        snippetSearchView?.setSnippets(KeyboardSettings.readTextSnippets(this))
+        savedTextSearchView?.let { view ->
+            view.setSnippets(KeyboardSettings.readTextSnippets(this))
+            view.setClipboardEntries(ClipboardHistoryStore.read(this))
+        }
         agentReviewView?.setHeightScale(heightScale)
-        clipboardHistoryView?.setHeightScale(heightScale)
         renderSecondRow()
     }
 
     private fun showEmojiPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         val panel = emojiPanelView ?: EmojiPanelView(this).also { view ->
             emojiPanelView = view
             view.callback = this
@@ -456,7 +455,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showEmojiSearchPanel() {
         hideGifSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         val keyboard = keyboardView ?: return
         val search = emojiSearchView ?: return
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
@@ -475,7 +474,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showGifPanel(keepCurrentResults: Boolean = false) {
         hideEmojiSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         val panel = gifSearchView ?: return
         panel.setHeightScale(KeyboardSettings.readHeightScale(this))
         panel.setProviderSettings(KeyboardSettings.readGifProviderSettings(this))
@@ -492,7 +491,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun showGifSearchPanel() {
         hideEmojiSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         val keyboard = keyboardView ?: return
         val search = gifSearchView ?: return
         search.setHeightScale(KeyboardSettings.readHeightScale(this))
@@ -509,28 +508,42 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showSnippetPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
+        capturePrimaryClipboardText()
         val panel = snippetPanelView ?: SnippetPanelView(this).also { view ->
             snippetPanelView = view
             view.callback = this
         }
+        val sensitiveEditor = isSensitiveEditor(currentEditorInfo)
+        val selectedTab = KeyboardSettings.readSavedTextPanelTab(this)
+            .takeUnless { sensitiveEditor && it == KeyboardSettings.SavedTextPanelTab.Clipboard }
+            ?: KeyboardSettings.SavedTextPanelTab.Snippets
         panel.setHeightScale(KeyboardSettings.readHeightScale(this))
+        panel.setClipboardEnabled(!sensitiveEditor)
         panel.setSnippets(KeyboardSettings.readTextSnippets(this))
+        panel.submitClipboardHistory(ClipboardHistoryStore.read(this))
+        panel.setSelectedTab(selectedTab)
         activeSurface = KeyboardSurface.Snippets
         swapKeyboardSurface(panel)
         renderSecondRow()
     }
 
-    private fun showSnippetSearchPanel() {
+    private fun showSavedTextSearchPanel(tab: KeyboardSettings.SavedTextPanelTab) {
+        if (tab == KeyboardSettings.SavedTextPanelTab.Clipboard && isSensitiveEditor(currentEditorInfo)) {
+            return
+        }
         hideEmojiSearchView()
         hideGifSearchView()
         val keyboard = keyboardView ?: return
-        val search = snippetSearchView ?: return
+        val search = savedTextSearchView ?: return
+        capturePrimaryClipboardText()
+        KeyboardSettings.saveSavedTextPanelTab(this, tab)
         search.setSnippets(KeyboardSettings.readTextSnippets(this))
-        search.clearSearch()
+        search.setClipboardEntries(ClipboardHistoryStore.read(this))
+        search.showForTab(tab)
         search.visibility = View.VISIBLE
         keyboard.setEnterLabel("Search")
-        activeSurface = KeyboardSurface.SnippetSearch
+        activeSurface = KeyboardSurface.SavedTextSearch
         swapKeyboardSurface(keyboard)
         renderSecondRow()
     }
@@ -569,14 +582,14 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         val updatedSnippets = snippets + snippet
         KeyboardSettings.saveTextSnippets(this, updatedSnippets)
         snippetPanelView?.setSnippets(updatedSnippets)
-        snippetSearchView?.setSnippets(updatedSnippets)
+        savedTextSearchView?.setSnippets(updatedSnippets)
         Toast.makeText(this, "Snippet saved.", Toast.LENGTH_SHORT).show()
     }
 
     private fun showKeyboardPanel() {
         hideEmojiSearchView()
         hideGifSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         activeSurface = KeyboardSurface.Keyboard
         val keyboard = keyboardView ?: run {
             renderSecondRow()
@@ -590,7 +603,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun showAgentReviewPanel(review: AgentReview) {
         hideEmojiSearchView()
         hideGifSearchView()
-        hideSnippetSearchView()
+        hideSavedTextSearchView()
         val reviewView = agentReviewView ?: AgentReviewView(this).also { view ->
             agentReviewView = view
             view.callback = this
@@ -599,22 +612,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         reviewView.render(review.replacementText)
         activeSurface = KeyboardSurface.Review
         swapKeyboardSurface(reviewView)
-        renderSecondRow()
-    }
-
-    private fun showClipboardHistoryPanel() {
-        hideEmojiSearchView()
-        hideGifSearchView()
-        hideSnippetSearchView()
-        capturePrimaryClipboardText()
-        val historyView = clipboardHistoryView ?: ClipboardHistoryView(this).also { view ->
-            clipboardHistoryView = view
-            view.callback = this
-        }
-        historyView.setHeightScale(KeyboardSettings.readHeightScale(this))
-        historyView.submitHistory(ClipboardHistoryStore.read(this))
-        activeSurface = KeyboardSurface.ClipboardHistory
-        swapKeyboardSurface(historyView)
         renderSecondRow()
     }
 
@@ -663,8 +660,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
     }
 
-    private fun hideSnippetSearchView() {
-        snippetSearchView?.let { view ->
+    private fun hideSavedTextSearchView() {
+        savedTextSearchView?.let { view ->
             if (view.visibility != View.GONE) {
                 view.visibility = View.GONE
             }
@@ -826,11 +823,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         return true
     }
 
-    private fun handleSnippetSearchKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
+    private fun handleSavedTextSearchKeyboardAction(action: KeyboardAction, modifiers: ModifierState): Boolean {
         if (modifiers.hasHardwareMeta) {
             return true
         }
-        val searchView = snippetSearchView ?: return true
+        val searchView = savedTextSearchView ?: return true
         when (action) {
             KeyboardAction.Backspace -> searchView.deleteQueryCharacter()
             KeyboardAction.Enter -> Unit
@@ -1181,8 +1178,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         lastCapturedClipboardSnapshot = snapshot
 
         ClipboardHistoryStore.recordText(this, snapshot.text)
-        if (activeSurface == KeyboardSurface.ClipboardHistory) {
-            clipboardHistoryView?.submitHistory(ClipboardHistoryStore.read(this))
+        if (activeSurface == KeyboardSurface.Snippets || activeSurface == KeyboardSurface.SavedTextSearch) {
+            refreshClipboardHistoryViews()
         }
     }
 
@@ -1263,6 +1260,17 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         } else {
             Toast.makeText(this, "Couldn't paste clipboard item.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun deleteClipboardHistoryText(text: String) {
+        ClipboardHistoryStore.deleteText(this, text)
+        refreshClipboardHistoryViews()
+    }
+
+    private fun refreshClipboardHistoryViews() {
+        val entries = ClipboardHistoryStore.read(this)
+        snippetPanelView?.submitClipboardHistory(entries)
+        savedTextSearchView?.setClipboardEntries(entries)
     }
 
     private fun startRewriteFromCurrentEditor() {
@@ -1841,14 +1849,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun renderSecondRow() {
         val visible = activeSurface == KeyboardSurface.Keyboard
         val providerConfigured = KeyboardSettings.readAgentProviderSettings(this).isConfigured
-        val sensitiveEditor = isSensitiveEditor(currentEditorInfo)
 
         keyboardView?.renderShortcutRows(
             ZnKeyboardView.ShortcutRowState(
                 secondRowVisible = visible,
                 loading = agentLoading,
                 rewriteEnabled = visible && isRewriteAvailable() && providerConfigured,
-                historyEnabled = visible && !sensitiveEditor,
             ),
         )
     }
@@ -1985,9 +1991,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         Gif,
         GifSearch,
         Snippets,
-        SnippetSearch,
+        SavedTextSearch,
         Review,
-        ClipboardHistory,
     }
 
     private class LlmHttpException(

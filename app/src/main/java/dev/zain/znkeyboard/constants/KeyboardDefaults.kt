@@ -18,6 +18,6 @@ object KeyboardDefaults {
     const val MAX_CUSTOM_EMOJI_TAG_CHARS = 32
 
     val DEFAULT_UPPER_ROW_KEY_IDS = listOf("ctrl", "tab", "pipe", "slash", "left", "up", "down", "right", "esc")
-    val DEFAULT_SECOND_ROW_BUTTON_IDS = listOf("rewrite", "left", "right", "backspace", "history")
+    val DEFAULT_SECOND_ROW_BUTTON_IDS = listOf("rewrite", "left", "right", "backspace")
     val DEFAULT_KEYBOARD_ROW_ORDER = listOf("second", "upper")
 }

@@ -24,44 +24,25 @@ import java.util.Date
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-class ClipboardHistoryView @JvmOverloads constructor(
+internal class ClipboardHistoryListView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : LinearLayout(context, attrs) {
+) : ListView(context, attrs) {
     interface Callback {
-        fun onClipboardHistoryClosed()
         fun onClipboardHistoryItemSelected(text: String)
         fun onClipboardHistoryItemDeleted(text: String)
-        fun onClipboardHistoryCleared()
     }
 
     var callback: Callback? = null
 
-    private val adapter = HistoryAdapter(
+    private val historyAdapter = HistoryAdapter(
         context = context,
         onSelected = { text -> callback?.onClipboardHistoryItemSelected(text) },
         onDeleted = { text -> callback?.onClipboardHistoryItemDeleted(text) },
     )
-    private val clearButton = TextView(context).apply {
-        text = "Clear"
-        gravity = Gravity.CENTER
-        includeFontPadding = false
-        setTextColor(PALETTE.mutedText)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-        background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
-        isClickable = true
-        isFocusable = false
-        setOnClickListener { callback?.onClipboardHistoryCleared() }
-    }
-    private val emptyText = TextView(context).apply {
-        text = "No clipboard history yet"
-        gravity = Gravity.CENTER
-        setTextColor(PALETTE.mutedText)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        visibility = GONE
-    }
-    private val historyList = ListView(context).apply {
-        adapter = this@ClipboardHistoryView.adapter
+
+    init {
+        adapter = historyAdapter
         divider = ColorDrawable(Color.TRANSPARENT)
         dividerHeight = dp(6)
         cacheColorHint = Color.TRANSPARENT
@@ -71,89 +52,9 @@ class ClipboardHistoryView @JvmOverloads constructor(
         selector = ColorDrawable(Color.TRANSPARENT)
         setPadding(0, 0, 0, dp(4))
     }
-    private var heightScale = 1f
-
-    private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
-        ImeLayout.bottomSystemControlGapPx(context)
-    }
-
-    init {
-        orientation = VERTICAL
-        setBackgroundColor(PALETTE.background)
-        setPadding(dp(8), dp(8), dp(8), dp(ImeLayout.BASE_BOTTOM_PADDING_DP) + bottomSystemControlGapPx.roundToInt())
-        isClickable = true
-        importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
-
-        val header = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                ImePanelChrome.backButton(
-                    context = context,
-                    contentDescription = "Back to keyboard",
-                    backgroundColor = PALETTE.function,
-                    textColor = PALETTE.mutedText,
-                    onClick = { callback?.onClipboardHistoryClosed() },
-                ),
-                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT)
-                    .withMargins(end = ImeLayout.CLIPBOARD_HISTORY_TITLE_START_GAP_DP),
-            )
-            addView(
-                TextView(context).apply {
-                    text = "Clipboard History"
-                    setTextColor(PALETTE.text)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER_VERTICAL
-                    includeFontPadding = false
-                },
-                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f),
-            )
-            addView(clearButton, LayoutParams(dp(78), LayoutParams.MATCH_PARENT))
-        }
-
-        addView(header, LayoutParams(LayoutParams.MATCH_PARENT, dp(42)))
-        addView(
-            historyList,
-            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 6),
-        )
-        addView(
-            emptyText,
-            LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f).withMargins(top = 6),
-        )
-    }
-
-    fun setHeightScale(scale: Float) {
-        if (heightScale != scale) {
-            heightScale = scale
-            requestLayout()
-        }
-    }
 
     fun submitHistory(entries: List<ClipboardHistoryStore.Entry>) {
-        adapter.submitList(entries.take(ClipboardHistoryStore.MAX_HISTORY))
-        val empty = entries.isEmpty()
-        clearButton.isEnabled = !empty
-        emptyText.visibility = if (empty) VISIBLE else GONE
-        historyList.visibility = if (empty) GONE else VISIBLE
-    }
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density +
-            ImeLayout.compactAgentRowHeightPx(context, heightScale) +
-            bottomSystemControlGapPx).roundToInt()
-        val exactHeightSpec = MeasureSpec.makeMeasureSpec(resolveSize(desiredHeight, heightMeasureSpec), MeasureSpec.EXACTLY)
-        super.onMeasure(widthMeasureSpec, exactHeightSpec)
-    }
-
-    private fun LayoutParams.withMargins(
-        start: Int = 0,
-        top: Int = 0,
-        end: Int = 0,
-        bottom: Int = 0,
-    ): LayoutParams {
-        setMargins(dp(start), dp(top), dp(end), dp(bottom))
-        return this
+        historyAdapter.submitList(entries.take(ClipboardHistoryStore.MAX_HISTORY))
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
@@ -198,8 +99,6 @@ class ClipboardHistoryView @JvmOverloads constructor(
             )
             return row
         }
-
-        private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).roundToInt()
     }
 
     private class SwipeRevealHistoryRow(context: Context) : FrameLayout(context) {
@@ -388,7 +287,6 @@ class ClipboardHistoryView @JvmOverloads constructor(
         val background = ImeColors.BACKGROUND
         val key = ImeColors.KEY
         val cardStroke = ImeColors.DIVIDER
-        val function = ImeColors.KEY
         const val text = ImeColors.TEXT
         val mutedText = ImeColors.SECONDARY_TEXT
         val deleteBackground = Color.rgb(58, 36, 36)

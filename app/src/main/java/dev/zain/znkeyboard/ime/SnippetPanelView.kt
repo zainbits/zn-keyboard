@@ -10,11 +10,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
@@ -23,12 +21,16 @@ import kotlin.math.roundToInt
 class SnippetPanelView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : LinearLayout(context, attrs) {
+) : LinearLayout(context, attrs),
+    ClipboardHistoryListView.Callback {
     interface Callback {
         fun onSnippetSelected(snippet: String)
-        fun onSnippetSearchRequested()
+        fun onSnippetSearchRequested(tab: KeyboardSettings.SavedTextPanelTab)
         fun onSnippetSaveCurrentInput()
         fun onSnippetPanelClosed()
+        fun onSavedTextPanelTabChanged(tab: KeyboardSettings.SavedTextPanelTab)
+        fun onClipboardHistoryItemSelected(text: String)
+        fun onClipboardHistoryItemDeleted(text: String)
     }
 
     var callback: Callback? = null
@@ -36,7 +38,7 @@ class SnippetPanelView @JvmOverloads constructor(
     private val masonryLayout = SnippetMasonryLayout(context).apply {
         setPadding(0, 0, 0, dp(2))
     }
-    private val scrollView = ScrollView(context).apply {
+    private val snippetScrollView = ScrollView(context).apply {
         isFillViewport = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         clipToPadding = false
@@ -49,39 +51,118 @@ class SnippetPanelView @JvmOverloads constructor(
             ),
         )
     }
-    private val emptyText = TextView(context).apply {
-        text = "No snippets"
-        gravity = Gravity.CENTER
-        setTextColor(PALETTE.mutedText)
-        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-        includeFontPadding = false
-        visibility = GONE
+    private val snippetEmptyText = emptyMessage("No snippets")
+    private val snippetContent = FrameLayout(context).apply {
+        addView(
+            snippetScrollView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        addView(
+            snippetEmptyText,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+    private val clipboardList = ClipboardHistoryListView(context).apply {
+        callback = this@SnippetPanelView
+    }
+    private val clipboardEmptyText = emptyMessage("No clipboard history yet")
+    private val clipboardContent = FrameLayout(context).apply {
+        addView(
+            clipboardList,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        addView(
+            clipboardEmptyText,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
     }
     private val contentFrame = FrameLayout(context).apply {
         addView(
-            scrollView,
+            snippetContent,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
         addView(
-            emptyText,
+            clipboardContent,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
     }
-    private val searchBar = iconTextKey("Search snippets", R.drawable.ic_search_24) {
-        callback?.onSnippetSearchRequested()
-    }.apply {
+    private val searchBar = SavedTextPanelChrome.searchKey(
+        context = context,
+        label = "Search snippets",
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.mutedText,
+        onClick = { callback?.onSnippetSearchRequested(selectedTab) },
+    )
+    private val saveButton = SavedTextPanelChrome.iconButton(
+        context = context,
+        iconResId = R.drawable.ic_save_24,
+        contentDescription = "Save current input as snippet",
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.mutedText,
+        onClick = { callback?.onSnippetSaveCurrentInput() },
+    )
+    private val clipboardTabButton = SavedTextPanelChrome.tabButton(
+        context = context,
+        label = KeyboardSettings.SavedTextPanelTab.Clipboard.label,
+        selected = false,
+        selectedColor = PALETTE.selected,
+        unselectedColor = PALETTE.background,
+        textColor = PALETTE.text,
+        mutedTextColor = PALETTE.mutedText,
+        onClick = { selectTab(KeyboardSettings.SavedTextPanelTab.Clipboard, notify = true) },
+    )
+    private val snippetsTabButton = SavedTextPanelChrome.tabButton(
+        context = context,
+        label = KeyboardSettings.SavedTextPanelTab.Snippets.label,
+        selected = true,
+        selectedColor = PALETTE.selected,
+        unselectedColor = PALETTE.background,
+        textColor = PALETTE.text,
+        mutedTextColor = PALETTE.mutedText,
+        onClick = { selectTab(KeyboardSettings.SavedTextPanelTab.Snippets, notify = true) },
+    )
+    private val tabBar = LinearLayout(context).apply {
+        orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        contentDescription = "Search snippets"
-        setPadding(dp(14), 0, dp(14), 0)
+        setPadding(dp(4), dp(4), dp(4), dp(4))
+        background = ImePressFeedback.roundedBackground(
+            context = context,
+            containerColor = PALETTE.function,
+            contentColor = PALETTE.mutedText,
+            radiusDp = 24,
+        )
+        addView(
+            clipboardTabButton,
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(end = 2),
+        )
+        addView(
+            snippetsTabButton,
+            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(start = 2),
+        )
     }
 
     private var snippets = emptyList<KeyboardSettings.TextSnippet>()
+    private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
+    private var selectedTab = KeyboardSettings.SavedTextPanelTab.Snippets
+    private var clipboardEnabled = true
     private var heightScale = 1f
 
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
@@ -108,7 +189,13 @@ class SnippetPanelView @JvmOverloads constructor(
             contentFrame,
             LayoutParams(LayoutParams.MATCH_PARENT, 0, 1f),
         )
+        addView(
+            tabBar,
+            LayoutParams(LayoutParams.MATCH_PARENT, dp(48)).withMargins(top = 6),
+        )
         rebuildSnippetCards()
+        updateClipboardContent()
+        selectTab(selectedTab, notify = false)
     }
 
     fun setHeightScale(scale: Float) {
@@ -126,6 +213,29 @@ class SnippetPanelView @JvmOverloads constructor(
         rebuildSnippetCards()
     }
 
+    fun submitClipboardHistory(entries: List<ClipboardHistoryStore.Entry>) {
+        val normalized = entries.take(ClipboardHistoryStore.MAX_HISTORY)
+        if (clipboardEntries == normalized) return
+
+        clipboardEntries = normalized
+        updateClipboardContent()
+    }
+
+    fun setSelectedTab(tab: KeyboardSettings.SavedTextPanelTab) {
+        selectTab(tab, notify = false)
+    }
+
+    fun setClipboardEnabled(enabled: Boolean) {
+        if (clipboardEnabled == enabled) return
+        clipboardEnabled = enabled
+        clipboardTabButton.alpha = if (enabled) 1f else 0.36f
+        clipboardTabButton.isEnabled = enabled
+        clipboardTabButton.isClickable = enabled
+        if (!enabled && selectedTab == KeyboardSettings.SavedTextPanelTab.Clipboard) {
+            selectTab(KeyboardSettings.SavedTextPanelTab.Snippets, notify = true)
+        }
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EXTENDED_PANEL_EXTRA_HEIGHT_DP) *
             heightScale *
@@ -134,6 +244,48 @@ class SnippetPanelView @JvmOverloads constructor(
             .roundToInt()
         val exactHeightSpec = MeasureSpec.makeMeasureSpec(resolveSize(desiredHeight, heightMeasureSpec), MeasureSpec.EXACTLY)
         super.onMeasure(widthMeasureSpec, exactHeightSpec)
+    }
+
+    override fun onClipboardHistoryItemSelected(text: String) {
+        callback?.onClipboardHistoryItemSelected(text)
+    }
+
+    override fun onClipboardHistoryItemDeleted(text: String) {
+        callback?.onClipboardHistoryItemDeleted(text)
+    }
+
+    private fun selectTab(tab: KeyboardSettings.SavedTextPanelTab, notify: Boolean) {
+        val nextTab = if (tab == KeyboardSettings.SavedTextPanelTab.Clipboard && !clipboardEnabled) {
+            KeyboardSettings.SavedTextPanelTab.Snippets
+        } else {
+            tab
+        }
+        val changed = selectedTab != nextTab
+        selectedTab = nextTab
+
+        snippetContent.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
+        clipboardContent.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Clipboard) VISIBLE else GONE
+        searchBar.text = nextTab.searchLabel
+        searchBar.contentDescription = nextTab.searchLabel
+        saveButton.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
+        clipboardTabButton.updateForTab(selected = nextTab == KeyboardSettings.SavedTextPanelTab.Clipboard)
+        snippetsTabButton.updateForTab(selected = nextTab == KeyboardSettings.SavedTextPanelTab.Snippets)
+
+        if (notify && changed) {
+            callback?.onSavedTextPanelTabChanged(nextTab)
+        }
+    }
+
+    private fun TextView.updateForTab(selected: Boolean) {
+        with(SavedTextPanelChrome) {
+            updateTabButton(
+                selected = selected,
+                selectedColor = PALETTE.selected,
+                unselectedColor = PALETTE.background,
+                textColor = PALETTE.text,
+                mutedTextColor = PALETTE.mutedText,
+            )
+        }
     }
 
     private fun rebuildSnippetCards() {
@@ -149,8 +301,15 @@ class SnippetPanelView @JvmOverloads constructor(
         }
 
         val empty = snippets.isEmpty()
-        emptyText.visibility = if (empty) VISIBLE else GONE
-        scrollView.visibility = if (empty) GONE else VISIBLE
+        snippetEmptyText.visibility = if (empty) VISIBLE else GONE
+        snippetScrollView.visibility = if (empty) GONE else VISIBLE
+    }
+
+    private fun updateClipboardContent() {
+        clipboardList.submitHistory(clipboardEntries)
+        val empty = clipboardEntries.isEmpty()
+        clipboardEmptyText.visibility = if (empty) VISIBLE else GONE
+        clipboardList.visibility = if (empty) GONE else VISIBLE
     }
 
     private fun buildHeaderRow(): LinearLayout {
@@ -172,9 +331,7 @@ class SnippetPanelView @JvmOverloads constructor(
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
             )
             addView(
-                iconKey(R.drawable.ic_save_24, "Save current input as snippet") {
-                    callback?.onSnippetSaveCurrentInput()
-                },
+                saveButton,
                 LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
             )
         }
@@ -221,42 +378,15 @@ class SnippetPanelView @JvmOverloads constructor(
         }
     }
 
-    private fun textKey(label: String, role: KeyRole, onClick: () -> Unit): TextView {
+    private fun emptyMessage(message: String): TextView {
         return TextView(context).apply {
-            text = label
+            text = message
             gravity = Gravity.CENTER
+            setTextColor(PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             includeFontPadding = false
-            isClickable = true
-            isFocusable = false
-            setTextColor(if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (role == KeyRole.Character) 18f else 13f)
-            background = keyBackground(role)
-            setOnClickListener { onClick() }
+            visibility = GONE
         }
-    }
-
-    private fun iconTextKey(label: String, iconResId: Int, onClick: () -> Unit): TextView {
-        return textKey(label, KeyRole.Function, onClick).apply {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(tintedIcon(iconResId), null, null, null)
-            compoundDrawablePadding = dp(8)
-        }
-    }
-
-    private fun iconKey(iconResId: Int, description: String, onClick: () -> Unit): ImageButton {
-        return ImageButton(context).apply {
-            contentDescription = description
-            background = keyBackground(KeyRole.Function)
-            isClickable = true
-            isFocusable = false
-            scaleType = ImageView.ScaleType.CENTER
-            setPadding(0, 0, 0, 0)
-            setImageDrawable(tintedIcon(iconResId))
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun tintedIcon(iconResId: Int) = ContextCompat.getDrawable(context, iconResId)?.mutate()?.apply {
-        setTint(PALETTE.mutedText)
     }
 
     private fun cardBackground() =
@@ -267,16 +397,6 @@ class SnippetPanelView @JvmOverloads constructor(
             radiusDp = 7,
             strokeWidthDp = 1,
             strokeColor = PALETTE.border,
-        )
-
-    private fun keyBackground(role: KeyRole) =
-        ImePressFeedback.roundedBackground(
-            context = context,
-            containerColor = when (role) {
-                KeyRole.Character -> PALETTE.key
-                KeyRole.Function -> PALETTE.function
-            },
-            contentColor = if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText,
         )
 
     private fun LayoutParams.withMargins(
@@ -292,11 +412,6 @@ class SnippetPanelView @JvmOverloads constructor(
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-
-    private enum class KeyRole {
-        Character,
-        Function,
-    }
 
     private class SnippetMasonryLayout @JvmOverloads constructor(
         context: Context,
@@ -394,6 +509,7 @@ class SnippetPanelView @JvmOverloads constructor(
         val background = ImeColors.BACKGROUND
         val key = ImeColors.KEY_DARK
         val function = ImeColors.FUNCTION_DARK
+        val selected = ImeColors.SELECTED
         val border = ImeColors.BORDER
         const val text = ImeColors.TEXT
         val tagText = ImeColors.TAG_TEXT

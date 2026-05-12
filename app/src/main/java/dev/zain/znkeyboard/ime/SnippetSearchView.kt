@@ -7,45 +7,81 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
 import kotlin.math.roundToInt
 
-class SnippetSearchView @JvmOverloads constructor(
+class SavedTextSearchView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : LinearLayout(context, attrs) {
+) : LinearLayout(context, attrs),
+    ClipboardHistoryListView.Callback {
     interface Callback {
-        fun onSnippetSearchClosed()
-        fun onSnippetSearchSnippetSelected(snippet: String)
+        fun onSavedTextSearchClosed()
+        fun onSavedTextSearchSnippetSelected(snippet: String)
+        fun onSavedTextSearchClipboardSelected(text: String)
+        fun onSavedTextSearchClipboardDeleted(text: String)
     }
 
     var callback: Callback? = null
 
+    private var activeTab = KeyboardSettings.SavedTextPanelTab.Snippets
     private var snippets = emptyList<KeyboardSettings.TextSnippet>()
+    private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
     private var query = ""
 
-    private val queryText = TextView(context)
-    private val clearButton = iconButton(R.drawable.ic_close_24, "Clear snippet search") {
-        setQuery("")
-    }
-    private val resultContent = LinearLayout(context).apply {
+    private val queryText = SavedTextPanelChrome.queryText(
+        context = context,
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+    )
+    private val clearButton = SavedTextPanelChrome.iconButton(
+        context = context,
+        iconResId = R.drawable.ic_close_24,
+        contentDescription = "Clear saved text search",
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.mutedText,
+        onClick = { setQuery("") },
+    )
+    private val snippetResultContent = LinearLayout(context).apply {
         orientation = VERTICAL
     }
-    private val resultScroll = ScrollView(context).apply {
+    private val snippetResultScroll = ScrollView(context).apply {
         clipToPadding = false
         overScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
         setPadding(0, dp(4), 0, dp(6))
         addView(
-            resultContent,
+            snippetResultContent,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT),
+        )
+    }
+    private val clipboardResultList = ClipboardHistoryListView(context).apply {
+        callback = this@SavedTextSearchView
+    }
+    private val emptyText = TextView(context).apply {
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        setTextColor(PALETTE.mutedText)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        visibility = GONE
+    }
+    private val resultsFrame = FrameLayout(context).apply {
+        addView(
+            snippetResultScroll,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+        )
+        addView(
+            clipboardResultList,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
+        )
+        addView(
+            emptyText,
+            FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
         )
     }
 
@@ -61,7 +97,7 @@ class SnippetSearchView @JvmOverloads constructor(
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
         visibility = GONE
 
-        addView(resultScroll, LayoutParams(LayoutParams.MATCH_PARENT, dp(156)))
+        addView(resultsFrame, LayoutParams(LayoutParams.MATCH_PARENT, dp(156)))
         addView(searchRow(), LayoutParams(LayoutParams.MATCH_PARENT, dp(44)).withMargins(top = 6))
         updateResults()
     }
@@ -72,6 +108,20 @@ class SnippetSearchView @JvmOverloads constructor(
             snippets = normalized
             updateResults()
         }
+    }
+
+    fun setClipboardEntries(entries: List<ClipboardHistoryStore.Entry>) {
+        val normalized = entries.take(ClipboardHistoryStore.MAX_HISTORY)
+        if (clipboardEntries != normalized) {
+            clipboardEntries = normalized
+            updateResults()
+        }
+    }
+
+    fun showForTab(tab: KeyboardSettings.SavedTextPanelTab) {
+        activeTab = tab
+        clearSearch()
+        updateResults()
     }
 
     fun appendQueryText(value: String) {
@@ -87,6 +137,14 @@ class SnippetSearchView @JvmOverloads constructor(
 
     fun clearSearch() {
         setQuery("")
+    }
+
+    override fun onClipboardHistoryItemSelected(text: String) {
+        callback?.onSavedTextSearchClipboardSelected(text)
+    }
+
+    override fun onClipboardHistoryItemDeleted(text: String) {
+        callback?.onSavedTextSearchClipboardDeleted(text)
     }
 
     private fun setQuery(value: String) {
@@ -106,24 +164,14 @@ class SnippetSearchView @JvmOverloads constructor(
             addView(
                 ImePanelChrome.backButton(
                     context = context,
-                    contentDescription = "Back to snippets",
+                    contentDescription = "Back to saved text",
                     backgroundColor = PALETTE.function,
                     textColor = PALETTE.mutedText,
-                    onClick = { callback?.onSnippetSearchClosed() },
+                    onClick = { callback?.onSavedTextSearchClosed() },
                 ),
                 LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
-            queryText.apply {
-                gravity = Gravity.CENTER_VERTICAL
-                includeFontPadding = false
-                setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END
-                setTextColor(PALETTE.text)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                setPadding(dp(14), 0, dp(14), 0)
-                background = roundedBackground(PALETTE.function)
-            }
             addView(
                 queryText,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
@@ -138,32 +186,54 @@ class SnippetSearchView @JvmOverloads constructor(
 
     private fun updateResults() {
         updateQueryText()
-        resultContent.removeAllViews()
+        if (activeTab == KeyboardSettings.SavedTextPanelTab.Clipboard) {
+            updateClipboardResults()
+        } else {
+            updateSnippetResults()
+        }
+    }
+
+    private fun updateSnippetResults() {
+        clipboardResultList.visibility = GONE
+        snippetResultContent.removeAllViews()
         val visibleSnippets = visibleSnippets()
         if (visibleSnippets.isEmpty()) {
-            resultContent.addView(
-                TextView(context).apply {
-                    text = if (query.isBlank()) "No snippets" else "No matching snippets"
-                    gravity = Gravity.CENTER
-                    includeFontPadding = false
-                    setTextColor(PALETTE.mutedText)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                },
-                LayoutParams(LayoutParams.MATCH_PARENT, dp(64)),
-            )
+            snippetResultScroll.visibility = GONE
+            showEmpty(if (query.isBlank()) "No snippets" else "No matching snippets")
             return
         }
 
+        emptyText.visibility = GONE
+        snippetResultScroll.visibility = VISIBLE
         visibleSnippets.forEach { snippet ->
-            resultContent.addView(
+            snippetResultContent.addView(
                 resultCard(snippet),
                 LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).withMargins(bottom = 6),
             )
         }
     }
 
+    private fun updateClipboardResults() {
+        snippetResultScroll.visibility = GONE
+        val entries = visibleClipboardEntries()
+        clipboardResultList.submitHistory(entries)
+        if (entries.isEmpty()) {
+            clipboardResultList.visibility = GONE
+            showEmpty(if (query.isBlank()) "No clipboard history yet" else "No matching clipboard items")
+            return
+        }
+
+        emptyText.visibility = GONE
+        clipboardResultList.visibility = VISIBLE
+    }
+
+    private fun showEmpty(message: String) {
+        emptyText.text = message
+        emptyText.visibility = VISIBLE
+    }
+
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { "Search snippets" }
+        queryText.text = query.ifBlank { activeTab.searchLabel }
         queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
         clearButton.alpha = if (query.isBlank()) 0.36f else 1f
         clearButton.isEnabled = query.isNotBlank()
@@ -171,15 +241,26 @@ class SnippetSearchView @JvmOverloads constructor(
     }
 
     private fun visibleSnippets(): List<KeyboardSettings.TextSnippet> {
-        val needle = query.trim().lowercase(Locale.US)
-        val source = snippets
-        if (needle.isBlank()) return source.take(MAX_RESULTS)
-        return source
+        val needle = normalizedQuery()
+        if (needle.isBlank()) return snippets.take(MAX_RESULTS)
+        return snippets
             .filter { snippet ->
                 snippet.text.lowercase(Locale.US).contains(needle) ||
                     snippet.tags.any { tag -> tag.lowercase(Locale.US).contains(needle) }
             }
             .take(MAX_RESULTS)
+    }
+
+    private fun visibleClipboardEntries(): List<ClipboardHistoryStore.Entry> {
+        val needle = normalizedQuery()
+        if (needle.isBlank()) return clipboardEntries.take(MAX_RESULTS)
+        return clipboardEntries
+            .filter { entry -> entry.text.lowercase(Locale.US).contains(needle) }
+            .take(MAX_RESULTS)
+    }
+
+    private fun normalizedQuery(): String {
+        return query.trim().lowercase(Locale.US)
     }
 
     private fun resultCard(snippet: KeyboardSettings.TextSnippet): LinearLayout {
@@ -214,44 +295,10 @@ class SnippetSearchView @JvmOverloads constructor(
                 )
             }
             setOnClickListener {
-                callback?.onSnippetSearchSnippetSelected(snippet.text)
+                callback?.onSavedTextSearchSnippetSelected(snippet.text)
             }
         }
     }
-
-    private fun textButton(label: String, onClick: () -> Unit): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = true
-            isFocusable = false
-            setTextColor(PALETTE.mutedText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun iconButton(iconResId: Int, description: String, onClick: () -> Unit): ImageButton {
-        return ImageButton(context).apply {
-            contentDescription = description
-            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
-            isClickable = true
-            isFocusable = false
-            scaleType = ImageView.ScaleType.CENTER
-            setPadding(0, 0, 0, 0)
-            setImageDrawable(tintedIcon(iconResId))
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun tintedIcon(iconResId: Int) = ContextCompat.getDrawable(context, iconResId)?.mutate()?.apply {
-        setTint(PALETTE.mutedText)
-    }
-
-    private fun roundedBackground(color: Int) =
-        ImePressFeedback.roundedShape(context, color)
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,
@@ -279,6 +326,6 @@ class SnippetSearchView @JvmOverloads constructor(
 
     private companion object {
         const val MAX_QUERY_LENGTH = 80
-        const val MAX_RESULTS = 8
+        const val MAX_RESULTS = 24
     }
 }

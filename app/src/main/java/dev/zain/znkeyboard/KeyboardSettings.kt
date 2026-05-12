@@ -46,6 +46,7 @@ object KeyboardSettings {
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
     private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
     private const val KEY_KEYBOARD_ROW_ORDER = "keyboard_row_order"
+    private const val KEY_SAVED_TEXT_PANEL_TAB = "saved_text_panel_tab"
     private const val KEY_TEXT_SNIPPETS = "text_snippets"
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
@@ -118,9 +119,7 @@ object KeyboardSettings {
 
     val SHORTCUT_ROW_KEY_OPTIONS = listOf(
         UpperRowKeyOption("rewrite", "Rewrite"),
-    ) + FUNCTION_KEY_OPTIONS + listOf(
-        UpperRowKeyOption("history", "Clipboard"),
-    )
+    ) + FUNCTION_KEY_OPTIONS
     val UPPER_ROW_KEY_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS
     val SECOND_ROW_BUTTON_OPTIONS = SHORTCUT_ROW_KEY_OPTIONS
     private val shortcutRowKeyOptionIds = SHORTCUT_ROW_KEY_OPTIONS.mapTo(mutableSetOf()) { it.id }
@@ -175,7 +174,7 @@ object KeyboardSettings {
         val legacyAgentRow = prefs.getString(KEY_AGENT_ROW_KEYS, null)
             ?.let(::parseAgentRowKeyIds)
             ?: return DEFAULT_SECOND_ROW_BUTTON_IDS
-        return normalizeSecondRowButtonIds(listOf("rewrite") + legacyAgentRow + "history")
+        return normalizeSecondRowButtonIds(listOf("rewrite") + legacyAgentRow)
     }
 
     fun saveSecondRowButtonIds(context: Context, buttonIds: List<String>) {
@@ -200,6 +199,19 @@ object KeyboardSettings {
 
     fun labelForShortcutRowKey(keyId: String): String {
         return SHORTCUT_ROW_KEY_OPTIONS.firstOrNull { it.id == keyId }?.label.orEmpty()
+    }
+
+    fun readSavedTextPanelTab(context: Context): SavedTextPanelTab {
+        val stored = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_SAVED_TEXT_PANEL_TAB, null)
+        return SavedTextPanelTab.entries.firstOrNull { it.id == stored } ?: SavedTextPanelTab.Snippets
+    }
+
+    fun saveSavedTextPanelTab(context: Context, tab: SavedTextPanelTab) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_SAVED_TEXT_PANEL_TAB, tab.id)
+            .apply()
     }
 
     fun readKeyboardRowOrder(context: Context): List<String> {
@@ -1121,6 +1133,15 @@ object KeyboardSettings {
     ) {
         Upper("upper", "Shortcut row A"),
         Second("second", "Shortcut row B"),
+    }
+
+    enum class SavedTextPanelTab(
+        val id: String,
+        val label: String,
+        val searchLabel: String,
+    ) {
+        Clipboard("clipboard", "Clipboard", "Search clipboard"),
+        Snippets("snippets", "Snippets", "Search snippets"),
     }
 
     enum class AgentProviderType(
