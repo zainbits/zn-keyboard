@@ -39,22 +39,6 @@ internal object SavedTextPanelChrome {
         }
     }
 
-    fun queryText(
-        context: Context,
-        backgroundColor: Int,
-        textColor: Int,
-    ): TextView {
-        return TextView(context).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            includeFontPadding = false
-            setSingleLine(true)
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            setPadding(dp(context, 14), 0, dp(context, 14), 0)
-            background = ImePressFeedback.roundedBackground(context, backgroundColor, textColor)
-        }
-    }
-
     fun iconButton(
         context: Context,
         iconResId: Int,

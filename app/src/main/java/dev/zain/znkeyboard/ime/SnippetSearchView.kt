@@ -6,12 +6,10 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.zain.znkeyboard.KeyboardSettings
-import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -35,18 +33,13 @@ class SavedTextSearchView @JvmOverloads constructor(
     private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
     private var query = ""
 
-    private val queryText = SavedTextPanelChrome.queryText(
-        context = context,
+    private val queryField = ImeSearchField(context).configure(
         backgroundColor = PALETTE.function,
         textColor = PALETTE.text,
-    )
-    private val clearButton = SavedTextPanelChrome.iconButton(
-        context = context,
-        iconResId = R.drawable.ic_close_24,
-        contentDescription = "Clear saved text search",
-        backgroundColor = PALETTE.function,
-        textColor = PALETTE.mutedText,
-        onClick = { setQuery("") },
+        placeholderColor = PALETTE.placeholderText,
+        clearIconColor = PALETTE.mutedText,
+        clearContentDescription = "Clear saved text search",
+        onClear = { setQuery("") },
     )
     private val snippetResultContent = LinearLayout(context).apply {
         orientation = VERTICAL
@@ -173,13 +166,8 @@ class SavedTextSearchView @JvmOverloads constructor(
             )
 
             addView(
-                queryText,
+                queryField,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-
-            addView(
-                clearButton,
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(start = 4),
             )
         }
     }
@@ -233,11 +221,7 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { activeTab.searchLabel }
-        queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
-        clearButton.alpha = if (query.isBlank()) 0.36f else 1f
-        clearButton.isEnabled = query.isNotBlank()
-        clearButton.isClickable = query.isNotBlank()
+        queryField.setSearchText(query = query, placeholder = activeTab.searchLabel)
     }
 
     private fun visibleSnippets(): List<KeyboardSettings.TextSnippet> {

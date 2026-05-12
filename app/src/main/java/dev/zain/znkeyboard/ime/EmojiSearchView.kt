@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
-import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
@@ -40,12 +39,14 @@ class EmojiSearchView @JvmOverloads constructor(
     private val resultRows = LinearLayout(context).apply {
         orientation = VERTICAL
     }
-    private val queryText = TextView(context)
-    private val clearButton = textButton("x") {
-        setQuery("")
-    }.apply {
-        contentDescription = "Clear emoji search"
-    }
+    private val queryField = ImeSearchField(context).configure(
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+        placeholderColor = PALETTE.placeholderText,
+        clearIconColor = PALETTE.mutedText,
+        clearContentDescription = "Clear emoji search",
+        onClear = { setQuery("") },
+    )
 
     init {
         orientation = VERTICAL
@@ -135,24 +136,9 @@ class EmojiSearchView @JvmOverloads constructor(
                 LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
-            queryText.apply {
-                gravity = Gravity.CENTER_VERTICAL
-                includeFontPadding = false
-                setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END
-                setTextColor(PALETTE.text)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                setPadding(dp(14), 0, dp(14), 0)
-                background = roundedBackground(PALETTE.function)
-            }
             addView(
-                queryText,
+                queryField,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-
-            addView(
-                clearButton,
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(start = 4),
             )
         }
     }
@@ -206,11 +192,7 @@ class EmojiSearchView @JvmOverloads constructor(
     }
 
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { "Search emoji" }
-        queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
-        clearButton.alpha = if (query.isBlank()) 0.36f else 1f
-        clearButton.isEnabled = query.isNotBlank()
-        clearButton.isClickable = query.isNotBlank()
+        queryField.setSearchText(query = query, placeholder = "Search emoji")
     }
 
     private fun visibleEntries(): List<EmojiEntry> {
@@ -284,20 +266,6 @@ class EmojiSearchView @JvmOverloads constructor(
     private fun dismissVariantPopup() {
         variantPopup?.dismiss()
         variantPopup = null
-    }
-
-    private fun textButton(label: String, onClick: () -> Unit): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = true
-            isFocusable = false
-            setTextColor(PALETTE.mutedText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
-            setOnClickListener { onClick() }
-        }
     }
 
     private fun roundedBackground(color: Int) =

@@ -71,7 +71,23 @@ class GifSearchView @JvmOverloads constructor(
     }
     private val suggestionButtons = mutableListOf<TextView>()
 
-    private val queryText = TextView(context)
+    private val queryField = ImeSearchField(context).configure(
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+        placeholderColor = PALETTE.placeholderText,
+        clearIconColor = PALETTE.mutedText,
+        clearContentDescription = "Clear GIF search",
+        onClear = { setQuery("") },
+    ).apply {
+        isClickable = true
+        isFocusable = false
+        contentDescription = "Edit GIF search"
+        setOnClickListener {
+            if (mode == Mode.Browse) {
+                callback?.onGifSearchRequested()
+            }
+        }
+    }
     private val browseHeader = browseHeaderRow()
     private val searchHeader = searchRow().apply {
         visibility = GONE
@@ -438,26 +454,8 @@ class GifSearchView @JvmOverloads constructor(
                 LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
             )
 
-            queryText.apply {
-                gravity = Gravity.CENTER_VERTICAL
-                includeFontPadding = false
-                setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END
-                setTextColor(PALETTE.text)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                setPadding(dp(14), 0, dp(14), 0)
-                background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.text)
-                isClickable = true
-                isFocusable = false
-                contentDescription = "Edit GIF search"
-                setOnClickListener {
-                    if (mode == Mode.Browse) {
-                        callback?.onGifSearchRequested()
-                    }
-                }
-            }
             addView(
-                queryText,
+                queryField,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
             )
 
@@ -482,8 +480,7 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { SEARCH_PLACEHOLDER }
-        queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
+        queryField.setSearchText(query = query, placeholder = SEARCH_PLACEHOLDER)
     }
 
     private fun scheduleRefresh(immediate: Boolean = false) {
