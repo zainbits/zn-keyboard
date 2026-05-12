@@ -1,16 +1,12 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.PopupWindow
 import android.widget.TextView
 import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiCategory
@@ -34,7 +30,13 @@ class EmojiSearchView @JvmOverloads constructor(
     private var defaultSkinTone = EmojiSkinTone.Default
     private var customEmojiTags = emptyMap<String, List<String>>()
     private var query = ""
-    private var variantPopup: PopupWindow? = null
+    private val variantPopup = EmojiVariantPopupController(
+        context = context,
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+        pressedColor = ImeColors.KEY,
+        onEmojiSelected = ::selectEmoji,
+    )
 
     private val resultRows = LinearLayout(context).apply {
         orientation = VERTICAL
@@ -122,25 +124,14 @@ class EmojiSearchView @JvmOverloads constructor(
     }
 
     private fun searchRow(): LinearLayout {
-        return LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                ImePanelChrome.backButton(
-                    context = context,
-                    contentDescription = "Back to emoji",
-                    backgroundColor = PALETTE.function,
-                    textColor = PALETTE.mutedText,
-                    onClick = { callback?.onEmojiSearchClosed() },
-                ),
-                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-            )
-
-            addView(
-                queryField,
-                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-        }
+        return ImeSearchHeader.create(
+            context = context,
+            backContentDescription = "Back to emoji",
+            backgroundColor = PALETTE.function,
+            textColor = PALETTE.mutedText,
+            queryField = queryField,
+            onBack = { callback?.onEmojiSearchClosed() },
+        )
     }
 
     private fun emojiResultRow(): LinearLayout {
@@ -221,55 +212,12 @@ class EmojiSearchView @JvmOverloads constructor(
     }
 
     private fun showVariantPopup(entry: EmojiEntry, anchor: View): Boolean {
-        val variants = EmojiCatalog.variantsFor(entry)
-        if (variants.isEmpty()) return false
-
-        dismissVariantPopup()
-        val row = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-            background = roundedBackground(PALETTE.function)
-        }
-
-        variants.forEach { variant ->
-            row.addView(
-                TextView(context).apply {
-                    text = variant.emoji
-                    gravity = Gravity.CENTER
-                    includeFontPadding = false
-                    typeface = Typeface.DEFAULT
-                    setTextColor(PALETTE.text)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-                    background = emojiPressBackground(context)
-                    contentDescription = variant.name
-                    setOnClickListener { selectEmoji(variant.emoji) }
-                },
-                LayoutParams(dp(42), dp(42)).withMargins(horizontal = 2),
-            )
-        }
-
-        variantPopup = PopupWindow(
-            row,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            false,
-        ).apply {
-            isOutsideTouchable = true
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            elevation = dp(8).toFloat()
-            showAsDropDown(anchor, 0, -anchor.height - dp(54))
-        }
-        return true
+        return variantPopup.show(entry, anchor)
     }
 
     private fun dismissVariantPopup() {
-        variantPopup?.dismiss()
-        variantPopup = null
+        variantPopup.dismiss()
     }
-
-    private fun roundedBackground(color: Int) =
-        ImePressFeedback.roundedShape(context, color)
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,

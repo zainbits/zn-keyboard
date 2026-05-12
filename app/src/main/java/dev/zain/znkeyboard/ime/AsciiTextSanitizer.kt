@@ -1,7 +1,5 @@
 package dev.zain.znkeyboard.ime
 
-import java.text.Normalizer
-
 object AsciiTextSanitizer {
     private val replacements = mapOf(
         0x201C to "\"",
@@ -70,27 +68,13 @@ object AsciiTextSanitizer {
             while (index < text.length) {
                 val codePoint = text.codePointAt(index)
                 val replacement = replacements[codePoint]
-                when {
-                    replacement != null -> append(replacement)
-                    codePoint <= ASCII_MAX_CODE_POINT -> appendCodePoint(codePoint)
-                    else -> appendNormalizedAscii(codePoint)
+                if (replacement != null) {
+                    append(replacement)
+                } else {
+                    appendCodePoint(codePoint)
                 }
                 index += Character.charCount(codePoint)
             }
         }
     }
-
-    private fun StringBuilder.appendNormalizedAscii(codePoint: Int) {
-        val normalized = Normalizer.normalize(
-            String(Character.toChars(codePoint)),
-            Normalizer.Form.NFKD,
-        )
-        for (char in normalized) {
-            if (char.code <= ASCII_MAX_CODE_POINT) {
-                append(char)
-            }
-        }
-    }
-
-    private const val ASCII_MAX_CODE_POINT = 0x7F
 }
