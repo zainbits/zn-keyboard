@@ -17,8 +17,8 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 object ClipboardHistoryStore {
-    const val MAX_HISTORY = 30
-    const val MAX_ENTRY_CHARS = 20_000
+    const val MAX_HISTORY = 100
+    const val MAX_ENTRY_CHARS = 32_000
     const val HISTORY_FILE_NAME = "clipboard_history.enc"
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"

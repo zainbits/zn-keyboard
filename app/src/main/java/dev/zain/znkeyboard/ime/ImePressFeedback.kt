@@ -33,6 +33,21 @@ internal object ImePressFeedback {
         }
     }
 
+    fun roundedTransientBackground(
+        context: Context,
+        pressedColor: Int,
+        radiusDp: Int = ImeLayout.KEY_RADIUS_DP,
+        fadeOutMillis: Int = 140,
+    ): Drawable {
+        return StateListDrawable().apply {
+            setEnterFadeDuration(0)
+            setExitFadeDuration(fadeOutMillis)
+            addState(PRESSED_STATE, roundedShape(context, pressedColor, radiusDp))
+            addState(FOCUSED_STATE, roundedShape(context, pressedColor, radiusDp))
+            addState(DEFAULT_STATE, roundedShape(context, Color.TRANSPARENT, radiusDp))
+        }
+    }
+
     fun roundedShape(
         context: Context,
         color: Int,

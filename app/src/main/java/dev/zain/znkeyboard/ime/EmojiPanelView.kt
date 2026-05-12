@@ -12,14 +12,18 @@ import android.view.ViewGroup
 import android.widget.AbsListView
 import android.widget.BaseAdapter
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.PopupWindow
 import android.widget.TextView
+import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiCategory
 import dev.zain.znkeyboard.EmojiEntry
 import dev.zain.znkeyboard.EmojiSkinTone
+import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
@@ -45,8 +49,9 @@ class EmojiPanelView @JvmOverloads constructor(
     private var heightScale = 1f
     private var variantPopup: PopupWindow? = null
     private var selectedSection: EmojiSectionKey = EmojiSectionKey.Recent
+    private var pendingProgrammaticSection: EmojiSectionKey? = null
 
-    private lateinit var recentShortcutButton: TextView
+    private lateinit var recentShortcutButton: View
     private val categoryButtons = mutableMapOf<EmojiCategory, TextView>()
     private val sectionPositions = mutableMapOf<EmojiSectionKey, Int>()
 
@@ -115,12 +120,7 @@ class EmojiPanelView @JvmOverloads constructor(
                 totalItemCount: Int,
             ) {
                 if (totalItemCount == 0) return
-                adapter.sectionForPosition(firstVisibleItem)?.let { section ->
-                    if (selectedSection != section) {
-                        selectedSection = section
-                        updateCategoryButtons()
-                    }
-                }
+                syncSelectedSectionWithScroll()
             }
         })
 
@@ -191,7 +191,7 @@ class EmojiPanelView @JvmOverloads constructor(
             LayoutParams(dp(ImePanelChrome.SEARCH_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 6),
         )
 
-        recentShortcutButton = categoryShortcut(RECENT_TAB_ICON, "Recently used") {
+        recentShortcutButton = recentShortcutButton {
             scrollToSection(EmojiSectionKey.Recent)
         }
         browseHeaderRow.addView(
@@ -335,10 +335,42 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun scrollToSection(section: EmojiSectionKey) {
+        pendingProgrammaticSection = section
         selectedSection = section
         updateCategoryButtons()
         val position = sectionPositions[section] ?: 0
         emojiList.setSelectionFromTop(position, emojiList.paddingTop)
+        emojiList.post {
+            if (pendingProgrammaticSection == section) {
+                pendingProgrammaticSection = null
+                selectedSection = section
+                updateCategoryButtons()
+            }
+        }
+    }
+
+    private fun syncSelectedSectionWithScroll() {
+        val section = sectionAtListContentTop() ?: return
+        pendingProgrammaticSection?.let { pendingSection ->
+            if (section != pendingSection) return
+            pendingProgrammaticSection = null
+        }
+        if (selectedSection != section) {
+            selectedSection = section
+            updateCategoryButtons()
+        }
+    }
+
+    private fun sectionAtListContentTop(): EmojiSectionKey? {
+        // firstVisiblePosition can include a tiny sliver of the previous row near the top padding.
+        val contentTop = emojiList.paddingTop + dp(4)
+        for (childIndex in 0 until emojiList.childCount) {
+            val child = emojiList.getChildAt(childIndex)
+            if (child.bottom > contentTop) {
+                return adapter.sectionForPosition(emojiList.firstVisiblePosition + childIndex)
+            }
+        }
+        return adapter.sectionForPosition(emojiList.firstVisiblePosition)
     }
 
     private fun updateCategoryButtons() {
@@ -418,6 +450,7 @@ class EmojiPanelView @JvmOverloads constructor(
         return textKey(label, KeyRole.Character, onClick = null).apply {
             typeface = Typeface.DEFAULT
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
+            background = emojiPressBackground(context)
         }
     }
 
@@ -436,6 +469,24 @@ class EmojiPanelView @JvmOverloads constructor(
             setOnClickListener { onClick() }
         }
     }
+
+    private fun recentShortcutButton(onClick: () -> Unit): ImageButton {
+        return ImageButton(context).apply {
+            contentDescription = "Recently used"
+            isClickable = true
+            isFocusable = false
+            scaleType = ImageView.ScaleType.CENTER
+            setPadding(0, 0, 0, 0)
+            setImageDrawable(tintedIcon(R.drawable.ic_history_24, PALETTE.text))
+            background = categoryShortcutBackground(active = false)
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun tintedIcon(iconResId: Int, color: Int) =
+        ContextCompat.getDrawable(context, iconResId)?.mutate()?.apply {
+            setTint(color)
+        }
 
     private fun toolbarTab(
         label: String,
@@ -675,7 +726,7 @@ class EmojiPanelView @JvmOverloads constructor(
                             setTextColor(PALETTE.text)
                             setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
                             minHeight = dp(42)
-                            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
+                            background = emojiPressBackground(context)
                         },
                         LinearLayout.LayoutParams(0, dp(44), 1f).withMargins(horizontal = 1),
                     )
@@ -733,6 +784,10 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private companion object {
-        const val RECENT_TAB_ICON = "◷"
+        fun emojiPressBackground(context: Context) =
+            ImePressFeedback.roundedTransientBackground(
+                context = context,
+                pressedColor = ImeColors.KEY,
+            )
     }
 }

@@ -169,7 +169,7 @@ class EmojiSearchView @JvmOverloads constructor(
                         typeface = Typeface.DEFAULT
                         setTextColor(PALETTE.text)
                         setTextSize(TypedValue.COMPLEX_UNIT_SP, 25f)
-                        background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
+                        background = emojiPressBackground(context)
                     },
                     LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 1),
                 )
@@ -259,7 +259,7 @@ class EmojiSearchView @JvmOverloads constructor(
                     typeface = Typeface.DEFAULT
                     setTextColor(PALETTE.text)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-                    background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.text)
+                    background = emojiPressBackground(context)
                     contentDescription = variant.name
                     setOnClickListener { selectEmoji(variant.emoji) }
                 },
@@ -328,5 +328,11 @@ class EmojiSearchView @JvmOverloads constructor(
     private companion object {
         const val MAX_RESULT_ROWS = 2
         const val MAX_QUERY_LENGTH = 64
+
+        fun emojiPressBackground(context: Context) =
+            ImePressFeedback.roundedTransientBackground(
+                context = context,
+                pressedColor = ImeColors.KEY,
+            )
     }
 }
