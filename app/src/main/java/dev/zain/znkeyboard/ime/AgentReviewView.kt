@@ -1,7 +1,6 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.util.TypedValue

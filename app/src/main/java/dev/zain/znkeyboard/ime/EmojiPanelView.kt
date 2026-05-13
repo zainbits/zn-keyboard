@@ -404,14 +404,6 @@ class EmojiPanelView @JvmOverloads constructor(
         variantPopup.dismiss()
     }
 
-    private fun emojiButton(label: String): TextView {
-        return textKey(label, KeyRole.Character, onClick = null).apply {
-            typeface = Typeface.DEFAULT
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-            background = emojiPressBackground(context)
-        }
-    }
-
     private fun categoryShortcut(label: String, description: String, onClick: () -> Unit): TextView {
         return TextView(context).apply {
             text = label
@@ -446,40 +438,12 @@ class EmojiPanelView @JvmOverloads constructor(
             setTint(color)
         }
 
-    private fun textKey(label: String, role: KeyRole, onClick: (() -> Unit)?): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = onClick != null
-            isFocusable = false
-            setTextColor(if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (role == KeyRole.Character) 18f else 13f)
-            background = keyBackground(active = false, role = role)
-            onClick?.let { click -> setOnClickListener { click() } }
-        }
-    }
-
-    private fun keyBackground(active: Boolean, role: KeyRole) =
-        ImePressFeedback.roundedBackground(
-            context = context,
-            containerColor = when {
-                active -> PALETTE.selected
-                role == KeyRole.Function -> PALETTE.function
-                else -> PALETTE.key
-            },
-            contentColor = if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText,
-        )
-
     private fun categoryShortcutBackground(active: Boolean) =
         ImePressFeedback.roundedBackground(
             context = context,
             containerColor = if (active) PALETTE.selected else Color.TRANSPARENT,
             contentColor = PALETTE.text,
         )
-
-    private fun roundedBackground(color: Int) =
-        ImePressFeedback.roundedShape(context, color)
 
     private fun LinearLayout.LayoutParams.withMargins(
         horizontal: Int = 0,
@@ -494,11 +458,6 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-
-    private enum class KeyRole {
-        Character,
-        Function,
-    }
 
     private sealed class EmojiSectionKey {
         data object Recent : EmojiSectionKey()

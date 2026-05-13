@@ -2047,10 +2047,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private val ModifierState.hasHardwareMeta: Boolean
         get() = ctrl || alt
 
-    private fun dp(value: Int): Int {
-        return (value * resources.displayMetrics.density).toInt()
-    }
-
     private data class EditorSnapshot(
         val text: String,
         val textStartOffset: Int,

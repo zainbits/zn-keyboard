@@ -27,7 +27,6 @@ import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.constants.GifDefaults
 import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
