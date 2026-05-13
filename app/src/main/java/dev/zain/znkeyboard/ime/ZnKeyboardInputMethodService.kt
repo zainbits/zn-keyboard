@@ -69,6 +69,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var requestGeneration = 0
     private var gifShareGeneration = 0
     private var backspaceGestureDeleteState: BackspaceGestureDeleteState? = null
+    private var spaceCursorDragState: SpaceCursorDragState? = null
     private var lastCapturedClipboardSnapshot: ClipboardSnapshot? = null
     private val clipboardChangeListener = ClipboardManager.OnPrimaryClipChangedListener {
         capturePrimaryClipboardText()
@@ -244,6 +245,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onBackspaceGestureDeleteCancelled() {
         cancelBackspaceGestureDelete()
+    }
+
+    override fun onSpaceCursorDragStarted(): Boolean {
+        return startSpaceCursorDrag()
+    }
+
+    override fun onSpaceCursorDragChanged(characterDelta: Int) {
+        updateSpaceCursorDrag(characterDelta)
+    }
+
+    override fun onSpaceCursorDragFinished() {
+        finishSpaceCursorDrag()
+    }
+
+    override fun onSpaceCursorDragCancelled() {
+        finishSpaceCursorDrag()
     }
 
     override fun onEmojiPanelRequested() {
@@ -998,6 +1015,107 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         currentInputConnection?.let { inputConnection ->
             restoreBackspaceGestureDeleteSelection(inputConnection, state)
         }
+    }
+
+    private fun startSpaceCursorDrag(): Boolean {
+        val inputConnection = currentInputConnection ?: return false
+        if (activeSurface != KeyboardSurface.Keyboard) return false
+
+        cancelActiveAgentForEditorChange()
+        if (isRawKeyEventEditor(currentEditorInfo) || isSensitiveEditor(currentEditorInfo)) {
+            spaceCursorDragState = SpaceCursorDragState.KeyEvents()
+            return true
+        }
+
+        val snapshot = captureEditorSnapshot(CURSOR_DRAG_CONTEXT_CHARS) ?: run {
+            spaceCursorDragState = SpaceCursorDragState.KeyEvents()
+            return true
+        }
+        val minOffset = snapshot.textStartOffset
+        val maxOffset = snapshot.textStartOffset + snapshot.text.length
+        val anchorOffset = maxOf(snapshot.selectionStart, snapshot.selectionEnd).coerceIn(minOffset, maxOffset)
+        inputConnection.finishComposingText()
+        spaceCursorDragState = SpaceCursorDragState.Selection(
+            anchorOffset = anchorOffset,
+            minOffset = minOffset,
+            maxOffset = maxOffset,
+            currentOffset = anchorOffset,
+        )
+        return true
+    }
+
+    private fun updateSpaceCursorDrag(characterDelta: Int) {
+        val state = spaceCursorDragState ?: return
+        val coercedDelta = characterDelta.coerceIn(-CURSOR_DRAG_MAX_CHARS, CURSOR_DRAG_MAX_CHARS)
+        when (state) {
+            is SpaceCursorDragState.Selection -> updateSelectionSpaceCursorDrag(state, coercedDelta)
+            is SpaceCursorDragState.KeyEvents -> updateKeyEventSpaceCursorDrag(state, coercedDelta)
+        }
+    }
+
+    private fun updateSelectionSpaceCursorDrag(
+        state: SpaceCursorDragState.Selection,
+        characterDelta: Int,
+    ) {
+        val inputConnection = currentInputConnection ?: return
+        val desiredOffset = state.anchorOffset + characterDelta
+        val targetOffset = desiredOffset.coerceIn(state.minOffset, state.maxOffset)
+        if (targetOffset == state.currentOffset) {
+            if (desiredOffset < state.minOffset || desiredOffset > state.maxOffset) {
+                val fallbackState = SpaceCursorDragState.KeyEvents(lastCharacterDelta = state.lastCharacterDelta)
+                spaceCursorDragState = fallbackState
+                updateKeyEventSpaceCursorDrag(fallbackState, characterDelta)
+                return
+            }
+            state.lastCharacterDelta = characterDelta
+            return
+        }
+
+        var selectionUpdated = false
+        inputConnection.beginBatchEdit()
+        try {
+            selectionUpdated = inputConnection.setSelection(targetOffset, targetOffset)
+        } finally {
+            inputConnection.endBatchEdit()
+        }
+
+        if (selectionUpdated) {
+            state.currentOffset = targetOffset
+            state.lastCharacterDelta = characterDelta
+            scheduleEmojiSuggestionRefresh()
+        } else {
+            val fallbackState = SpaceCursorDragState.KeyEvents(lastCharacterDelta = state.lastCharacterDelta)
+            spaceCursorDragState = fallbackState
+            updateKeyEventSpaceCursorDrag(fallbackState, characterDelta)
+        }
+    }
+
+    private fun updateKeyEventSpaceCursorDrag(
+        state: SpaceCursorDragState.KeyEvents,
+        characterDelta: Int,
+    ) {
+        val stepDelta = characterDelta - state.lastCharacterDelta
+        if (stepDelta == 0) return
+
+        sendCursorKeyEvents(stepDelta)
+        state.lastCharacterDelta = characterDelta
+    }
+
+    private fun finishSpaceCursorDrag() {
+        spaceCursorDragState = null
+    }
+
+    private fun sendCursorKeyEvents(characterDelta: Int) {
+        val keyCode = if (characterDelta > 0) {
+            KeyEvent.KEYCODE_DPAD_RIGHT
+        } else {
+            KeyEvent.KEYCODE_DPAD_LEFT
+        }
+        val eventCount = if (characterDelta > 0) characterDelta else -characterDelta
+        repeat(eventCount.coerceAtMost(CURSOR_DRAG_MAX_CHARS)) {
+            sendKey(keyCode, ModifierState(ctrl = false, alt = false))
+        }
+        scheduleEmojiSuggestionRefresh()
     }
 
     private fun isBackspaceGestureDeleteTargetCurrent(
@@ -1974,6 +2092,20 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         var currentWordCount: Int = 0,
     )
 
+    private sealed class SpaceCursorDragState {
+        data class Selection(
+            val anchorOffset: Int,
+            val minOffset: Int,
+            val maxOffset: Int,
+            var currentOffset: Int,
+            var lastCharacterDelta: Int = 0,
+        ) : SpaceCursorDragState()
+
+        data class KeyEvents(
+            var lastCharacterDelta: Int = 0,
+        ) : SpaceCursorDragState()
+    }
+
     private data class ClipboardSnapshot(
         val text: String,
         val timestampMillis: Long,
@@ -2022,6 +2154,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val MAX_REWRITE_SOURCE_CHARS = AgentDefaults.MAX_REWRITE_SOURCE_CHARS
         const val GESTURE_DELETE_CONTEXT_CHARS = 4_096
         const val MAX_GESTURE_DELETE_WORDS = 80
+        const val CURSOR_DRAG_CONTEXT_CHARS = 8_192
+        const val CURSOR_DRAG_MAX_CHARS = 120
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
         const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
         const val REQUEST_TIMEOUT_MS = AgentDefaults.REQUEST_TIMEOUT_MS

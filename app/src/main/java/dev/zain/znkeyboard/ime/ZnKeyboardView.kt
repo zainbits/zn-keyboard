@@ -38,6 +38,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onBackspaceGestureDeleteChanged(wordCount: Int)
         fun onBackspaceGestureDeleteFinished()
         fun onBackspaceGestureDeleteCancelled()
+        fun onSpaceCursorDragStarted(): Boolean
+        fun onSpaceCursorDragChanged(characterDelta: Int)
+        fun onSpaceCursorDragFinished()
+        fun onSpaceCursorDragCancelled()
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
         fun onEmojiKeySuggestionSelected(emoji: String)
@@ -301,6 +305,14 @@ class ZnKeyboardView @JvmOverloads constructor(
                 callback?.onSnippetPanelRequested()
             }
         }
+        if (key?.id == "space") {
+            touch.spaceCursorDrag = SpaceCursorDragTouch(
+                key = key,
+                startX = event.getX(pointerIndex),
+                startY = event.getY(pointerIndex),
+                stepPx = max(dp(SPACE_CURSOR_DRAG_STEP_DP), hit.visualBounds.width() / SPACE_CURSOR_DRAG_VISIBLE_STEPS),
+            )
+        }
         key?.takeIf(::isBackspaceKey)?.let { key ->
             touch.backspaceGesture = BackspaceGestureTouch(
                 key = key,
@@ -320,6 +332,10 @@ class ZnKeyboardView @JvmOverloads constructor(
             val x = event.getX(pointerIndex)
             val y = event.getY(pointerIndex)
             if (updateBackspaceGesture(pointerId, touch, x, y)) {
+                changed = true
+                continue
+            }
+            if (updateSpaceCursorDrag(pointerId, touch, x, y)) {
                 changed = true
                 continue
             }
@@ -388,6 +404,51 @@ class ZnKeyboardView @JvmOverloads constructor(
         return true
     }
 
+    private fun updateSpaceCursorDrag(
+        pointerId: Int,
+        touch: ActiveTouch,
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val gesture = touch.spaceCursorDrag ?: return false
+        if (gesture.consumedWithoutGesture) {
+            return true
+        }
+
+        val dx = x - gesture.startX
+        val dy = y - gesture.startY
+        val activationDistance = max(touchSlopPx, dp(SPACE_CURSOR_DRAG_ACTIVATION_DP))
+        if (!gesture.active) {
+            if (abs(dx) < activationDistance || abs(dx) < abs(dy) * 1.2f) {
+                return false
+            }
+
+            cancelLongPressFor(pointerId)
+            touch.cursorDragConsumed = true
+            touch.currentKey = gesture.key
+            if (callback?.onSpaceCursorDragStarted() == true) {
+                gesture.active = true
+                clearLatchedModifiers()
+            } else {
+                gesture.consumedWithoutGesture = true
+                touch.currentKey = null
+                return true
+            }
+        }
+
+        val characterDelta = spaceCursorDragCharacterDelta(gesture, x)
+        if (characterDelta != gesture.lastCharacterDelta) {
+            gesture.lastCharacterDelta = characterDelta
+            callback?.onSpaceCursorDragChanged(characterDelta)
+        }
+        return true
+    }
+
+    private fun spaceCursorDragCharacterDelta(gesture: SpaceCursorDragTouch, x: Float): Int {
+        val rawDelta = (x - gesture.startX) / gesture.stepPx
+        return rawDelta.roundToInt().coerceIn(-SPACE_CURSOR_DRAG_MAX_CHARS, SPACE_CURSOR_DRAG_MAX_CHARS)
+    }
+
     private fun backspaceGestureWordCount(
         gesture: BackspaceGestureTouch,
         activationDistance: Float,
@@ -404,9 +465,14 @@ class ZnKeyboardView @JvmOverloads constructor(
             val touch = activeTouches.get(nextPointerId)
             activeTouches.remove(nextPointerId)
             finishBackspaceGesture(touch)
+            finishSpaceCursorDrag(touch)
             cancelLongPressFor(nextPointerId)
             cancelBackspaceRepeatFor(nextPointerId)
-            if (touch?.longPressConsumed != true && touch?.repeatConsumed != true) {
+            if (
+                touch?.longPressConsumed != true &&
+                touch?.repeatConsumed != true &&
+                touch?.cursorDragConsumed != true
+            ) {
                 touch?.currentKey?.let(::handleKey)
             }
             if (nextPointerId == pointerId) {
@@ -422,6 +488,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         cancelPendingLongPress()
         cancelBackspaceRepeat()
         cancelBackspaceGestures()
+        cancelSpaceCursorDrags()
         activeTouches.clear()
         pointerQueue.clear()
     }
@@ -434,11 +501,28 @@ class ZnKeyboardView @JvmOverloads constructor(
         touch.backspaceGesture = null
     }
 
+    private fun finishSpaceCursorDrag(touch: ActiveTouch?) {
+        val gesture = touch?.spaceCursorDrag ?: return
+        if (gesture.active) {
+            callback?.onSpaceCursorDragFinished()
+        }
+        touch.spaceCursorDrag = null
+    }
+
     private fun cancelBackspaceGestures() {
         for (index in 0 until activeTouches.size()) {
             val gesture = activeTouches.valueAt(index).backspaceGesture
             if (gesture?.active == true) {
                 callback?.onBackspaceGestureDeleteCancelled()
+            }
+        }
+    }
+
+    private fun cancelSpaceCursorDrags() {
+        for (index in 0 until activeTouches.size()) {
+            val gesture = activeTouches.valueAt(index).spaceCursorDrag
+            if (gesture?.active == true) {
+                callback?.onSpaceCursorDragCancelled()
             }
         }
     }
@@ -1349,7 +1433,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         var currentKey: KeySpec?,
         var longPressConsumed: Boolean = false,
         var repeatConsumed: Boolean = false,
+        var cursorDragConsumed: Boolean = false,
         var backspaceGesture: BackspaceGestureTouch? = null,
+        var spaceCursorDrag: SpaceCursorDragTouch? = null,
     )
 
     private data class BackspaceGestureTouch(
@@ -1360,6 +1446,16 @@ class ZnKeyboardView @JvmOverloads constructor(
         var active: Boolean = false,
         var consumedWithoutGesture: Boolean = false,
         var lastWordCount: Int = 0,
+    )
+
+    private data class SpaceCursorDragTouch(
+        val key: KeySpec,
+        val startX: Float,
+        val startY: Float,
+        val stepPx: Float,
+        var active: Boolean = false,
+        var consumedWithoutGesture: Boolean = false,
+        var lastCharacterDelta: Int = 0,
     )
 
     private sealed class KeyIntent {
@@ -1396,6 +1492,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val LONG_PRESS_HINT_ALPHA = 170
         const val GESTURE_DELETE_ACTIVATION_DP = 10f
         const val GESTURE_DELETE_WORD_STEP_DP = 42f
+        const val SPACE_CURSOR_DRAG_ACTIVATION_DP = 8f
+        const val SPACE_CURSOR_DRAG_STEP_DP = 14f
+        const val SPACE_CURSOR_DRAG_VISIBLE_STEPS = 28f
+        const val SPACE_CURSOR_DRAG_MAX_CHARS = 120
         const val AI_LOADING_CYCLE_MS = 2200L
         const val TWO_PI = 6.2831855f
         val AI_LOADING_COLORS = intArrayOf(
