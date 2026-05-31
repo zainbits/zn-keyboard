@@ -1,17 +1,14 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import dev.zain.znkeyboard.KeyboardSettings
-import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -35,18 +32,13 @@ class SavedTextSearchView @JvmOverloads constructor(
     private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
     private var query = ""
 
-    private val queryText = SavedTextPanelChrome.queryText(
-        context = context,
+    private val queryField = ImeSearchField(context).configure(
         backgroundColor = PALETTE.function,
         textColor = PALETTE.text,
-    )
-    private val clearButton = SavedTextPanelChrome.iconButton(
-        context = context,
-        iconResId = R.drawable.ic_close_24,
-        contentDescription = "Clear saved text search",
-        backgroundColor = PALETTE.function,
-        textColor = PALETTE.mutedText,
-        onClick = { setQuery("") },
+        placeholderColor = PALETTE.placeholderText,
+        clearIconColor = PALETTE.mutedText,
+        clearContentDescription = "Clear saved text search",
+        onClear = { setQuery("") },
     )
     private val snippetResultContent = LinearLayout(context).apply {
         orientation = VERTICAL
@@ -158,30 +150,14 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun searchRow(): LinearLayout {
-        return LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                ImePanelChrome.backButton(
-                    context = context,
-                    contentDescription = "Back to saved text",
-                    backgroundColor = PALETTE.function,
-                    textColor = PALETTE.mutedText,
-                    onClick = { callback?.onSavedTextSearchClosed() },
-                ),
-                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-            )
-
-            addView(
-                queryText,
-                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-
-            addView(
-                clearButton,
-                LayoutParams(dp(44), LayoutParams.MATCH_PARENT).withMargins(start = 4),
-            )
-        }
+        return ImeSearchHeader.create(
+            context = context,
+            backContentDescription = "Back to saved text",
+            backgroundColor = PALETTE.function,
+            textColor = PALETTE.mutedText,
+            queryField = queryField,
+            onBack = { callback?.onSavedTextSearchClosed() },
+        )
     }
 
     private fun updateResults() {
@@ -233,11 +209,7 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { activeTab.searchLabel }
-        queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
-        clearButton.alpha = if (query.isBlank()) 0.36f else 1f
-        clearButton.isEnabled = query.isNotBlank()
-        clearButton.isClickable = query.isNotBlank()
+        queryField.setSearchText(query = query, placeholder = activeTab.searchLabel)
     }
 
     private fun visibleSnippets(): List<KeyboardSettings.TextSnippet> {
@@ -264,40 +236,17 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun resultCard(snippet: KeyboardSettings.TextSnippet): LinearLayout {
-        return LinearLayout(context).apply {
-            orientation = VERTICAL
-            setPadding(dp(12), dp(9), dp(12), dp(9))
-            background = ImePressFeedback.roundedBackground(context, PALETTE.key, PALETTE.text)
-            isClickable = true
-            isFocusable = false
-            contentDescription = snippet.text
-            addView(
-                TextView(context).apply {
-                    text = snippet.text
-                    setTextColor(PALETTE.text)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                    maxLines = 2
-                    ellipsize = TextUtils.TruncateAt.END
-                },
-                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
-            )
-            if (snippet.tags.isNotEmpty()) {
-                addView(
-                    TextView(context).apply {
-                        text = snippet.tags.joinToString("  ") { "#$it" }
-                        includeFontPadding = false
-                        setSingleLine(true)
-                        ellipsize = TextUtils.TruncateAt.END
-                        setTextColor(PALETTE.tagText)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-                    },
-                    LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).withMargins(top = 5),
-                )
-            }
-            setOnClickListener {
-                callback?.onSavedTextSearchSnippetSelected(snippet.text)
-            }
-        }
+        return SavedTextSnippetCard.create(
+            context = context,
+            snippet = snippet,
+            style = SavedTextSnippetCard.Style(
+                backgroundColor = PALETTE.key,
+                textColor = PALETTE.text,
+                tagTextColor = PALETTE.tagText,
+                maxLines = 2,
+            ),
+            onClick = { callback?.onSavedTextSearchSnippetSelected(it) },
+        )
     }
 
     private fun LayoutParams.withMargins(

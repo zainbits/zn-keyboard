@@ -2,7 +2,6 @@ package dev.zain.znkeyboard
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
@@ -66,7 +65,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -93,7 +91,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -101,7 +98,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.zIndex
 import dev.zain.znkeyboard.constants.SettingsBackupDefaults
-import dev.zain.znkeyboard.constants.SettingsThemeColors
 import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
@@ -109,12 +105,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.time.LocalDateTime
-import java.util.Locale
 import kotlin.math.roundToInt
 
 class SettingsActivity : ComponentActivity() {
@@ -393,51 +383,22 @@ private fun SettingsScreen() {
                 },
             )
 
-            Surface(
-                color = ZnKeyboardColors.Surface,
-                shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-                tonalElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(
-                    modifier = Modifier.padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_tune_24),
-                                contentDescription = null,
-                                tint = ZnKeyboardColors.Accent,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(
-                                text = "Keyboard height",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                        Text(
-                            text = "${(heightScale * 100f).roundToInt()}%",
-                            color = ZnKeyboardColors.Muted,
-                            style = MaterialTheme.typography.labelLarge,
-                        )
-                    }
+            SettingsSectionCard {
+                SettingsSectionHeader(
+                    title = "Keyboard height",
+                    iconResId = R.drawable.ic_tune_24,
+                    trailingText = "${(heightScale * 100f).roundToInt()}%",
+                )
 
-                    Slider(
-                        value = heightScale,
-                        onValueChange = {
-                            heightScale = it
-                            KeyboardSettings.saveHeightScale(context, it)
-                        },
-                        valueRange = KeyboardSettings.MIN_HEIGHT_SCALE..KeyboardSettings.MAX_HEIGHT_SCALE,
-                        steps = 6,
-                    )
-                }
+                Slider(
+                    value = heightScale,
+                    onValueChange = {
+                        heightScale = it
+                        KeyboardSettings.saveHeightScale(context, it)
+                    },
+                    valueRange = KeyboardSettings.MIN_HEIGHT_SCALE..KeyboardSettings.MAX_HEIGHT_SCALE,
+                    steps = 6,
+                )
             }
 
             EmojiPreferencesSection(
@@ -497,95 +458,73 @@ private fun TextSnippetsSection(
         snippets.none { it.text == normalizedDraft.text } &&
         snippets.size < KeyboardSettings.MAX_TEXT_SNIPPETS
 
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Text snippets",
+            trailingText = "${snippets.size}/${KeyboardSettings.MAX_TEXT_SNIPPETS}",
+        )
+
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it.take(KeyboardSettings.MAX_TEXT_SNIPPET_CHARS) },
+            label = { Text("Snippet") },
+            minLines = 2,
+            maxLines = 4,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Button(
+            onClick = {
+                onSnippetsChange(snippets + normalizedDraft)
+                draft = ""
+            },
+            enabled = canAddSnippet,
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Icon(
+                painter = painterResource(R.drawable.ic_add_24),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Add")
+        }
+
+        if (snippets.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
+                    .background(ZnKeyboardColors.Key),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "Text snippets",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "${snippets.size}/${KeyboardSettings.MAX_TEXT_SNIPPETS}",
+                    text = "No snippets",
                     color = ZnKeyboardColors.Muted,
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
-
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it.take(KeyboardSettings.MAX_TEXT_SNIPPET_CHARS) },
-                label = { Text("Snippet") },
-                minLines = 2,
-                maxLines = 4,
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            Button(
-                onClick = {
-                    onSnippetsChange(snippets + normalizedDraft)
-                    draft = ""
-                },
-                enabled = canAddSnippet,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Add")
-            }
-
-            if (snippets.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
-                        .background(ZnKeyboardColors.Key),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "No snippets",
-                        color = ZnKeyboardColors.Muted,
-                        style = MaterialTheme.typography.labelLarge,
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                snippets.forEachIndexed { index, snippet ->
+                    TextSnippetEditorRow(
+                        snippet = snippet,
+                        onTagsChange = { tags ->
+                            onSnippetsChange(
+                                snippets.toMutableList().apply {
+                                    this[index] = snippet.copy(tags = tags)
+                                },
+                            )
+                        },
+                        onRemove = {
+                            onSnippetsChange(
+                                snippets.toMutableList().apply {
+                                    removeAt(index)
+                                },
+                            )
+                        },
                     )
-                }
-            } else {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    snippets.forEachIndexed { index, snippet ->
-                        TextSnippetEditorRow(
-                            snippet = snippet,
-                            onTagsChange = { tags ->
-                                onSnippetsChange(
-                                    snippets.toMutableList().apply {
-                                        this[index] = snippet.copy(tags = tags)
-                                    },
-                                )
-                            },
-                            onRemove = {
-                                onSnippetsChange(
-                                    snippets.toMutableList().apply {
-                                        removeAt(index)
-                                    },
-                                )
-                            },
-                        )
-                    }
                 }
             }
         }
@@ -599,62 +538,27 @@ private fun ClipboardHistorySettingsSection(
 ) {
     var confirmingClear by remember { mutableStateOf(false) }
 
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Clipboard history",
+            iconResId = R.drawable.ic_history_24,
+            trailingText = "$entryCount/${ClipboardHistoryStore.MAX_HISTORY}",
+        )
+
+        Text(
+            text = "Clipboard history is available from the spacebar long-press saved text panel. Clearing it requires confirmation here.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        OutlinedButton(
+            onClick = { confirmingClear = true },
+            enabled = entryCount > 0,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.DeleteContent),
+            border = BorderStroke(1.dp, ZnKeyboardColors.DeleteContent.copy(alpha = 0.55f)),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_history_24),
-                        contentDescription = null,
-                        tint = ZnKeyboardColors.Accent,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "Clipboard history",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    text = "$entryCount/${ClipboardHistoryStore.MAX_HISTORY}",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-
-            Text(
-                text = "Clipboard history is available from the spacebar long-press saved text panel. Clearing it requires confirmation here.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            OutlinedButton(
-                onClick = { confirmingClear = true },
-                enabled = entryCount > 0,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.DeleteContent),
-                border = BorderStroke(1.dp, ZnKeyboardColors.DeleteContent.copy(alpha = 0.55f)),
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_delete_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Clear clipboard history")
-            }
+            SettingsIconTextButtonContent(R.drawable.ic_delete_24, "Clear clipboard history")
         }
     }
 
@@ -946,7 +850,7 @@ private fun AddTextSnippetTagButton(
         border = BorderStroke(1.dp, ZnKeyboardColors.Muted.copy(alpha = 0.7f)),
         tonalElevation = 0.dp,
         modifier = Modifier
-            .size(30.dp)
+            .size(26.dp)
             .clickable(onClick = onClick),
     ) {
         Box(contentAlignment = Alignment.Center) {
@@ -954,7 +858,7 @@ private fun AddTextSnippetTagButton(
                 painter = painterResource(R.drawable.ic_add_24),
                 contentDescription = "Add tag",
                 tint = ZnKeyboardColors.Muted,
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(14.dp),
             )
         }
     }
@@ -1029,77 +933,36 @@ private fun BackupRestoreSection(
     onExport: () -> Unit,
     onImport: () -> Unit,
 ) {
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Backup & restore",
+            iconResId = R.drawable.ic_download_24,
+            trailingText = "JSON",
+        )
+
+        Text(
+            text = "API keys stay out of backup files.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Button(
+                onClick = onExport,
+                modifier = Modifier.weight(1f),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_download_24),
-                        contentDescription = null,
-                        tint = ZnKeyboardColors.Accent,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "Backup & restore",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    text = "JSON",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.labelLarge,
-                )
+                SettingsIconTextButtonContent(R.drawable.ic_download_24, "Export")
             }
 
-            Text(
-                text = "API keys stay out of backup files.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            OutlinedButton(
+                onClick = onImport,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
             ) {
-                Button(
-                    onClick = onExport,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_download_24),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Export")
-                }
-
-                OutlinedButton(
-                    onClick = onImport,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_upload_24),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Import")
-                }
+                SettingsIconTextButtonContent(R.drawable.ic_upload_24, "Import")
             }
         }
     }
@@ -1114,112 +977,48 @@ private fun GifSearchSection(
     onGifAppKeyChange: (String) -> Unit,
     onGifAppKeyLockedChange: (Boolean) -> Unit,
 ) {
-    val effectivelyLocked = gifAppKeyLocked && gifAppKey.isNotBlank()
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "GIF search",
+            subtitle = "Uses KLIPY for searchable GIFs and meme-friendly results.",
+            trailingText = if (gifAppKey.isBlank()) "Setup" else "Ready",
+            trailingColor = if (gifAppKey.isBlank()) ZnKeyboardColors.Muted else ZnKeyboardColors.Accent,
+        )
 
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "GIF search",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Uses KLIPY for searchable GIFs and meme-friendly results.",
-                        color = ZnKeyboardColors.Muted,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+        Text(
+            text = "GIF search queries go directly from this keyboard to KLIPY. The app key is stored on this device and stays out of backups.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        OutlinedTextField(
+            value = gifApiBaseUrl,
+            onValueChange = onGifApiBaseUrlChange,
+            label = { Text("API base URL") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            supportingText = {
                 Text(
-                    text = if (gifAppKey.isBlank()) "Setup" else "Ready",
-                    color = if (gifAppKey.isBlank()) ZnKeyboardColors.Muted else ZnKeyboardColors.Accent,
-                    style = MaterialTheme.typography.labelLarge,
+                    text = "Default: ${KeyboardSettings.DEFAULT_GIF_API_BASE_URL}",
+                    color = ZnKeyboardColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodySmall,
                 )
-            }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        )
 
-            Text(
-                text = "GIF search queries go directly from this keyboard to KLIPY. The app key is stored on this device and stays out of backups.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            OutlinedTextField(
-                value = gifApiBaseUrl,
-                onValueChange = onGifApiBaseUrlChange,
-                label = { Text("API base URL") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                supportingText = {
-                    Text(
-                        text = "Default: ${KeyboardSettings.DEFAULT_GIF_API_BASE_URL}",
-                        color = ZnKeyboardColors.Muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            OutlinedTextField(
-                value = gifAppKey,
-                onValueChange = onGifAppKeyChange,
-                label = { Text("KLIPY app key") },
-                singleLine = true,
-                enabled = !effectivelyLocked,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            if (effectivelyLocked) {
-                                onGifAppKeyLockedChange(false)
-                            } else if (gifAppKey.isNotBlank()) {
-                                onGifAppKeyLockedChange(true)
-                            }
-                        },
-                        enabled = gifAppKey.isNotBlank(),
-                    ) {
-                        Icon(
-                            painter = painterResource(
-                                if (effectivelyLocked) R.drawable.ic_lock_24 else R.drawable.ic_lock_open_24,
-                            ),
-                            contentDescription = if (effectivelyLocked) "Unlock KLIPY app key" else "Lock KLIPY app key",
-                            tint = if (effectivelyLocked) ZnKeyboardColors.Accent else ZnKeyboardColors.Muted,
-                        )
-                    }
-                },
-                supportingText = {
-                    Text(
-                        text = if (effectivelyLocked) {
-                            "Locked. Tap lock to edit."
-                        } else if (gifAppKey.isNotBlank()) {
-                            "Tap lock to prevent edits."
-                        } else {
-                            "Create a free key in the KLIPY partner panel."
-                        },
-                        color = ZnKeyboardColors.Muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+        LockableSecretOutlinedTextField(
+            value = gifAppKey,
+            onValueChange = onGifAppKeyChange,
+            label = "KLIPY app key",
+            locked = gifAppKeyLocked,
+            onLockedChange = onGifAppKeyLockedChange,
+            emptySupportingText = "Create a free key in the KLIPY partner panel.",
+            lockContentDescription = "Lock KLIPY app key",
+            unlockContentDescription = "Unlock KLIPY app key",
+        )
     }
 }
 
@@ -1234,106 +1033,71 @@ private fun EmojiPreferencesSection(
 ) {
     var expanded by remember { mutableStateOf(false) }
 
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = "Emoji",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+    SettingsSectionCard(verticalSpacing = 12.dp) {
+        SettingsSectionHeader(title = "Emoji")
 
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = { expanded = true },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-                ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            SettingsPickerLauncherButton(
+                label = "Default tone",
+                value = skinTone.label,
+                onClick = { expanded = true },
+                leadingContent = {
                     Text(
                         text = skinTone.sample,
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Spacer(Modifier.width(12.dp))
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        horizontalAlignment = Alignment.Start,
-                    ) {
-                        Text(
-                            text = "Default tone",
-                            color = ZnKeyboardColors.Muted,
-                            style = MaterialTheme.typography.labelSmall,
-                        )
-                        Text(
-                            text = skinTone.label,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                    Text(
-                        text = "Change",
-                        color = ZnKeyboardColors.Accent,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-
-                FloatingPickerMenu(
-                    expanded = expanded,
-                    items = EmojiSkinTone.entries.map { option ->
-                        PickerItem(
-                            id = option.id,
-                            title = "${option.sample}  ${option.label}",
-                        )
-                    },
-                    onDismissRequest = { expanded = false },
-                    onItemSelected = { item ->
-                        expanded = false
-                        EmojiSkinTone.entries.firstOrNull { it.id == item.id }
-                            ?.let(onSkinToneChange)
-                    },
-                    maxHeight = SKIN_TONE_PICKER_MAX_HEIGHT,
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Recent rows",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    text = "$recentEmojiRows",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-
-            Slider(
-                value = recentEmojiRows.toFloat(),
-                onValueChange = { value ->
-                    onRecentEmojiRowsChange(value.roundToInt())
                 },
-                valueRange = EmojiCatalog.MIN_RECENT_ROW_COUNT.toFloat()..EmojiCatalog.MAX_RECENT_ROW_COUNT.toFloat(),
-                steps = EmojiCatalog.MAX_RECENT_ROW_COUNT - EmojiCatalog.MIN_RECENT_ROW_COUNT - 1,
             )
 
-            CustomEmojiTagsEditor(
-                tagsByEmoji = customEmojiTags,
-                onTagsChange = onCustomEmojiTagsChange,
+            FloatingPickerMenu(
+                expanded = expanded,
+                items = EmojiSkinTone.entries.map { option ->
+                    PickerItem(
+                        id = option.id,
+                        title = "${option.sample}  ${option.label}",
+                    )
+                },
+                onDismissRequest = { expanded = false },
+                onItemSelected = { item ->
+                    expanded = false
+                    EmojiSkinTone.entries.firstOrNull { it.id == item.id }
+                        ?.let(onSkinToneChange)
+                },
+                maxHeight = SKIN_TONE_PICKER_MAX_HEIGHT,
             )
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Recent rows",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "$recentEmojiRows",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelLarge,
+            )
+        }
+
+        Slider(
+            value = recentEmojiRows.toFloat(),
+            onValueChange = { value ->
+                onRecentEmojiRowsChange(value.roundToInt())
+            },
+            valueRange = EmojiCatalog.MIN_RECENT_ROW_COUNT.toFloat()..EmojiCatalog.MAX_RECENT_ROW_COUNT.toFloat(),
+            steps = EmojiCatalog.MAX_RECENT_ROW_COUNT - EmojiCatalog.MIN_RECENT_ROW_COUNT - 1,
+        )
+
+        CustomEmojiTagsEditor(
+            tagsByEmoji = customEmojiTags,
+            onTagsChange = onCustomEmojiTagsChange,
+        )
     }
 }
 
@@ -1544,138 +1308,183 @@ private fun AgentModeSection(
     onAgentApiKeyChange: (String) -> Unit,
     onAgentApiKeyLockedChange: (Boolean) -> Unit,
 ) {
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Rewrite",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = "Controls the Rewrite button in the tools row.",
-                        color = ZnKeyboardColors.Muted,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Rewrite",
+            subtitle = "Controls the Rewrite button in the tools row.",
+            trailingContent = {
                 Switch(
                     checked = agentModeEnabled,
                     onCheckedChange = onAgentModeEnabledChange,
                 )
-            }
+            },
+        )
 
+        Text(
+            text = "Text is sent directly from this keyboard to your configured provider. Rewrite is disabled in password fields.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        ProviderTypeSelector(
+            providerType = agentProviderType,
+            onProviderTypeChange = onAgentProviderTypeChange,
+        )
+
+        if (agentProviderType == KeyboardSettings.AgentProviderType.OpenAiCompatible) {
+            OutlinedTextField(
+                value = agentApiBaseUrl,
+                onValueChange = onAgentApiBaseUrlChange,
+                label = { Text("API base URL") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
             Text(
-                text = "Text is sent directly from this keyboard to your configured provider. Rewrite is disabled in password fields.",
+                text = "OpenRouter endpoint is managed automatically. Pick a model first, then optionally pin a provider for that model.",
                 color = ZnKeyboardColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )
+        }
 
-            ProviderTypeSelector(
-                providerType = agentProviderType,
-                onProviderTypeChange = onAgentProviderTypeChange,
-            )
+        ModelSelectorField(
+            providerType = agentProviderType,
+            apiBaseUrl = agentApiBaseUrl,
+            apiKey = agentApiKey,
+            value = agentModel,
+            onValueChange = onAgentModelChange,
+        )
 
-            if (agentProviderType == KeyboardSettings.AgentProviderType.OpenAiCompatible) {
-                OutlinedTextField(
-                    value = agentApiBaseUrl,
-                    onValueChange = onAgentApiBaseUrlChange,
-                    label = { Text("API base URL") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
-                Text(
-                    text = "OpenRouter endpoint is managed automatically. Leave pin empty for automatic routing.",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                OutlinedTextField(
-                    value = openRouterProviderSlug,
-                    onValueChange = onOpenRouterProviderSlugChange,
-                    label = { Text("Provider pin") },
-                    placeholder = { Text("Example: deepinfra") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            ModelSelectorField(
-                providerType = agentProviderType,
-                apiBaseUrl = agentApiBaseUrl,
+        if (agentProviderType == KeyboardSettings.AgentProviderType.OpenRouter) {
+            OpenRouterProviderSelector(
+                modelId = agentModel,
                 apiKey = agentApiKey,
-                value = agentModel,
-                onValueChange = onAgentModelChange,
-            )
-
-            ReasoningControls(
-                providerType = agentProviderType,
-                reasoningMode = agentReasoningMode,
-                reasoningTextEnabled = agentReasoningTextEnabled,
-                onReasoningModeChange = onAgentReasoningModeChange,
-                onReasoningTextEnabledChange = onAgentReasoningTextEnabledChange,
-            )
-
-            val effectivelyLocked = agentApiKeyLocked && agentApiKey.isNotBlank()
-            OutlinedTextField(
-                value = agentApiKey,
-                onValueChange = onAgentApiKeyChange,
-                label = { Text("API key") },
-                singleLine = true,
-                enabled = !effectivelyLocked,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                trailingIcon = {
-                    IconButton(
-                        onClick = {
-                            if (effectivelyLocked) {
-                                onAgentApiKeyLockedChange(false)
-                            } else if (agentApiKey.isNotBlank()) {
-                                onAgentApiKeyLockedChange(true)
-                            }
-                        },
-                        enabled = agentApiKey.isNotBlank(),
-                    ) {
-                        Icon(
-                            painter = painterResource(
-                                if (effectivelyLocked) R.drawable.ic_lock_24 else R.drawable.ic_lock_open_24,
-                            ),
-                            contentDescription = if (effectivelyLocked) "Unlock API key" else "Lock API key",
-                            tint = if (effectivelyLocked) ZnKeyboardColors.Accent else ZnKeyboardColors.Muted,
-                        )
-                    }
-                },
-                supportingText = {
-                    Text(
-                        text = if (effectivelyLocked) {
-                            "Locked. Tap lock to edit."
-                        } else if (agentApiKey.isNotBlank()) {
-                            "Tap lock to prevent edits."
-                        } else {
-                            "Enter your provider's API key."
-                        },
-                        color = ZnKeyboardColors.Muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                },
-                modifier = Modifier.fillMaxWidth(),
+                value = openRouterProviderSlug,
+                onValueChange = onOpenRouterProviderSlugChange,
             )
         }
+
+        ReasoningControls(
+            providerType = agentProviderType,
+            reasoningMode = agentReasoningMode,
+            reasoningTextEnabled = agentReasoningTextEnabled,
+            onReasoningModeChange = onAgentReasoningModeChange,
+            onReasoningTextEnabledChange = onAgentReasoningTextEnabledChange,
+        )
+
+        LockableSecretOutlinedTextField(
+            value = agentApiKey,
+            onValueChange = onAgentApiKeyChange,
+            label = "API key",
+            locked = agentApiKeyLocked,
+            onLockedChange = onAgentApiKeyLockedChange,
+            emptySupportingText = "Enter your provider's API key.",
+            lockContentDescription = "Lock API key",
+            unlockContentDescription = "Unlock API key",
+        )
+    }
+}
+
+@Composable
+private fun OpenRouterProviderSelector(
+    modelId: String,
+    apiKey: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var providerOptions by remember { mutableStateOf<List<OpenRouterProviderOption>>(emptyList()) }
+    var providerLoadStatus by remember { mutableStateOf("Pick a model to load OpenRouter providers.") }
+    val currentValue by rememberUpdatedState(value)
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val normalizedModelId = modelId.trim()
+
+    LaunchedEffect(normalizedModelId, apiKey) {
+        providerOptions = emptyList()
+        if (normalizedModelId.isBlank()) {
+            providerLoadStatus = "Pick a model to load OpenRouter providers."
+            return@LaunchedEffect
+        }
+        if (apiKey.isBlank()) {
+            providerLoadStatus = "Enter your OpenRouter API key to load providers."
+            return@LaunchedEffect
+        }
+        if (!normalizedModelId.contains("/")) {
+            providerLoadStatus = "Use an OpenRouter model ID like openai/gpt-4o to load providers."
+            return@LaunchedEffect
+        }
+
+        providerLoadStatus = "Loading providers..."
+        delay(MODEL_LOAD_DEBOUNCE_MS)
+        val result = withContext(Dispatchers.IO) {
+            fetchOpenRouterProviderOptions(
+                baseUrl = KeyboardSettings.OPENROUTER_API_BASE_URL,
+                modelId = normalizedModelId,
+                apiKey = apiKey,
+            )
+        }
+        result
+            .onSuccess { providers ->
+                providerOptions = providers
+                if (currentValue.isNotBlank() && providers.none { it.slug == currentValue }) {
+                    currentOnValueChange("")
+                }
+                providerLoadStatus = if (providers.isEmpty()) {
+                    "No provider pins found for this model. Automatic routing is still available."
+                } else {
+                    "Loaded ${providers.size} providers for this model."
+                }
+            }
+            .onFailure { error ->
+                providerLoadStatus = error.message?.takeIf { it.isNotBlank() }
+                    ?: "Could not load providers. Automatic routing is still available."
+            }
+    }
+
+    val selectedLabel = providerOptions.firstOrNull { it.slug == value }?.name
+        ?: value.takeIf { it.isNotBlank() }
+        ?: "Automatic routing"
+    val pickerItems = remember(providerOptions) {
+        listOf(
+            PickerItem(
+                id = "",
+                title = "Automatic routing",
+                subtitle = "Let OpenRouter choose the provider.",
+            ),
+        ) + providerOptions.map { option ->
+            PickerItem(
+                id = option.slug,
+                title = option.name,
+                subtitle = option.slug,
+            )
+        }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            SettingsPickerLauncherButton(
+                label = "OpenRouter provider",
+                value = selectedLabel,
+                onClick = { expanded = true },
+            )
+
+            FloatingPickerMenu(
+                expanded = expanded,
+                items = pickerItems,
+                onDismissRequest = { expanded = false },
+                onItemSelected = { item ->
+                    expanded = false
+                    onValueChange(item.id)
+                },
+            )
+        }
+
+        Text(
+            text = providerLoadStatus,
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -1906,34 +1715,11 @@ private fun ProviderTypeSelector(
     var expanded by remember { mutableStateOf(false) }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        OutlinedButton(
+        SettingsPickerLauncherButton(
+            label = "Provider",
+            value = providerType.label,
             onClick = { expanded = true },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-        ) {
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalAlignment = Alignment.Start,
-            ) {
-                Text(
-                    text = "Provider",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Text(
-                    text = providerType.label,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-            }
-            Text(
-                text = "Change",
-                color = ZnKeyboardColors.Accent,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
+        )
 
         FloatingPickerMenu(
             expanded = expanded,
@@ -2075,150 +1861,121 @@ private fun RowButtonsSection(
     labelForKey: (String) -> String,
     onKeyIdsChange: (List<String>) -> Unit,
 ) {
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = title,
+            iconResId = R.drawable.ic_keyboard_24,
+            trailingText = "${keyIds.size}/$maxKeys",
+        )
+
+        if (keyIds.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
+                    .background(ZnKeyboardColors.Key),
+                contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_keyboard_24),
-                        contentDescription = null,
-                        tint = ZnKeyboardColors.Accent,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
                 Text(
-                    text = "${keyIds.size}/$maxKeys",
+                    text = "No keys",
                     color = ZnKeyboardColors.Muted,
                     style = MaterialTheme.typography.labelLarge,
                 )
             }
+        } else {
+            var draggingKeyIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
+            var keyDropIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
+            val activeDraggingKeyIndex = draggingKeyIndex?.takeIf { it in keyIds.indices }
+            val activeKeyDropIndex = keyDropIndex?.takeIf { it in keyIds.indices }
 
-            if (keyIds.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
-                        .background(ZnKeyboardColors.Key),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "No keys",
-                        color = ZnKeyboardColors.Muted,
-                        style = MaterialTheme.typography.labelLarge,
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(reorderListHeight(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, keyIds.size)),
+            ) {
+                if (activeDraggingKeyIndex != null && activeKeyDropIndex != null) {
+                    ReorderDropShadow(
+                        index = activeKeyDropIndex,
+                        label = labelForKey(keyIds[activeDraggingKeyIndex]),
+                        height = SHORTCUT_KEY_ITEM_HEIGHT,
+                        modifier = Modifier
+                            .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, activeKeyDropIndex))
+                            .zIndex(0f),
                     )
                 }
-            } else {
-                var draggingKeyIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
-                var keyDropIndex by remember(keyIds) { mutableStateOf<Int?>(null) }
-                val activeDraggingKeyIndex = draggingKeyIndex?.takeIf { it in keyIds.indices }
-                val activeKeyDropIndex = keyDropIndex?.takeIf { it in keyIds.indices }
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(reorderListHeight(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, keyIds.size)),
-                ) {
-                    if (activeDraggingKeyIndex != null && activeKeyDropIndex != null) {
-                        ReorderDropShadow(
-                            index = activeKeyDropIndex,
-                            label = labelForKey(keyIds[activeDraggingKeyIndex]),
-                            height = SHORTCUT_KEY_ITEM_HEIGHT,
-                            modifier = Modifier
-                                .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, activeKeyDropIndex))
-                                .zIndex(0f),
-                        )
-                    }
-
-                    keyIds.forEachIndexed { index, keyId ->
-                        val visualIndex = reorderVisualIndex(index, activeDraggingKeyIndex, activeKeyDropIndex)
-                        UpperRowKeyEditor(
-                            index = index,
-                            keyId = keyId,
-                            keyCount = keyIds.size,
-                            keyOptions = keyOptions,
-                            labelForKey = labelForKey,
-                            modifier = Modifier
-                                .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, visualIndex))
-                                .zIndex(if (activeDraggingKeyIndex == index) 2f else 1f),
-                            onDragStart = {
-                                draggingKeyIndex = index
-                                keyDropIndex = index
-                            },
-                            onDragTargetChange = { targetIndex ->
-                                keyDropIndex = targetIndex
-                            },
-                            onDragFinish = {
-                                draggingKeyIndex = null
-                                keyDropIndex = null
-                            },
-                            onKeyChange = { nextKeyId ->
-                                onKeyIdsChange(
-                                    keyIds.toMutableList().apply {
-                                        set(index, nextKeyId)
-                                    },
-                                )
-                            },
-                            onMove = { fromIndex, toIndex ->
-                                onKeyIdsChange(keyIds.moveItem(fromIndex, toIndex))
-                            },
-                            onRemove = {
-                                onKeyIdsChange(
-                                    keyIds.toMutableList().apply {
-                                        removeAt(index)
-                                    },
-                                )
-                            },
-                        )
-                    }
+                keyIds.forEachIndexed { index, keyId ->
+                    val visualIndex = reorderVisualIndex(index, activeDraggingKeyIndex, activeKeyDropIndex)
+                    UpperRowKeyEditor(
+                        index = index,
+                        keyId = keyId,
+                        keyCount = keyIds.size,
+                        keyOptions = keyOptions,
+                        labelForKey = labelForKey,
+                        modifier = Modifier
+                            .offset(y = reorderItemY(SHORTCUT_KEY_ITEM_HEIGHT, SHORTCUT_KEY_ITEM_GAP, visualIndex))
+                            .zIndex(if (activeDraggingKeyIndex == index) 2f else 1f),
+                        onDragStart = {
+                            draggingKeyIndex = index
+                            keyDropIndex = index
+                        },
+                        onDragTargetChange = { targetIndex ->
+                            keyDropIndex = targetIndex
+                        },
+                        onDragFinish = {
+                            draggingKeyIndex = null
+                            keyDropIndex = null
+                        },
+                        onKeyChange = { nextKeyId ->
+                            onKeyIdsChange(
+                                keyIds.toMutableList().apply {
+                                    set(index, nextKeyId)
+                                },
+                            )
+                        },
+                        onMove = { fromIndex, toIndex ->
+                            onKeyIdsChange(keyIds.moveItem(fromIndex, toIndex))
+                        },
+                        onRemove = {
+                            onKeyIdsChange(
+                                keyIds.toMutableList().apply {
+                                    removeAt(index)
+                                },
+                            )
+                        },
+                    )
                 }
             }
+        }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(
+                onClick = {
+                    onKeyIdsChange(keyIds + nextRowButtonId(keyIds, defaultKeyIds, keyOptions))
+                },
+                enabled = keyIds.size < maxKeys,
+                modifier = Modifier.weight(1f),
             ) {
-                Button(
-                    onClick = {
-                        onKeyIdsChange(keyIds + nextRowButtonId(keyIds, defaultKeyIds, keyOptions))
-                    },
-                    enabled = keyIds.size < maxKeys,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_add_24),
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Add")
-                }
+                Icon(
+                    painter = painterResource(R.drawable.ic_add_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Add")
+            }
 
-                OutlinedButton(
-                    onClick = { onKeyIdsChange(defaultKeyIds) },
-                    enabled = keyIds != defaultKeyIds,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-                ) {
-                    Text("Reset")
-                }
+            OutlinedButton(
+                onClick = { onKeyIdsChange(defaultKeyIds) },
+                enabled = keyIds != defaultKeyIds,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+            ) {
+                Text("Reset")
             }
         }
     }
@@ -2352,97 +2109,68 @@ private fun KeyboardRowOrderSection(
 ) {
     val normalizedOrder = KeyboardSettings.normalizeKeyboardRowOrder(rowOrder)
 
-    Surface(
-        color = ZnKeyboardColors.Surface,
-        shape = RoundedCornerShape(SECTION_CORNER_RADIUS),
-        tonalElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            modifier = Modifier.padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Shortcut row order",
+            iconResId = R.drawable.ic_tune_24,
+            trailingText = "${normalizedOrder.size}",
+        )
+
+        var draggingRowIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
+        var rowDropIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
+        val activeDraggingRowIndex = draggingRowIndex?.takeIf { it in normalizedOrder.indices }
+        val activeRowDropIndex = rowDropIndex?.takeIf { it in normalizedOrder.indices }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(reorderListHeight(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, normalizedOrder.size)),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_tune_24),
-                        contentDescription = null,
-                        tint = ZnKeyboardColors.Accent,
-                    )
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "Shortcut row order",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Text(
-                    text = "${normalizedOrder.size}",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.labelLarge,
+            if (activeDraggingRowIndex != null && activeRowDropIndex != null) {
+                ReorderDropShadow(
+                    index = activeRowDropIndex,
+                    label = KeyboardSettings.labelForKeyboardRow(normalizedOrder[activeDraggingRowIndex]),
+                    height = ROW_ORDER_ITEM_HEIGHT,
+                    modifier = Modifier
+                        .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, activeRowDropIndex))
+                        .zIndex(0f),
                 )
             }
 
-            var draggingRowIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
-            var rowDropIndex by remember(normalizedOrder) { mutableStateOf<Int?>(null) }
-            val activeDraggingRowIndex = draggingRowIndex?.takeIf { it in normalizedOrder.indices }
-            val activeRowDropIndex = rowDropIndex?.takeIf { it in normalizedOrder.indices }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(reorderListHeight(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, normalizedOrder.size)),
-            ) {
-                if (activeDraggingRowIndex != null && activeRowDropIndex != null) {
-                    ReorderDropShadow(
-                        index = activeRowDropIndex,
-                        label = KeyboardSettings.labelForKeyboardRow(normalizedOrder[activeDraggingRowIndex]),
-                        height = ROW_ORDER_ITEM_HEIGHT,
-                        modifier = Modifier
-                            .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, activeRowDropIndex))
-                            .zIndex(0f),
-                    )
-                }
-
-                normalizedOrder.forEachIndexed { index, rowId ->
-                    val visualIndex = reorderVisualIndex(index, activeDraggingRowIndex, activeRowDropIndex)
-                    KeyboardRowOrderItem(
-                        index = index,
-                        rowId = rowId,
-                        rowCount = normalizedOrder.size,
-                        modifier = Modifier
-                            .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, visualIndex))
-                            .zIndex(if (activeDraggingRowIndex == index) 2f else 1f),
-                        onDragStart = {
-                            draggingRowIndex = index
-                            rowDropIndex = index
-                        },
-                        onDragTargetChange = { targetIndex ->
-                            rowDropIndex = targetIndex
-                        },
-                        onDragFinish = {
-                            draggingRowIndex = null
-                            rowDropIndex = null
-                        },
-                        onMove = { fromIndex, toIndex ->
-                            onRowOrderChange(normalizedOrder.moveItem(fromIndex, toIndex))
-                        },
-                    )
-                }
+            normalizedOrder.forEachIndexed { index, rowId ->
+                val visualIndex = reorderVisualIndex(index, activeDraggingRowIndex, activeRowDropIndex)
+                KeyboardRowOrderItem(
+                    index = index,
+                    rowId = rowId,
+                    rowCount = normalizedOrder.size,
+                    modifier = Modifier
+                        .offset(y = reorderItemY(ROW_ORDER_ITEM_HEIGHT, ROW_ORDER_ITEM_GAP, visualIndex))
+                        .zIndex(if (activeDraggingRowIndex == index) 2f else 1f),
+                    onDragStart = {
+                        draggingRowIndex = index
+                        rowDropIndex = index
+                    },
+                    onDragTargetChange = { targetIndex ->
+                        rowDropIndex = targetIndex
+                    },
+                    onDragFinish = {
+                        draggingRowIndex = null
+                        rowDropIndex = null
+                    },
+                    onMove = { fromIndex, toIndex ->
+                        onRowOrderChange(normalizedOrder.moveItem(fromIndex, toIndex))
+                    },
+                )
             }
+        }
 
-            OutlinedButton(
-                onClick = { onRowOrderChange(KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER) },
-                enabled = normalizedOrder != KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-            ) {
-                Text("Reset")
-            }
+        OutlinedButton(
+            onClick = { onRowOrderChange(KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER) },
+            enabled = normalizedOrder != KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+        ) {
+            Text("Reset")
         }
     }
 }
@@ -2584,13 +2312,7 @@ private fun SystemSetupActions() {
             modifier = Modifier.weight(1f),
             colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_keyboard_24),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("Enable")
+            SettingsIconTextButtonContent(R.drawable.ic_keyboard_24, "Enable")
         }
 
         Button(
@@ -2600,13 +2322,7 @@ private fun SystemSetupActions() {
             },
             modifier = Modifier.weight(1f),
         ) {
-            Icon(
-                painter = painterResource(R.drawable.ic_keyboard_24),
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("Choose")
+            SettingsIconTextButtonContent(R.drawable.ic_keyboard_24, "Choose")
         }
     }
 }
@@ -2661,112 +2377,8 @@ private fun <T> List<T>.moveItem(fromIndex: Int, toIndex: Int): List<T> {
     }
 }
 
-private fun fetchModelOptions(
-    baseUrl: String,
-    apiKey: String,
-): Result<List<ModelOption>> {
-    return runCatching {
-        val endpoint = buildModelsUrl(baseUrl)
-        val connection = (endpoint.openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = MODEL_LOAD_TIMEOUT_MS
-            readTimeout = MODEL_LOAD_TIMEOUT_MS
-            setRequestProperty("Accept", "application/json")
-            if (apiKey.isNotBlank()) {
-                setRequestProperty("Authorization", "Bearer $apiKey")
-            }
-        }
-
-        try {
-            val responseCode = connection.responseCode
-            val responseText = if (responseCode in 200..299) {
-                connection.inputStream.bufferedReader().use { it.readText() }
-            } else {
-                connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
-            }
-            if (responseCode !in 200..299) {
-                throw IOException("Could not load models ($responseCode). You can still type a custom model ID.")
-            }
-
-            val data = JSONObject(responseText).getJSONArray("data")
-            buildList {
-                for (index in 0 until data.length()) {
-                    val model = data.optJSONObject(index) ?: continue
-                    val id = model.optString("id").trim()
-                    if (id.isNotBlank()) {
-                        add(
-                            ModelOption(
-                                id = id,
-                                name = model.optString("name").trim().takeIf { it.isNotBlank() },
-                            ),
-                        )
-                    }
-                }
-            }.distinctBy { it.id }.sortedBy { it.id.lowercase(Locale.US) }
-        } finally {
-            connection.disconnect()
-        }
-    }
-}
-
-private fun buildModelsUrl(baseUrl: String): URL {
-    val normalizedBaseUrl = baseUrl.trim().trimEnd('/')
-    val endpoint = URL("$normalizedBaseUrl/models")
-    if (endpoint.protocol != "https") {
-        throw IOException("Use an HTTPS endpoint to load models.")
-    }
-    return endpoint
-}
-
-private fun List<ModelOption>.filterForQuery(query: String): List<ModelOption> {
-    val normalizedQuery = query.trim().lowercase(Locale.US)
-    if (normalizedQuery.isBlank()) return this
-
-    return filter { option ->
-        option.id.lowercase(Locale.US).contains(normalizedQuery) ||
-            option.name?.lowercase(Locale.US)?.contains(normalizedQuery) == true
-    }
-}
-
-private fun writeSettingsBackup(context: Context, uri: Uri) {
-    val output = context.contentResolver.openOutputStream(uri)
-        ?: throw IOException("Could not open export file.")
-    output.bufferedWriter(Charsets.UTF_8).use { writer ->
-        writer.write(KeyboardSettings.createBackupJson(context))
-    }
-}
-
-private fun restoreSettingsBackup(
-    context: Context,
-    uri: Uri,
-): KeyboardSettings.BackupRestoreResult {
-    val input = context.contentResolver.openInputStream(uri)
-        ?: throw IOException("Could not open import file.")
-    val backupJson = input.bufferedReader(Charsets.UTF_8).use { reader ->
-        reader.readText()
-    }
-    return KeyboardSettings.restoreBackupJson(context, backupJson)
-}
-
-private fun suggestedBackupFileName(): String {
-    return "znkeyboard-backup-${BACKUP_FILE_TIMESTAMP_FORMAT.format(LocalDateTime.now())}.json"
-}
-
-private data class ModelOption(
-    val id: String,
-    val name: String?,
-)
-
-private data class PickerItem(
-    val id: String,
-    val title: String,
-    val subtitle: String? = null,
-)
-
 private const val MODEL_LOAD_DEBOUNCE_MS = SettingsUiTimings.MODEL_LOAD_DEBOUNCE_MS
 private const val MODEL_QUERY_DEBOUNCE_MS = SettingsUiTimings.MODEL_QUERY_DEBOUNCE_MS
-private const val MODEL_LOAD_TIMEOUT_MS = SettingsUiTimings.MODEL_LOAD_TIMEOUT_MS
-private val BACKUP_FILE_TIMESTAMP_FORMAT = SettingsBackupDefaults.FILE_TIMESTAMP_FORMAT
 private val BACKUP_IMPORT_MIME_TYPES = SettingsBackupDefaults.IMPORT_MIME_TYPES
 private val PICKER_MENU_WIDTH = SettingsUiDimensions.PICKER_MENU_WIDTH
 private val PICKER_MAX_HEIGHT = SettingsUiDimensions.PICKER_MAX_HEIGHT
@@ -2783,31 +2395,3 @@ private val PICKER_CORNER_RADIUS = SettingsUiDimensions.PICKER_CORNER_RADIUS
 private val TEXT_SNIPPET_DELETE_REVEAL_WIDTH = 96.dp
 private const val TEXT_SNIPPET_DELETE_LOCK_THRESHOLD = 0.45f
 
-@Composable
-private fun ZnKeyboardTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = ZnKeyboardColors.Accent,
-            onPrimary = Color.White,
-            background = ZnKeyboardColors.Background,
-            onBackground = ZnKeyboardColors.OnSurface,
-            surface = ZnKeyboardColors.Surface,
-            onSurface = ZnKeyboardColors.OnSurface,
-            secondary = ZnKeyboardColors.FunctionKey,
-            onSecondary = ZnKeyboardColors.OnSurface,
-        ),
-        content = content,
-    )
-}
-
-private object ZnKeyboardColors {
-    val Background = SettingsThemeColors.Background
-    val Surface = SettingsThemeColors.Surface
-    val Key = SettingsThemeColors.Key
-    val FunctionKey = SettingsThemeColors.FunctionKey
-    val Accent = SettingsThemeColors.Accent
-    val OnSurface = SettingsThemeColors.OnSurface
-    val Muted = SettingsThemeColors.Muted
-    val DeleteBackground = Color(0xFF3A2424)
-    val DeleteContent = Color(0xFFE0A8A8)
-}

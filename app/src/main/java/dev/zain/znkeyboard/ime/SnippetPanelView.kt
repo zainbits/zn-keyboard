@@ -2,14 +2,11 @@ package dev.zain.znkeyboard.ime
 
 import android.content.Context
 import android.graphics.Rect
-import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -338,44 +335,25 @@ class SnippetPanelView @JvmOverloads constructor(
     }
 
     private fun snippetCard(snippet: KeyboardSettings.TextSnippet): LinearLayout {
-        return LinearLayout(context).apply {
-            orientation = VERTICAL
-            gravity = Gravity.START
-            setPadding(dp(12), dp(10), dp(12), dp(10))
-            minimumHeight = dp(50)
-            background = cardBackground()
-            isClickable = true
-            isFocusable = false
-            contentDescription = snippet.text
-            addView(
-                TextView(context).apply {
-                    text = snippet.text
-                    includeFontPadding = true
-                    setTextColor(PALETTE.text)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-                    setLineSpacing(dp(2).toFloat(), 1f)
-                    maxLines = SNIPPET_CARD_MAX_LINES
-                    ellipsize = TextUtils.TruncateAt.END
-                },
-                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT),
-            )
-            if (snippet.tags.isNotEmpty()) {
-                addView(
-                    TextView(context).apply {
-                        text = snippet.tags.joinToString("  ") { "#$it" }
-                        includeFontPadding = false
-                        setTextColor(PALETTE.tagText)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 11.5f)
-                        setSingleLine(true)
-                        ellipsize = TextUtils.TruncateAt.END
-                    },
-                    LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT).withMargins(top = 6),
-                )
-            }
-            setOnClickListener {
-                callback?.onSnippetSelected(snippet.text)
-            }
-        }
+        return SavedTextSnippetCard.create(
+            context = context,
+            snippet = snippet,
+            style = SavedTextSnippetCard.Style(
+                backgroundColor = PALETTE.key,
+                textColor = PALETTE.text,
+                tagTextColor = PALETTE.tagText,
+                radiusDp = 7,
+                strokeWidthDp = 1,
+                strokeColor = PALETTE.border,
+                verticalPaddingDp = 10,
+                minHeightDp = 50,
+                textSizeSp = 14.5f,
+                lineSpacingDp = 2,
+                maxLines = SNIPPET_CARD_MAX_LINES,
+                tagTopMarginDp = 6,
+            ),
+            onClick = { callback?.onSnippetSelected(it) },
+        )
     }
 
     private fun emptyMessage(message: String): TextView {
@@ -388,16 +366,6 @@ class SnippetPanelView @JvmOverloads constructor(
             visibility = GONE
         }
     }
-
-    private fun cardBackground() =
-        ImePressFeedback.roundedBackground(
-            context = context,
-            containerColor = PALETTE.key,
-            contentColor = PALETTE.text,
-            radiusDp = 7,
-            strokeWidthDp = 1,
-            strokeColor = PALETTE.border,
-        )
 
     private fun LayoutParams.withMargins(
         horizontal: Int = 0,

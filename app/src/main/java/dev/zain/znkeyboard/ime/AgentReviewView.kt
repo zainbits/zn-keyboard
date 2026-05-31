@@ -1,12 +1,10 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.Gravity
-import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -33,22 +31,18 @@ class AgentReviewView @JvmOverloads constructor(
         background = fieldBackground()
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
     }
-    private val applyButton = Button(context).apply {
-        text = "Apply"
-        isAllCaps = false
-        minHeight = 0
-        minWidth = 0
-        isFocusable = false
-        setOnClickListener { callback?.onAgentReviewApply() }
-    }
-    private val cancelButton = Button(context).apply {
-        text = "Cancel"
-        isAllCaps = false
-        minHeight = 0
-        minWidth = 0
-        isFocusable = false
-        setOnClickListener { callback?.onAgentReviewCancel() }
-    }
+    private val applyButton = reviewActionButton(
+        label = "Apply",
+        backgroundColor = PALETTE.action,
+        textColor = PALETTE.text,
+        onClick = { callback?.onAgentReviewApply() },
+    )
+    private val cancelButton = reviewActionButton(
+        label = "Cancel",
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.mutedText,
+        onClick = { callback?.onAgentReviewCancel() },
+    )
     private var heightScale = 1f
 
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
@@ -121,6 +115,31 @@ class AgentReviewView @JvmOverloads constructor(
         }
     }
 
+    private fun reviewActionButton(
+        label: String,
+        backgroundColor: Int,
+        textColor: Int,
+        onClick: () -> Unit,
+    ): TextView {
+        return TextView(context).apply {
+            text = label
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            isClickable = true
+            isFocusable = false
+            minHeight = 0
+            minWidth = 0
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            background = ImePressFeedback.roundedBackground(
+                context = context,
+                containerColor = backgroundColor,
+                contentColor = textColor,
+            )
+            setOnClickListener { onClick() }
+        }
+    }
+
     private fun LayoutParams.withMargins(
         start: Int = 0,
         top: Int = 0,
@@ -137,7 +156,10 @@ class AgentReviewView @JvmOverloads constructor(
         val background = ImeColors.BACKGROUND
         val field = ImeColors.KEY_DARK
         val border = ImeColors.BORDER
+        val function = ImeColors.FUNCTION_DARK
+        val action = ImeColors.FUNCTION
         const val text = ImeColors.TEXT
+        val mutedText = ImeColors.MUTED_TEXT
     }
 
 }

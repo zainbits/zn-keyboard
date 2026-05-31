@@ -21,6 +21,7 @@ import android.view.View
 import android.view.ViewConfiguration
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.constants.ImeColors
+import dev.zain.znkeyboard.constants.ImeDimensions
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
@@ -38,6 +39,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onBackspaceGestureDeleteChanged(wordCount: Int)
         fun onBackspaceGestureDeleteFinished()
         fun onBackspaceGestureDeleteCancelled()
+        fun onSpaceCursorDragStarted(): Boolean
+        fun onSpaceCursorDragChanged(characterDelta: Int)
+        fun onSpaceCursorDragFinished()
+        fun onSpaceCursorDragCancelled()
         fun onEmojiPanelRequested()
         fun onSnippetPanelRequested()
         fun onEmojiKeySuggestionSelected(emoji: String)
@@ -301,6 +306,14 @@ class ZnKeyboardView @JvmOverloads constructor(
                 callback?.onSnippetPanelRequested()
             }
         }
+        if (key?.id == "space") {
+            touch.spaceCursorDrag = SpaceCursorDragTouch(
+                key = key,
+                startX = event.getX(pointerIndex),
+                startY = event.getY(pointerIndex),
+                stepPx = max(dp(SPACE_CURSOR_DRAG_STEP_DP), hit.visualBounds.width() / SPACE_CURSOR_DRAG_VISIBLE_STEPS),
+            )
+        }
         key?.takeIf(::isBackspaceKey)?.let { key ->
             touch.backspaceGesture = BackspaceGestureTouch(
                 key = key,
@@ -320,6 +333,10 @@ class ZnKeyboardView @JvmOverloads constructor(
             val x = event.getX(pointerIndex)
             val y = event.getY(pointerIndex)
             if (updateBackspaceGesture(pointerId, touch, x, y)) {
+                changed = true
+                continue
+            }
+            if (updateSpaceCursorDrag(pointerId, touch, x, y)) {
                 changed = true
                 continue
             }
@@ -388,6 +405,51 @@ class ZnKeyboardView @JvmOverloads constructor(
         return true
     }
 
+    private fun updateSpaceCursorDrag(
+        pointerId: Int,
+        touch: ActiveTouch,
+        x: Float,
+        y: Float,
+    ): Boolean {
+        val gesture = touch.spaceCursorDrag ?: return false
+        if (gesture.consumedWithoutGesture) {
+            return true
+        }
+
+        val dx = x - gesture.startX
+        val dy = y - gesture.startY
+        val activationDistance = max(touchSlopPx, dp(SPACE_CURSOR_DRAG_ACTIVATION_DP))
+        if (!gesture.active) {
+            if (abs(dx) < activationDistance || abs(dx) < abs(dy) * 1.2f) {
+                return false
+            }
+
+            cancelLongPressFor(pointerId)
+            touch.cursorDragConsumed = true
+            touch.currentKey = gesture.key
+            if (callback?.onSpaceCursorDragStarted() == true) {
+                gesture.active = true
+                clearLatchedModifiers()
+            } else {
+                gesture.consumedWithoutGesture = true
+                touch.currentKey = null
+                return true
+            }
+        }
+
+        val characterDelta = spaceCursorDragCharacterDelta(gesture, x)
+        if (characterDelta != gesture.lastCharacterDelta) {
+            gesture.lastCharacterDelta = characterDelta
+            callback?.onSpaceCursorDragChanged(characterDelta)
+        }
+        return true
+    }
+
+    private fun spaceCursorDragCharacterDelta(gesture: SpaceCursorDragTouch, x: Float): Int {
+        val rawDelta = (x - gesture.startX) / gesture.stepPx
+        return rawDelta.roundToInt().coerceIn(-SPACE_CURSOR_DRAG_MAX_CHARS, SPACE_CURSOR_DRAG_MAX_CHARS)
+    }
+
     private fun backspaceGestureWordCount(
         gesture: BackspaceGestureTouch,
         activationDistance: Float,
@@ -404,9 +466,14 @@ class ZnKeyboardView @JvmOverloads constructor(
             val touch = activeTouches.get(nextPointerId)
             activeTouches.remove(nextPointerId)
             finishBackspaceGesture(touch)
+            finishSpaceCursorDrag(touch)
             cancelLongPressFor(nextPointerId)
             cancelBackspaceRepeatFor(nextPointerId)
-            if (touch?.longPressConsumed != true && touch?.repeatConsumed != true) {
+            if (
+                touch?.longPressConsumed != true &&
+                touch?.repeatConsumed != true &&
+                touch?.cursorDragConsumed != true
+            ) {
                 touch?.currentKey?.let(::handleKey)
             }
             if (nextPointerId == pointerId) {
@@ -422,6 +489,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         cancelPendingLongPress()
         cancelBackspaceRepeat()
         cancelBackspaceGestures()
+        cancelSpaceCursorDrags()
         activeTouches.clear()
         pointerQueue.clear()
     }
@@ -434,11 +502,28 @@ class ZnKeyboardView @JvmOverloads constructor(
         touch.backspaceGesture = null
     }
 
+    private fun finishSpaceCursorDrag(touch: ActiveTouch?) {
+        val gesture = touch?.spaceCursorDrag ?: return
+        if (gesture.active) {
+            callback?.onSpaceCursorDragFinished()
+        }
+        touch.spaceCursorDrag = null
+    }
+
     private fun cancelBackspaceGestures() {
         for (index in 0 until activeTouches.size()) {
             val gesture = activeTouches.valueAt(index).backspaceGesture
             if (gesture?.active == true) {
                 callback?.onBackspaceGestureDeleteCancelled()
+            }
+        }
+    }
+
+    private fun cancelSpaceCursorDrags() {
+        for (index in 0 until activeTouches.size()) {
+            val gesture = activeTouches.valueAt(index).spaceCursorDrag
+            if (gesture?.active == true) {
+                callback?.onSpaceCursorDragCancelled()
             }
         }
     }
@@ -575,7 +660,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         } else key.icon?.let {
             drawIcon(canvas, it, bounds, contentColor, contentAlpha)
         } ?: run {
-            val textSize = fitTextSize(key.label, bounds, key.role, key.largeLabel)
+            val textSize = fitTextSize(key.label, bounds, key.role)
             textPaint.textSize = textSize
             textPaint.color = contentColor
             textPaint.alpha = contentAlpha
@@ -599,7 +684,8 @@ class ZnKeyboardView @JvmOverloads constructor(
     ) {
         if (hint == null) return
 
-        textPaint.textSize = sp(8f).coerceAtMost(bounds.height() * 0.22f)
+        textPaint.textSize = sp(ImeDimensions.LONG_PRESS_HINT_TEXT_SIZE_SP)
+            .coerceAtMost(bounds.height() * ImeDimensions.LONG_PRESS_HINT_MAX_HEIGHT_FRACTION)
         textPaint.color = color
         textPaint.alpha = min(alpha, LONG_PRESS_HINT_ALPHA)
         textPaint.textAlign = Paint.Align.RIGHT
@@ -632,7 +718,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         color: Int,
         alpha: Int,
     ) {
-        val textSize = fitTextSize(label, bounds, KeyRole.Action, largeLabel = false)
+        val textSize = fitTextSize(label, bounds, KeyRole.Action)
         textPaint.textSize = textSize
         textPaint.color = color
         textPaint.alpha = alpha
@@ -881,21 +967,19 @@ class ZnKeyboardView @JvmOverloads constructor(
         return hitTargets.firstOrNull { it.hitBounds.contains(x, y) }
     }
 
-    private fun fitTextSize(label: String, bounds: RectF, role: KeyRole, largeLabel: Boolean): Float {
+    private fun fitTextSize(label: String, bounds: RectF, role: KeyRole): Float {
         val base = when (role) {
-            KeyRole.Character if largeLabel -> sp(24f)
-            KeyRole.Character -> sp(20f)
-            KeyRole.Function if largeLabel -> sp(24f)
-            KeyRole.Function -> sp(12.5f)
-            KeyRole.Action -> sp(13.5f)
+            KeyRole.Character -> sp(ImeDimensions.KEY_LABEL_CHARACTER_TEXT_SIZE_SP)
+            KeyRole.Function -> sp(ImeDimensions.KEY_LABEL_FUNCTION_TEXT_SIZE_SP)
+            KeyRole.Action -> sp(ImeDimensions.KEY_LABEL_ACTION_TEXT_SIZE_SP)
         }
-        var size = base.coerceAtMost(bounds.height() * 0.48f)
-        val min = sp(9f)
-        val maxWidth = bounds.width() - dp(8f)
+        var size = base.coerceAtMost(bounds.height() * ImeDimensions.KEY_LABEL_MAX_HEIGHT_FRACTION)
+        val min = sp(ImeDimensions.KEY_LABEL_MIN_TEXT_SIZE_SP)
+        val maxWidth = bounds.width() - dp(ImeDimensions.KEY_LABEL_HORIZONTAL_INSET_DP)
 
         textPaint.textSize = size
         while (textPaint.measureText(label) > maxWidth && size > min) {
-            size -= sp(0.5f)
+            size -= sp(ImeDimensions.KEY_LABEL_SHRINK_STEP_SP)
             textPaint.textSize = size
         }
         return size
@@ -1021,20 +1105,20 @@ class ZnKeyboardView @JvmOverloads constructor(
         val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
         val mainRows = when (layoutMode) {
             LayoutMode.Letters -> listOf(
-                RowSpec(chars("qwertyuiop"), 1f),
-                RowSpec(chars("asdfghjkl"), 1f, layoutKeyCount = 10),
+                RowSpec(chars("qwertyuiop"), ImeLayout.STANDARD_ROW_WEIGHT),
+                RowSpec(chars("asdfghjkl"), ImeLayout.STANDARD_ROW_WEIGHT, layoutKeyCount = 10),
                 letterBottomRow(),
                 bottomRow(),
             )
             LayoutMode.Symbols -> listOf(
-                RowSpec(chars("1234567890"), 1f),
-                RowSpec(symbols("-/:;()\$&@\"", rowPrefix = "symbol_middle"), 1f),
+                RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT),
+                RowSpec(symbols("-/:;()\$&@\"", rowPrefix = "symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
                 symbolBottomRow(),
                 bottomRow(),
             )
             LayoutMode.MoreSymbols -> listOf(
-                RowSpec(symbols("[]{}#%^*+=", rowPrefix = "more_symbol_top"), 1f),
-                RowSpec(symbols("_\\|~<>€£¥•", rowPrefix = "more_symbol_middle"), 1f),
+                RowSpec(symbols("[]{}#%^*+=", rowPrefix = "more_symbol_top"), ImeLayout.STANDARD_ROW_WEIGHT),
+                RowSpec(symbols("_\\|~<>€£¥•", rowPrefix = "more_symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
                 moreSymbolBottomRow(),
                 bottomRow(),
             )
@@ -1074,7 +1158,11 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private fun upperRowKeyWeight(index: Int, lastIndex: Int): Float {
-        return if (index == 0 || index == lastIndex) 1.4f else 1f
+        return if (index == 0 || index == lastIndex) {
+            ImeDimensions.EDGE_UPPER_ROW_KEY_WEIGHT
+        } else {
+            ImeDimensions.DEFAULT_KEY_WEIGHT
+        }
     }
 
     private fun upperRowKeySpec(
@@ -1151,39 +1239,80 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun letterBottomRow(): RowSpec {
         val keys = mutableListOf<KeySpec>()
-        keys += KeySpec("shift", "Shift", KeyIntent.Shift, 1.35f, KeyRole.Function, shiftState != ShiftState.Off, KeyIcon.Shift)
+        keys += KeySpec(
+            "shift",
+            "Shift",
+            KeyIntent.Shift,
+            ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+            KeyRole.Function,
+            shiftState != ShiftState.Off,
+            KeyIcon.Shift,
+        )
         keys += chars("zxcvbnm")
-        keys += KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete)
-        return RowSpec(keys, 1f)
+        keys += KeySpec(
+            "backspace",
+            "Del",
+            KeyIntent.Dispatch(KeyboardAction.Backspace),
+            ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+            KeyRole.Function,
+            icon = KeyIcon.Delete,
+        )
+        return RowSpec(keys, ImeLayout.STANDARD_ROW_WEIGHT)
     }
 
     private fun symbolBottomRow(): RowSpec {
         return RowSpec(
             listOf(
-                KeySpec("more_symbols", "#+=", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
+                KeySpec(
+                    "more_symbols",
+                    "#+=",
+                    KeyIntent.ToggleMoreSymbols,
+                    ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+                    KeyRole.Function,
+                ),
                 KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), role = KeyRole.Character),
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
                 KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
-                KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
+                KeySpec(
+                    "backspace",
+                    "Del",
+                    KeyIntent.Dispatch(KeyboardAction.Backspace),
+                    ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+                    KeyRole.Function,
+                    icon = KeyIcon.Delete,
+                ),
             ),
-            heightWeight = 1f,
+            heightWeight = ImeLayout.STANDARD_ROW_WEIGHT,
         )
     }
 
     private fun moreSymbolBottomRow(): RowSpec {
         return RowSpec(
             listOf(
-                KeySpec("more_symbols", "123", KeyIntent.ToggleMoreSymbols, 1.35f, KeyRole.Function),
+                KeySpec(
+                    "more_symbols",
+                    "123",
+                    KeyIntent.ToggleMoreSymbols,
+                    ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+                    KeyRole.Function,
+                ),
                 KeySpec("period", ".", KeyIntent.Dispatch(KeyboardAction.Text(".")), role = KeyRole.Character),
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
                 KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
-                KeySpec("backspace", "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), 1.35f, KeyRole.Function, icon = KeyIcon.Delete),
+                KeySpec(
+                    "backspace",
+                    "Del",
+                    KeyIntent.Dispatch(KeyboardAction.Backspace),
+                    ImeDimensions.SIDE_FUNCTION_KEY_WEIGHT,
+                    KeyRole.Function,
+                    icon = KeyIcon.Delete,
+                ),
             ),
-            heightWeight = 1f,
+            heightWeight = ImeLayout.STANDARD_ROW_WEIGHT,
         )
     }
 
@@ -1192,36 +1321,62 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (layoutMode != LayoutMode.Letters) {
             return RowSpec(
                 listOf(
-                    KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
+                    KeySpec(
+                        "switch",
+                        switchLabel,
+                        KeyIntent.SwitchMode,
+                        ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
+                        KeyRole.Function,
+                    ),
                     emojiKeySpec(),
                     KeySpec(
                         "space",
                         "space",
                         KeyIntent.Dispatch(KeyboardAction.Text(" ")),
-                        5.1f,
+                        ImeDimensions.SPACE_KEY_WEIGHT,
                         KeyRole.Function,
                         longPressHint = "Saved",
                     ),
-                    KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
+                    KeySpec(
+                        "enter",
+                        enterLabel,
+                        KeyIntent.Dispatch(KeyboardAction.Enter),
+                        ImeDimensions.ENTER_KEY_WEIGHT,
+                        KeyRole.Action,
+                        icon = iconForEnterLabel(enterLabel),
+                    ),
                 ),
-                heightWeight = 1.08f,
+                heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
             )
         }
         return RowSpec(
             listOf(
-                KeySpec("switch", switchLabel, KeyIntent.SwitchMode, 1.25f, KeyRole.Function),
+                KeySpec(
+                    "switch",
+                    switchLabel,
+                    KeyIntent.SwitchMode,
+                    ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
+                    KeyRole.Function,
+                ),
                 emojiKeySpec(),
                 KeySpec(
                     "space",
                     "space",
                     KeyIntent.Dispatch(KeyboardAction.Text(" ")),
-                    5.1f,
+                    ImeDimensions.SPACE_KEY_WEIGHT,
                     KeyRole.Function,
                     longPressHint = "Saved",
                 ),
-                KeySpec("enter", enterLabel, KeyIntent.Dispatch(KeyboardAction.Enter), 1.55f, KeyRole.Action, icon = iconForEnterLabel(enterLabel)),
+                KeySpec(
+                    "enter",
+                    enterLabel,
+                    KeyIntent.Dispatch(KeyboardAction.Enter),
+                    ImeDimensions.ENTER_KEY_WEIGHT,
+                    KeyRole.Action,
+                    icon = iconForEnterLabel(enterLabel),
+                ),
             ),
-            heightWeight = 1.08f,
+            heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
         )
     }
 
@@ -1231,10 +1386,9 @@ class ZnKeyboardView @JvmOverloads constructor(
             id = "emoji",
             label = suggestion ?: "Emoji",
             intent = KeyIntent.OpenEmojiPanel,
-            weight = 0.9f,
+            weight = ImeDimensions.EMOJI_KEY_WEIGHT,
             role = KeyRole.Function,
             icon = if (suggestion == null) KeyIcon.Emoji else null,
-            largeLabel = suggestion != null,
         )
     }
 
@@ -1323,14 +1477,13 @@ class ZnKeyboardView @JvmOverloads constructor(
         val id: String,
         val label: String,
         val intent: KeyIntent,
-        val weight: Float = 1f,
+        val weight: Float = ImeDimensions.DEFAULT_KEY_WEIGHT,
         val role: KeyRole = KeyRole.Character,
         val active: Boolean = false,
         val icon: KeyIcon? = null,
         val consumesOneShotShift: Boolean = false,
         val enabled: Boolean = true,
         val emphasizedWhenDisabled: Boolean = false,
-        val largeLabel: Boolean = false,
         val longPressHint: String? = null,
     )
 
@@ -1349,7 +1502,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         var currentKey: KeySpec?,
         var longPressConsumed: Boolean = false,
         var repeatConsumed: Boolean = false,
+        var cursorDragConsumed: Boolean = false,
         var backspaceGesture: BackspaceGestureTouch? = null,
+        var spaceCursorDrag: SpaceCursorDragTouch? = null,
     )
 
     private data class BackspaceGestureTouch(
@@ -1360,6 +1515,16 @@ class ZnKeyboardView @JvmOverloads constructor(
         var active: Boolean = false,
         var consumedWithoutGesture: Boolean = false,
         var lastWordCount: Int = 0,
+    )
+
+    private data class SpaceCursorDragTouch(
+        val key: KeySpec,
+        val startX: Float,
+        val startY: Float,
+        val stepPx: Float,
+        var active: Boolean = false,
+        var consumedWithoutGesture: Boolean = false,
+        var lastCharacterDelta: Int = 0,
     )
 
     private sealed class KeyIntent {
@@ -1396,6 +1561,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val LONG_PRESS_HINT_ALPHA = 170
         const val GESTURE_DELETE_ACTIVATION_DP = 10f
         const val GESTURE_DELETE_WORD_STEP_DP = 42f
+        const val SPACE_CURSOR_DRAG_ACTIVATION_DP = 8f
+        const val SPACE_CURSOR_DRAG_STEP_DP = 14f
+        const val SPACE_CURSOR_DRAG_VISIBLE_STEPS = 28f
+        const val SPACE_CURSOR_DRAG_MAX_CHARS = 120
         const val AI_LOADING_CYCLE_MS = 2200L
         const val TWO_PI = 6.2831855f
         val AI_LOADING_COLORS = intArrayOf(

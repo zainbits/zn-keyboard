@@ -16,7 +16,6 @@ import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
-import android.widget.PopupWindow
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.EmojiCatalog
@@ -47,7 +46,13 @@ class EmojiPanelView @JvmOverloads constructor(
     private var recentRowCount = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
     private var defaultSkinTone = EmojiSkinTone.Default
     private var heightScale = 1f
-    private var variantPopup: PopupWindow? = null
+    private val variantPopup = EmojiVariantPopupController(
+        context = context,
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+        pressedColor = ImeColors.KEY,
+        onEmojiSelected = ::selectEmoji,
+    )
     private var selectedSection: EmojiSectionKey = EmojiSectionKey.Recent
     private var pendingProgrammaticSection: EmojiSectionKey? = null
 
@@ -220,32 +225,20 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun buildBottomToolbar() {
-        bottomToolbar.addView(
-            flatToolbarKey("ABC", enabled = true) { closePanel() },
-            LayoutParams(dp(62), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-        )
-        bottomToolbar.addView(
-            toolbarTab("☺", active = true, enabled = true, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab("GIF", active = false, enabled = true, onClick = { callback?.onGifPanelRequested() }),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab("▣", active = false, enabled = false, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab(":-)", active = false, enabled = false, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            flatToolbarKey("⌫", enabled = true) { callback?.onEmojiBackspace() }.apply {
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                contentDescription = "Delete"
-            },
-            LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
+        ImeModeToolbar.populate(
+            toolbar = bottomToolbar,
+            colors = ImeModeToolbar.Colors(
+                function = PALETTE.function,
+                selected = PALETTE.selected,
+                text = PALETTE.text,
+                mutedText = PALETTE.mutedText,
+                disabledText = PALETTE.disabledText,
+            ),
+            activeTab = ImeModeToolbar.ActiveTab.Emoji,
+            onKeyboard = ::closePanel,
+            onEmoji = null,
+            onGif = { callback?.onGifPanelRequested() },
+            onBackspace = { callback?.onEmojiBackspace() },
         )
     }
 
@@ -404,54 +397,11 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun showVariantPopup(entry: EmojiEntry, anchor: View): Boolean {
-        val variants = EmojiCatalog.variantsFor(entry)
-        if (variants.isEmpty()) return false
-
-        dismissVariantPopup()
-        val row = LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER
-            setPadding(dp(4), dp(4), dp(4), dp(4))
-            background = keyBackground(active = false, role = KeyRole.Function)
-        }
-
-        variants.forEach { variant ->
-            row.addView(
-                emojiButton(variant.emoji).apply {
-                    isEnabled = true
-                    alpha = 1f
-                    contentDescription = variant.name
-                    setOnClickListener { selectEmoji(variant.emoji) }
-                },
-                LinearLayout.LayoutParams(dp(42), dp(42)).withMargins(horizontal = 2),
-            )
-        }
-
-        variantPopup = PopupWindow(
-            row,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            false,
-        ).apply {
-            isOutsideTouchable = true
-            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            elevation = dp(8).toFloat()
-            showAsDropDown(anchor, 0, -anchor.height - dp(54))
-        }
-        return true
+        return variantPopup.show(entry, anchor)
     }
 
     private fun dismissVariantPopup() {
-        variantPopup?.dismiss()
-        variantPopup = null
-    }
-
-    private fun emojiButton(label: String): TextView {
-        return textKey(label, KeyRole.Character, onClick = null).apply {
-            typeface = Typeface.DEFAULT
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-            background = emojiPressBackground(context)
-        }
+        variantPopup.dismiss()
     }
 
     private fun categoryShortcut(label: String, description: String, onClick: () -> Unit): TextView {
@@ -488,84 +438,12 @@ class EmojiPanelView @JvmOverloads constructor(
             setTint(color)
         }
 
-    private fun toolbarTab(
-        label: String,
-        active: Boolean,
-        enabled: Boolean,
-        onClick: (() -> Unit)?,
-    ): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isEnabled = enabled
-            isClickable = enabled && onClick != null
-            isFocusable = false
-            alpha = if (enabled) 1f else 0.38f
-            typeface = if (label == "GIF") Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            setTextColor(if (enabled) PALETTE.text else PALETTE.disabledText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label == "GIF") 14f else 22f)
-            background = if (active) pillBackground(active = true) else pillBackground(active = false)
-            onClick?.let { click -> setOnClickListener { click() } }
-        }
-    }
-
-    private fun flatToolbarKey(label: String, enabled: Boolean, onClick: () -> Unit): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = enabled
-            isEnabled = enabled
-            isFocusable = false
-            setTextColor(if (enabled) PALETTE.mutedText else PALETTE.disabledText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.mutedText)
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun textKey(label: String, role: KeyRole, onClick: (() -> Unit)?): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = onClick != null
-            isFocusable = false
-            setTextColor(if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (role == KeyRole.Character) 18f else 13f)
-            background = keyBackground(active = false, role = role)
-            onClick?.let { click -> setOnClickListener { click() } }
-        }
-    }
-
-    private fun keyBackground(active: Boolean, role: KeyRole) =
-        ImePressFeedback.roundedBackground(
-            context = context,
-            containerColor = when {
-                active -> PALETTE.selected
-                role == KeyRole.Function -> PALETTE.function
-                else -> PALETTE.key
-            },
-            contentColor = if (role == KeyRole.Character) PALETTE.text else PALETTE.mutedText,
-        )
-
-    private fun pillBackground(active: Boolean) =
-        ImePressFeedback.roundedBackground(
-            context = context,
-            containerColor = if (active) PALETTE.selected else PALETTE.function,
-            contentColor = PALETTE.text,
-        )
-
     private fun categoryShortcutBackground(active: Boolean) =
         ImePressFeedback.roundedBackground(
             context = context,
             containerColor = if (active) PALETTE.selected else Color.TRANSPARENT,
             contentColor = PALETTE.text,
         )
-
-    private fun roundedBackground(color: Int) =
-        ImePressFeedback.roundedShape(context, color)
 
     private fun LinearLayout.LayoutParams.withMargins(
         horizontal: Int = 0,
@@ -580,11 +458,6 @@ class EmojiPanelView @JvmOverloads constructor(
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
-
-    private enum class KeyRole {
-        Character,
-        Function,
-    }
 
     private sealed class EmojiSectionKey {
         data object Recent : EmojiSectionKey()

@@ -27,7 +27,6 @@ import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.constants.GifDefaults
 import dev.zain.znkeyboard.constants.ImeColors
 import java.util.Locale
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 
@@ -71,7 +70,23 @@ class GifSearchView @JvmOverloads constructor(
     }
     private val suggestionButtons = mutableListOf<TextView>()
 
-    private val queryText = TextView(context)
+    private val queryField = ImeSearchField(context).configure(
+        backgroundColor = PALETTE.function,
+        textColor = PALETTE.text,
+        placeholderColor = PALETTE.placeholderText,
+        clearIconColor = PALETTE.mutedText,
+        clearContentDescription = "Clear GIF search",
+        onClear = { setQuery("") },
+    ).apply {
+        isClickable = true
+        isFocusable = false
+        contentDescription = "Edit GIF search"
+        setOnClickListener {
+            if (mode == Mode.Browse) {
+                callback?.onGifSearchRequested()
+            }
+        }
+    }
     private val browseHeader = browseHeaderRow()
     private val searchHeader = searchRow().apply {
         visibility = GONE
@@ -394,83 +409,39 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private fun buildBottomToolbar() {
-        bottomToolbar.addView(
-            flatToolbarKey("ABC", enabled = true) { callback?.onGifKeyboardRequested() },
-            LayoutParams(dp(62), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-        )
-        bottomToolbar.addView(
-            toolbarTab("☺", active = false, enabled = true, onClick = { callback?.onGifEmojiRequested() }),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab("GIF", active = true, enabled = true, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab("▣", active = false, enabled = false, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            toolbarTab(":-)", active = false, enabled = false, onClick = null),
-            LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 3),
-        )
-        bottomToolbar.addView(
-            flatToolbarKey("⌫", enabled = true) { callback?.onGifBackspace() }.apply {
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 26f)
-                contentDescription = "Delete"
-            },
-            LayoutParams(dp(58), LayoutParams.MATCH_PARENT).withMargins(start = 4),
+        ImeModeToolbar.populate(
+            toolbar = bottomToolbar,
+            colors = ImeModeToolbar.Colors(
+                function = PALETTE.function,
+                selected = PALETTE.selected,
+                text = PALETTE.text,
+                mutedText = PALETTE.mutedText,
+                disabledText = PALETTE.disabledText,
+            ),
+            activeTab = ImeModeToolbar.ActiveTab.Gif,
+            onKeyboard = { callback?.onGifKeyboardRequested() },
+            onEmoji = { callback?.onGifEmojiRequested() },
+            onGif = null,
+            onBackspace = { callback?.onGifBackspace() },
         )
     }
 
     private fun searchRow(): LinearLayout {
-        return LinearLayout(context).apply {
-            orientation = HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(
-                ImePanelChrome.backButton(
-                    context = context,
-                    contentDescription = "Back",
-                    backgroundColor = PALETTE.function,
-                    textColor = PALETTE.mutedText,
-                    onClick = ::navigateBackFromSearchHeader,
-                ),
-                LayoutParams(dp(ImePanelChrome.BACK_BUTTON_WIDTH_DP), LayoutParams.MATCH_PARENT).withMargins(end = 4),
-            )
-
-            queryText.apply {
-                gravity = Gravity.CENTER_VERTICAL
-                includeFontPadding = false
-                setSingleLine(true)
-                ellipsize = TextUtils.TruncateAt.END
-                setTextColor(PALETTE.text)
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                setPadding(dp(14), 0, dp(14), 0)
-                background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.text)
-                isClickable = true
-                isFocusable = false
-                contentDescription = "Edit GIF search"
-                setOnClickListener {
-                    if (mode == Mode.Browse) {
-                        callback?.onGifSearchRequested()
-                    }
-                }
-            }
-            addView(
-                queryText,
-                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(horizontal = 2),
-            )
-
-            addView(
-                textButton("Search") {
-                    searchNow()
-                }.apply {
-                    contentDescription = "Search GIFs"
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                },
-                LayoutParams(dp(72), LayoutParams.MATCH_PARENT).withMargins(start = 4),
-            )
-        }
+        return ImeSearchHeader.create(
+            context = context,
+            backContentDescription = "Back",
+            backgroundColor = PALETTE.function,
+            textColor = PALETTE.mutedText,
+            queryField = queryField,
+            onBack = ::navigateBackFromSearchHeader,
+            actionView = textButton("Search") {
+                searchNow()
+            }.apply {
+                contentDescription = "Search GIFs"
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            },
+            actionWidthDp = 72,
+        )
     }
 
     private fun navigateBackFromSearchHeader() {
@@ -482,8 +453,7 @@ class GifSearchView @JvmOverloads constructor(
     }
 
     private fun updateQueryText() {
-        queryText.text = query.ifBlank { SEARCH_PLACEHOLDER }
-        queryText.setTextColor(if (query.isBlank()) PALETTE.placeholderText else PALETTE.text)
+        queryField.setSearchText(query = query, placeholder = SEARCH_PLACEHOLDER)
     }
 
     private fun scheduleRefresh(immediate: Boolean = false) {
@@ -776,47 +746,6 @@ class GifSearchView @JvmOverloads constructor(
             setTextColor(PALETTE.mutedText)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
             background = ImePressFeedback.roundedBackground(context, PALETTE.function, PALETTE.mutedText)
-            setOnClickListener { onClick() }
-        }
-    }
-
-    private fun toolbarTab(
-        label: String,
-        active: Boolean,
-        enabled: Boolean,
-        onClick: (() -> Unit)?,
-    ): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isEnabled = enabled
-            isClickable = enabled && onClick != null
-            isFocusable = false
-            alpha = if (enabled) 1f else 0.38f
-            typeface = if (label == "GIF") Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            setTextColor(if (enabled) PALETTE.text else PALETTE.disabledText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (label == "GIF") 14f else 22f)
-            background = ImePressFeedback.roundedBackground(
-                context = context,
-                containerColor = if (active) PALETTE.selected else PALETTE.function,
-                contentColor = if (enabled) PALETTE.text else PALETTE.disabledText,
-            )
-            onClick?.let { click -> setOnClickListener { click() } }
-        }
-    }
-
-    private fun flatToolbarKey(label: String, enabled: Boolean, onClick: () -> Unit): TextView {
-        return TextView(context).apply {
-            text = label
-            gravity = Gravity.CENTER
-            includeFontPadding = false
-            isClickable = enabled
-            isEnabled = enabled
-            isFocusable = false
-            setTextColor(if (enabled) PALETTE.mutedText else PALETTE.disabledText)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-            background = ImePressFeedback.roundedBackground(context, Color.TRANSPARENT, PALETTE.mutedText)
             setOnClickListener { onClick() }
         }
     }
