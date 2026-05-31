@@ -28,17 +28,32 @@ Most "AI keyboards" send your keystrokes to a vendor's cloud. ZnKeyboard takes t
 - **Structured, safe output:** the model is constrained to a JSON `{ "text": ... }` contract, with optional reasoning modes for compatible models.
 - Encrypted key storage via the Android Keystore.
 
-### ⌨️ A real keyboard
+### 🧩 Customizable extra button rows
+Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from a deep menu of keys most keyboards never give you:
+- **Cursor & navigation:** arrow keys, `Home`/`End`, `PgUp`/`PgDn`, `Del`.
+- **Modifiers & control:** `Ctrl`, `Alt`, `Tab`, `Esc` (latched only for the dispatched action).
+- **Symbols you actually type:** `|`, `/`, `\`, `-`, `=`, and more.
+- **Panel shortcuts:** jump straight to emoji, GIF, clipboard, or snippets.
+- **Reorderable rows** and adjustable keyboard height so the layout fits your thumbs and your workflow (great for coding and terminal apps on mobile).
+
+### 🏷️ Tag‑based emoji suggestions
+- Assign your **own tags** to any emoji (e.g. tag 🫡 as "ok", "done", "got it").
+- Tagged emojis surface in search *and* as a one‑tap **contextual suggestion right on the keyboard**, so the emojis you actually use are always a tap away — no scrolling.
+- Plus a full **emoji panel** with search, skin‑tone variants, and recents.
+
+### 📋 Clipboard history
+- Recent copies are kept on a dedicated panel for quick re‑pasting — no more re‑copying the same address, code, or link.
+- On‑device only.
+
+### ✂️ Text snippets
+- Save reusable phrases, templates, and boilerplate.
+- **Tag and search** snippets so the right one is instantly findable — ideal for canned replies, email sign‑offs, addresses, or code stubs.
+
+### ⌨️ A real keyboard, done right
 - Custom high‑performance typing `View` (not a WebView, not Compose on the hot path) with press feedback tuned to feel like a stock key.
 - Gboard‑style **spacebar cursor dragging** for precise caret movement.
-- Configurable layout: customizable shortcut rows, reorderable keyboard rows, and adjustable keyboard height.
 - Selection‑aware deletion and correct editor‑action handling (`Done`, `Go`, `Next`, `Search`, `Send`, etc.).
-
-### 😀 Expression & productivity
-- **Emoji panel** with search, skin‑tone variants, recents, and custom emoji tags.
 - **GIF picker** powered by [KLIPY](https://klipy.com), with on‑device caching and content filtering.
-- **Clipboard history** for quickly re‑pasting recent copies.
-- **Text snippets** — save and search reusable phrases/templates.
 - **Settings backup & restore** as portable JSON.
 
 ## Architecture
