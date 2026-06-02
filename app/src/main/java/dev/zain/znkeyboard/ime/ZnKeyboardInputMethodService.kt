@@ -4,6 +4,7 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
@@ -72,7 +73,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var spaceCursorDragState: SpaceCursorDragState? = null
     private var lastCapturedClipboardSnapshot: ClipboardSnapshot? = null
     private val clipboardChangeListener = ClipboardManager.OnPrimaryClipChangedListener {
-        capturePrimaryClipboardText()
+        capturePrimaryClipboardText(inferSourceApp = true)
     }
     private var clipboardListenerRegistered = false
     private val clipboardManager: ClipboardManager by lazy(LazyThreadSafetyMode.NONE) {
@@ -1290,18 +1291,23 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         clipboardListenerRegistered = false
     }
 
-    private fun capturePrimaryClipboardText() {
-        val snapshot = readPrimaryPlainClipboardText() ?: return
-        if (snapshot == lastCapturedClipboardSnapshot) return
+    private fun capturePrimaryClipboardText(inferSourceApp: Boolean = false) {
+        val snapshot = readPrimaryPlainClipboardText(inferSourceApp = inferSourceApp) ?: return
+        if (snapshot.matchesClip(lastCapturedClipboardSnapshot)) return
         lastCapturedClipboardSnapshot = snapshot
 
-        ClipboardHistoryStore.recordText(this, snapshot.text)
+        ClipboardHistoryStore.recordText(
+            context = this,
+            text = snapshot.text,
+            sourcePackageName = snapshot.sourcePackageName,
+            sourceAppLabel = snapshot.sourceAppLabel,
+        )
         if (activeSurface == KeyboardSurface.Snippets || activeSurface == KeyboardSurface.SavedTextSearch) {
             refreshClipboardHistoryViews()
         }
     }
 
-    private fun readPrimaryPlainClipboardText(): ClipboardSnapshot? {
+    private fun readPrimaryPlainClipboardText(inferSourceApp: Boolean): ClipboardSnapshot? {
         return runCatching {
             val description = clipboardManager.primaryClipDescription ?: return@runCatching null
             if (description.extras?.getBoolean(ClipDescription.EXTRA_IS_SENSITIVE, false) == true) {
@@ -1318,11 +1324,33 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 ?.toString()
                 ?.takeIf { it.isNotBlank() && it.length <= ClipboardHistoryStore.MAX_ENTRY_CHARS }
                 ?: return@runCatching null
+            val sourceApp = if (inferSourceApp) resolveClipboardSourceApp() else null
             ClipboardSnapshot(
                 text = text,
                 timestampMillis = description.timestamp,
+                sourcePackageName = sourceApp?.packageName,
+                sourceAppLabel = sourceApp?.label,
             )
         }.getOrNull()
+    }
+
+    private fun resolveClipboardSourceApp(): ClipboardSourceApp? {
+        val sourcePackageName = currentEditorInfo
+            ?.packageName
+            ?.takeIf { it.isNotBlank() && it != packageName }
+            ?: return null
+        val appInfo = runCatching {
+            packageManager.getApplicationInfo(
+                sourcePackageName,
+                PackageManager.ApplicationInfoFlags.of(0),
+            )
+        }.getOrNull()
+        val label = appInfo
+            ?.loadLabel(packageManager)
+            ?.toString()
+            ?.takeIf { it.isNotBlank() }
+            ?: sourcePackageName
+        return ClipboardSourceApp(packageName = sourcePackageName, label = label)
     }
 
     private fun sendKey(keyCode: Int, modifiers: ModifierState) {
@@ -2105,6 +2133,19 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private data class ClipboardSnapshot(
         val text: String,
         val timestampMillis: Long,
+        val sourcePackageName: String?,
+        val sourceAppLabel: String?,
+    ) {
+        fun matchesClip(other: ClipboardSnapshot?): Boolean {
+            return other != null &&
+                text == other.text &&
+                timestampMillis == other.timestampMillis
+        }
+    }
+
+    private data class ClipboardSourceApp(
+        val packageName: String,
+        val label: String,
     )
 
     private data class SelectionWrapPair(

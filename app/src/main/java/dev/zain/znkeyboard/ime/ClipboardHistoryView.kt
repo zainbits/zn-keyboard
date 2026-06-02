@@ -1,10 +1,12 @@
 package dev.zain.znkeyboard.ime
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.Drawable
 import android.text.TextUtils
 import android.util.AttributeSet
 import android.util.TypedValue
@@ -15,6 +17,8 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.BaseAdapter
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
@@ -35,6 +39,26 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
 
     var callback: Callback? = null
 
+    private var allEntries: List<ClipboardHistoryStore.Entry> = emptyList()
+    private var selectedSourcePackageName: String? = null
+
+    private val sourcePillRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
+    private val sourceFilterScroller = HorizontalScrollView(context).apply {
+        visibility = GONE
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_NEVER
+        setPadding(0, 0, 0, dp(6))
+        addView(
+            sourcePillRow,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+    }
     private val historyAdapter = HistoryAdapter(
         context = context,
         onSelected = { text -> callback?.onClipboardHistoryItemSelected(text) },
@@ -42,6 +66,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
     )
 
     init {
+        addHeaderView(sourceFilterScroller, null, false)
         adapter = historyAdapter
         divider = ColorDrawable(Color.TRANSPARENT)
         dividerHeight = dp(6)
@@ -54,16 +79,102 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
     }
 
     fun submitHistory(entries: List<ClipboardHistoryStore.Entry>) {
-        historyAdapter.submitList(entries.take(ClipboardHistoryStore.MAX_HISTORY))
+        allEntries = entries.take(ClipboardHistoryStore.MAX_HISTORY)
+        updateSourceFilters()
+        submitFilteredHistory()
+    }
+
+    private fun updateSourceFilters() {
+        val options = allEntries
+            .mapNotNull { entry ->
+                val packageName = entry.sourcePackageName?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                SourceFilterOption(
+                    packageName = packageName,
+                    label = entry.sourceAppLabel?.takeIf { it.isNotBlank() } ?: packageName,
+                )
+            }
+            .distinctBy { it.packageName }
+
+        if (selectedSourcePackageName != null && options.none { it.packageName == selectedSourcePackageName }) {
+            selectedSourcePackageName = null
+        }
+
+        sourcePillRow.removeAllViews()
+        sourceFilterScroller.visibility = if (options.isEmpty()) GONE else VISIBLE
+        options.forEachIndexed { index, option ->
+            val selected = option.packageName == selectedSourcePackageName
+            sourcePillRow.addView(
+                sourcePill(option = option, selected = selected),
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(32))
+                    .apply { if (index < options.lastIndex) marginEnd = dp(6) },
+            )
+        }
+    }
+
+    private fun submitFilteredHistory() {
+        val selectedPackageName = selectedSourcePackageName
+        val visibleEntries = if (selectedPackageName == null) {
+            allEntries
+        } else {
+            allEntries.filter { it.sourcePackageName == selectedPackageName }
+        }
+        historyAdapter.submitList(visibleEntries)
+    }
+
+    private fun sourcePill(option: SourceFilterOption, selected: Boolean): TextView {
+        return TextView(context).apply {
+            text = option.label
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+            setMaxWidth(dp(148))
+            setPadding(dp(12), 0, dp(12), 0)
+            setTextColor(if (selected) PALETTE.text else PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            background = sourcePillBackground(selected)
+            isClickable = true
+            isFocusable = false
+            contentDescription = if (selected) {
+                "Clear ${option.label} clipboard filter"
+            } else {
+                "Filter clipboard by ${option.label}"
+            }
+            setOnClickListener {
+                selectedSourcePackageName = if (selectedSourcePackageName == option.packageName) {
+                    null
+                } else {
+                    option.packageName
+                }
+                updateSourceFilters()
+                submitFilteredHistory()
+            }
+        }
+    }
+
+    private fun sourcePillBackground(selected: Boolean): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(16).toFloat()
+            setColor(if (selected) PALETTE.selected else PALETTE.function)
+            setStroke(dp(1), if (selected) PALETTE.mutedText else PALETTE.cardStroke)
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).roundToInt()
+
+    private data class SourceFilterOption(
+        val packageName: String,
+        val label: String,
+    )
 
     private class HistoryAdapter(
         private val context: Context,
         private val onSelected: (String) -> Unit,
         private val onDeleted: (String) -> Unit,
     ) : BaseAdapter() {
+        private val packageManager = context.packageManager
+        private val appIconCache = mutableMapOf<String, Drawable?>()
         private val timestampFormat = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         private var entries: List<ClipboardHistoryStore.Entry> = emptyList()
 
@@ -94,10 +205,24 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             row.bind(
                 entry = entry,
                 timestamp = timestamp,
+                sourceIconDrawable = appIconFor(entry.sourcePackageName),
                 onSelected = onSelected,
                 onDeleted = onDeleted,
             )
             return row
+        }
+
+        private fun appIconFor(packageName: String?): Drawable? {
+            if (packageName.isNullOrBlank()) return null
+            if (!appIconCache.containsKey(packageName)) {
+                appIconCache[packageName] = runCatching {
+                    packageManager
+                        .getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0))
+                        .loadIcon(packageManager)
+                }.getOrNull()
+            }
+            val cachedIcon = appIconCache[packageName] ?: return null
+            return cachedIcon.constantState?.newDrawable(context.resources)?.mutate() ?: cachedIcon.mutate()
         }
     }
 
@@ -128,6 +253,10 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             maxLines = 6
             ellipsize = TextUtils.TruncateAt.END
         }
+        private val sourceIcon = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            visibility = GONE
+        }
         private val deleteAction = TextView(context).apply {
             text = "Delete"
             gravity = Gravity.CENTER
@@ -145,17 +274,29 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 }
             }
         }
-        private val content = LinearLayout(context).apply {
+        private val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(10), dp(9), dp(10), dp(9))
-            background = itemBackground()
-            isClickable = true
-            isFocusable = false
             addView(timestamp, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(
                 body,
                 LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     .apply { topMargin = dp(5) },
+            )
+        }
+        private val content = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            background = itemBackground()
+            isClickable = true
+            isFocusable = false
+            addView(
+                sourceIcon,
+                LinearLayout.LayoutParams(dp(32), dp(32)).apply { marginEnd = dp(10) },
+            )
+            addView(
+                textColumn,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
             )
         }
 
@@ -176,6 +317,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         fun bind(
             entry: ClipboardHistoryStore.Entry,
             timestamp: String,
+            sourceIconDrawable: Drawable?,
             onSelected: (String) -> Unit,
             onDeleted: (String) -> Unit,
         ) {
@@ -184,6 +326,15 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             this.onDeleted = onDeleted
             this.timestamp.text = timestamp
             body.text = entry.text
+            if (sourceIconDrawable == null) {
+                sourceIcon.setImageDrawable(null)
+                sourceIcon.visibility = GONE
+                sourceIcon.contentDescription = null
+            } else {
+                sourceIcon.setImageDrawable(sourceIconDrawable)
+                sourceIcon.visibility = VISIBLE
+                sourceIcon.contentDescription = entry.sourceAppLabel?.let { "Copied from $it" }
+            }
             close(animated = false)
         }
 
@@ -286,6 +437,8 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
     private object PALETTE {
         val background = ImeColors.BACKGROUND
         val key = ImeColors.KEY
+        val function = ImeColors.FUNCTION_DARK
+        val selected = ImeColors.SELECTED
         val cardStroke = ImeColors.DIVIDER
         const val text = ImeColors.TEXT
         val mutedText = ImeColors.SECONDARY_TEXT

@@ -28,6 +28,8 @@ object ClipboardHistoryStore {
     private const val JSON_ENTRIES = "entries"
     private const val JSON_TEXT = "text"
     private const val JSON_TIMESTAMP_MILLIS = "timestampMillis"
+    private const val JSON_SOURCE_PACKAGE_NAME = "sourcePackageName"
+    private const val JSON_SOURCE_APP_LABEL = "sourceAppLabel"
     private const val JSON_CIPHERTEXT = "ciphertext"
     private const val JSON_IV = "iv"
 
@@ -43,12 +45,24 @@ object ClipboardHistoryStore {
         }
     }
 
-    fun recordText(context: Context, text: String) {
+    fun recordText(
+        context: Context,
+        text: String,
+        sourcePackageName: String? = null,
+        sourceAppLabel: String? = null,
+    ) {
         if (text.isBlank() || text.length > MAX_ENTRY_CHARS) return
 
         val now = System.currentTimeMillis()
         val entries = buildList {
-            add(Entry(text = text, timestampMillis = now))
+            add(
+                Entry(
+                    text = text,
+                    timestampMillis = now,
+                    sourcePackageName = sourcePackageName?.takeIf { it.isNotBlank() },
+                    sourceAppLabel = sourceAppLabel?.takeIf { it.isNotBlank() },
+                ),
+            )
             addAll(read(context).filterNot { it.text == text })
         }.take(MAX_HISTORY)
 
@@ -98,11 +112,12 @@ object ClipboardHistoryStore {
                 JSON_ENTRIES,
                 JSONArray().apply {
                     entries.take(MAX_HISTORY).forEach { entry ->
-                        put(
-                            JSONObject()
-                                .put(JSON_TEXT, entry.text)
-                                .put(JSON_TIMESTAMP_MILLIS, entry.timestampMillis),
-                        )
+                        val item = JSONObject()
+                            .put(JSON_TEXT, entry.text)
+                            .put(JSON_TIMESTAMP_MILLIS, entry.timestampMillis)
+                        entry.sourcePackageName?.let { item.put(JSON_SOURCE_PACKAGE_NAME, it) }
+                        entry.sourceAppLabel?.let { item.put(JSON_SOURCE_APP_LABEL, it) }
+                        put(item)
                     }
                 },
             )
@@ -141,6 +156,8 @@ object ClipboardHistoryStore {
                         Entry(
                             text = text,
                             timestampMillis = item.optLong(JSON_TIMESTAMP_MILLIS, 0L),
+                            sourcePackageName = item.optString(JSON_SOURCE_PACKAGE_NAME).takeIf { it.isNotBlank() },
+                            sourceAppLabel = item.optString(JSON_SOURCE_APP_LABEL).takeIf { it.isNotBlank() },
                         ),
                     )
                 }
@@ -191,5 +208,7 @@ object ClipboardHistoryStore {
     data class Entry(
         val text: String,
         val timestampMillis: Long,
+        val sourcePackageName: String? = null,
+        val sourceAppLabel: String? = null,
     )
 }
