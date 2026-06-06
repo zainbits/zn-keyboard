@@ -22,6 +22,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.TextView
+import com.bumptech.glide.Glide
 import dev.zain.znkeyboard.constants.ImeColors
 import java.text.DateFormat
 import java.util.Date
@@ -197,6 +198,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             }
 
             val entry = entries[position]
+            val previewUrl = ClipboardLinkPreviewRepository.extractFirstPreviewUrl(entry.text)
             val timestamp = if (entry.timestampMillis > 0L) {
                 timestampFormat.format(Date(entry.timestampMillis))
             } else {
@@ -206,10 +208,20 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 entry = entry,
                 timestamp = timestamp,
                 sourceIconDrawable = appIconFor(entry.sourcePackageName),
+                previewUrl = previewUrl,
+                previewState = previewUrl?.let(ClipboardLinkPreviewRepository::stateFor)
+                    ?: ClipboardLinkPreviewState.Idle,
                 onSelected = onSelected,
                 onDeleted = onDeleted,
+                onPreviewRequested = ::requestPreview,
             )
             return row
+        }
+
+        private fun requestPreview(url: String) {
+            ClipboardLinkPreviewRepository.request(url) {
+                notifyDataSetChanged()
+            }
         }
 
         private fun appIconFor(packageName: String?): Drawable? {
@@ -236,8 +248,10 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         private var dragging = false
 
         private var boundEntry: ClipboardHistoryStore.Entry? = null
+        private var boundPreviewUrl: String? = null
         private var onSelected: ((String) -> Unit)? = null
         private var onDeleted: ((String) -> Unit)? = null
+        private var onPreviewRequested: ((String) -> Unit)? = null
 
         private val timestamp = TextView(context).apply {
             setTextColor(PALETTE.mutedText)
@@ -252,6 +266,95 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             setLineSpacing(dp(2).toFloat(), 1f)
             maxLines = 6
             ellipsize = TextUtils.TruncateAt.END
+        }
+        private val previewButton = TextView(context).apply {
+            text = "Preview"
+            gravity = Gravity.CENTER
+            includeFontPadding = false
+            setSingleLine(true)
+            setTextColor(PALETTE.previewButtonText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(10), 0, dp(10), 0)
+            minHeight = dp(26)
+            background = previewButtonBackground()
+            isClickable = true
+            isFocusable = false
+            contentDescription = "Preview clipboard link"
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+                false
+            }
+            setOnClickListener {
+                boundPreviewUrl?.let { url -> onPreviewRequested?.invoke(url) }
+            }
+        }
+        private val previewStatus = TextView(context).apply {
+            setTextColor(PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            includeFontPadding = false
+            visibility = GONE
+        }
+        private val previewImage = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = GONE
+            background = previewImageBackground()
+        }
+        private val previewTitle = TextView(context).apply {
+            setTextColor(PALETTE.text)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.DEFAULT_BOLD
+            includeFontPadding = false
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        private val previewDescription = TextView(context).apply {
+            setTextColor(PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setLineSpacing(dp(1).toFloat(), 1f)
+            includeFontPadding = false
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        private val previewHost = TextView(context).apply {
+            setTextColor(PALETTE.mutedText)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 11f)
+            includeFontPadding = false
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        private val previewTextColumn = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(previewTitle, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(
+                previewDescription,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = dp(4) },
+            )
+            addView(
+                previewHost,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = dp(5) },
+            )
+        }
+        private val previewCard = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = previewCardBackground()
+            visibility = GONE
+            isClickable = true
+            isFocusable = false
+            addView(
+                previewImage,
+                LinearLayout.LayoutParams(dp(64), dp(64)).apply { marginEnd = dp(9) },
+            )
+            addView(
+                previewTextColumn,
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f),
+            )
         }
         private val sourceIcon = ImageView(context).apply {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -274,13 +377,32 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 }
             }
         }
+        private val headerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(timestamp, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(
+                previewButton,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(26)).apply { marginStart = dp(8) },
+            )
+        }
         private val textColumn = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            addView(timestamp, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(headerRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             addView(
                 body,
                 LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     .apply { topMargin = dp(5) },
+            )
+            addView(
+                previewStatus,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = dp(7) },
+            )
+            addView(
+                previewCard,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    .apply { topMargin = dp(8) },
             )
         }
         private val content = LinearLayout(context).apply {
@@ -318,14 +440,20 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             entry: ClipboardHistoryStore.Entry,
             timestamp: String,
             sourceIconDrawable: Drawable?,
+            previewUrl: String?,
+            previewState: ClipboardLinkPreviewState,
             onSelected: (String) -> Unit,
             onDeleted: (String) -> Unit,
+            onPreviewRequested: (String) -> Unit,
         ) {
             boundEntry = entry
+            boundPreviewUrl = previewUrl
             this.onSelected = onSelected
             this.onDeleted = onDeleted
+            this.onPreviewRequested = onPreviewRequested
             this.timestamp.text = timestamp
             body.text = entry.text
+            renderPreview(previewUrl, previewState)
             if (sourceIconDrawable == null) {
                 sourceIcon.setImageDrawable(null)
                 sourceIcon.visibility = GONE
@@ -336,6 +464,67 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 sourceIcon.contentDescription = entry.sourceAppLabel?.let { "Copied from $it" }
             }
             close(animated = false)
+        }
+
+        private fun renderPreview(previewUrl: String?, previewState: ClipboardLinkPreviewState) {
+            if (previewUrl == null) {
+                previewButton.visibility = GONE
+                previewStatus.visibility = GONE
+                previewCard.visibility = GONE
+                Glide.with(previewImage).clear(previewImage)
+                previewImage.setImageDrawable(null)
+                return
+            }
+
+            when (previewState) {
+                ClipboardLinkPreviewState.Idle -> {
+                    previewButton.visibility = VISIBLE
+                    previewStatus.visibility = GONE
+                    previewCard.visibility = GONE
+                    Glide.with(previewImage).clear(previewImage)
+                    previewImage.setImageDrawable(null)
+                }
+                ClipboardLinkPreviewState.Loading -> {
+                    previewButton.visibility = GONE
+                    previewStatus.text = "Fetching preview..."
+                    previewStatus.visibility = VISIBLE
+                    previewCard.visibility = GONE
+                    Glide.with(previewImage).clear(previewImage)
+                    previewImage.setImageDrawable(null)
+                }
+                is ClipboardLinkPreviewState.Ready -> {
+                    previewButton.visibility = GONE
+                    previewStatus.visibility = GONE
+                    bindPreviewCard(previewState.preview)
+                }
+            }
+        }
+
+        private fun bindPreviewCard(preview: ClipboardLinkPreview) {
+            previewTitle.text = preview.title
+            val description = preview.description?.takeIf { it.isNotBlank() }
+            previewDescription.text = description.orEmpty()
+            previewDescription.visibility = if (description == null) GONE else VISIBLE
+            previewHost.text = preview.siteName
+                ?.takeIf { it.isNotBlank() && it != preview.host }
+                ?.let { siteName -> "$siteName - ${preview.host}" }
+                ?: preview.host
+
+            val imageUrl = preview.imageUrl?.takeIf { it.isNotBlank() }
+            if (imageUrl == null) {
+                Glide.with(previewImage).clear(previewImage)
+                previewImage.setImageDrawable(null)
+                previewImage.visibility = GONE
+            } else {
+                previewImage.visibility = VISIBLE
+                Glide.with(previewImage)
+                    .load(imageUrl)
+                    .centerCrop()
+                    .placeholder(previewImageBackground())
+                    .error(previewImageBackground())
+                    .into(previewImage)
+            }
+            previewCard.visibility = VISIBLE
         }
 
         private fun onContentTouch(view: View, event: MotionEvent): Boolean {
@@ -423,6 +612,34 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             }
         }
 
+        private fun previewButtonBackground(): Drawable {
+            return ImePressFeedback.roundedBackground(
+                context = context,
+                containerColor = PALETTE.function,
+                contentColor = PALETTE.previewButtonText,
+                radiusDp = 13,
+                strokeWidthDp = 1,
+                strokeColor = PALETTE.cardStroke,
+            )
+        }
+
+        private fun previewCardBackground(): GradientDrawable {
+            return GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(10).toFloat()
+                setColor(PALETTE.previewCard)
+                setStroke(dp(1), PALETTE.cardStroke)
+            }
+        }
+
+        private fun previewImageBackground(): GradientDrawable {
+            return GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(PALETTE.function)
+            }
+        }
+
         private fun deleteBackground(): GradientDrawable {
             return GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
@@ -442,6 +659,8 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         val cardStroke = ImeColors.DIVIDER
         const val text = ImeColors.TEXT
         val mutedText = ImeColors.SECONDARY_TEXT
+        val previewButtonText = Color.rgb(198, 207, 220)
+        val previewCard = Color.rgb(34, 38, 45)
         val deleteBackground = Color.rgb(58, 36, 36)
         val deleteContent = Color.rgb(224, 168, 168)
     }
