@@ -209,7 +209,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 timestamp = timestamp,
                 sourceIconDrawable = appIconFor(entry.sourcePackageName),
                 previewUrl = previewUrl,
-                previewState = previewUrl?.let(ClipboardLinkPreviewRepository::stateFor)
+                previewState = previewUrl?.let { ClipboardLinkPreviewRepository.stateFor(context, it) }
                     ?: ClipboardLinkPreviewState.Idle,
                 onSelected = onSelected,
                 onDeleted = onDeleted,
@@ -219,7 +219,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         }
 
         private fun requestPreview(url: String) {
-            ClipboardLinkPreviewRepository.request(url) {
+            ClipboardLinkPreviewRepository.request(context, url) {
                 notifyDataSetChanged()
             }
         }

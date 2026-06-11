@@ -83,6 +83,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onCreate() {
         super.onCreate()
         ClipboardHistoryStore.deleteLegacyRewriteHistory(this)
+        ClipboardLinkPreviewRepository.loadPersistedPreviews(this)
         registerClipboardListener()
         capturePrimaryClipboardText()
     }
