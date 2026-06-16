@@ -127,6 +127,9 @@ private fun SettingsScreen() {
     val focusManager = LocalFocusManager.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
     var bottomPaddingDp by remember { mutableStateOf(KeyboardSettings.readBottomPaddingDp(context)) }
+    var functionKeyBackgroundsEnabled by remember {
+        mutableStateOf(KeyboardSettings.readFunctionKeyBackgroundsEnabled(context))
+    }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
     var secondRowButtonIds by remember { mutableStateOf(KeyboardSettings.readSecondRowButtonIds(context)) }
     var keyboardRowOrder by remember { mutableStateOf(KeyboardSettings.readKeyboardRowOrder(context)) }
@@ -152,6 +155,7 @@ private fun SettingsScreen() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
         heightScale = KeyboardSettings.readHeightScale(context)
         bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(context)
+        functionKeyBackgroundsEnabled = KeyboardSettings.readFunctionKeyBackgroundsEnabled(context)
         upperRowKeyIds = KeyboardSettings.readUpperRowKeyIds(context)
         secondRowButtonIds = KeyboardSettings.readSecondRowButtonIds(context)
         keyboardRowOrder = KeyboardSettings.readKeyboardRowOrder(context)
@@ -409,6 +413,14 @@ private fun SettingsScreen() {
                         KeyboardSettings.saveBottomPaddingDp(context, it)
                     },
                 )
+
+                FunctionKeyBackgroundsSwitch(
+                    enabled = functionKeyBackgroundsEnabled,
+                    onEnabledChange = {
+                        functionKeyBackgroundsEnabled = it
+                        KeyboardSettings.saveFunctionKeyBackgroundsEnabled(context, it)
+                    },
+                )
             }
 
             EmojiPreferencesSection(
@@ -452,6 +464,35 @@ private fun SettingsScreen() {
                 onRowOrderChange = ::updateKeyboardRowOrder,
             )
         }
+    }
+}
+
+@Composable
+private fun FunctionKeyBackgroundsSwitch(
+    enabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Function key backgrounds",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "Show filled backgrounds behind utility keys.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+        )
     }
 }
 

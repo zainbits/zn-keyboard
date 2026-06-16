@@ -46,6 +46,7 @@ object KeyboardSettings {
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_BOTTOM_PADDING_DP = "bottom_padding_dp"
+    private const val KEY_FUNCTION_KEY_BACKGROUNDS_ENABLED = "function_key_backgrounds_enabled"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
     private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
@@ -159,6 +160,18 @@ object KeyboardSettings {
 
     fun normalizeBottomPaddingDp(paddingDp: Int): Int {
         return paddingDp.coerceIn(MIN_BOTTOM_PADDING_DP, MAX_BOTTOM_PADDING_DP)
+    }
+
+    fun readFunctionKeyBackgroundsEnabled(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_FUNCTION_KEY_BACKGROUNDS_ENABLED, true)
+    }
+
+    fun saveFunctionKeyBackgroundsEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_FUNCTION_KEY_BACKGROUNDS_ENABLED, enabled)
+            .apply()
     }
 
     fun readUpperRowKeyIds(context: Context): List<String> {
@@ -740,6 +753,7 @@ object KeyboardSettings {
                         JSONObject()
                             .put("heightScale", readHeightScale(context))
                             .put("bottomPaddingDp", readBottomPaddingDp(context))
+                            .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
                             .put("shortcutRowOrder", stringArrayJson(readKeyboardRowOrder(context))),
@@ -797,6 +811,10 @@ object KeyboardSettings {
         val bottomPaddingDp = normalizeBottomPaddingDp(
             keyboard.optInt("bottomPaddingDp", readBottomPaddingDp(context)),
         )
+        val functionKeyBackgroundsEnabled = keyboard.optBoolean(
+            "functionKeyBackgroundsEnabled",
+            readFunctionKeyBackgroundsEnabled(context),
+        )
         val upperRowKeys = keyboard.optStringList("shortcutRowAKeys")
             ?.let(::normalizeUpperRowKeyIds)
             ?: readUpperRowKeyIds(context)
@@ -840,6 +858,7 @@ object KeyboardSettings {
 
         saveHeightScale(context, heightScale)
         saveBottomPaddingDp(context, bottomPaddingDp)
+        saveFunctionKeyBackgroundsEnabled(context, functionKeyBackgroundsEnabled)
         saveUpperRowKeyIds(context, upperRowKeys)
         saveSecondRowButtonIds(context, secondRowButtons)
         saveKeyboardRowOrder(context, rowOrder)

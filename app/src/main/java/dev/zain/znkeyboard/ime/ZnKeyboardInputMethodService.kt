@@ -100,6 +100,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             keyboardView = view
             view.callback = this
             view.setEmojiKeySuggestion(emojiKeySuggestion)
+            view.setPhonePadMode(shouldUsePhonePadMode(currentEditorInfo))
         }
         val emojiSearch = EmojiSearchView(this).also { view ->
             emojiSearchView = view
@@ -164,6 +165,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         currentEditorInfo = attribute
+        keyboardView?.setPhonePadMode(shouldUsePhonePadMode(attribute))
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         scheduleEmojiSuggestionRefresh(delayMillis = 0L)
@@ -172,6 +174,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         currentEditorInfo = info
+        keyboardView?.setPhonePadMode(shouldUsePhonePadMode(info))
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         keyboardView?.setEnterLabel(resolveEnterLabel(info))
@@ -182,6 +185,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboardView?.clearLatchedModifiers()
+        keyboardView?.resetToLetters()
         cancelEmojiSuggestionRefresh()
         setEmojiKeySuggestion(null)
         resetAgentState(returnToKeyboard = true)
@@ -419,6 +423,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         keyboardView?.let { view ->
             view.setHeightScale(heightScale)
             view.setBottomPaddingDp(bottomPaddingDp)
+            view.setFunctionKeyBackgroundsEnabled(KeyboardSettings.readFunctionKeyBackgroundsEnabled(this))
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
             view.setSecondRowButtonIds(KeyboardSettings.readSecondRowButtonIds(this))
             view.setKeyboardRowOrder(KeyboardSettings.readKeyboardRowOrder(this))
@@ -2015,6 +2020,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun isRawKeyEventEditor(info: EditorInfo?): Boolean {
         val inputType = info?.inputType ?: return false
         return (inputType and InputType.TYPE_MASK_CLASS) == InputType.TYPE_NULL
+    }
+
+    private fun shouldUsePhonePadMode(info: EditorInfo?): Boolean {
+        val inputType = info?.inputType ?: return false
+        return when (inputType and InputType.TYPE_MASK_CLASS) {
+            InputType.TYPE_CLASS_NUMBER,
+            InputType.TYPE_CLASS_PHONE -> true
+            else -> false
+        }
     }
 
     private fun isSensitiveEditor(info: EditorInfo?): Boolean {

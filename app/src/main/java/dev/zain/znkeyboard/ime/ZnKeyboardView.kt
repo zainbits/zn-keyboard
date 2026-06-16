@@ -89,12 +89,14 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var loadingGradientShader: LinearGradient? = null
 
     private var layoutMode = LayoutMode.Letters
+    private var lastNumericLayoutMode = LayoutMode.Symbols
     private var shiftState = ShiftState.Off
     private var ctrl = false
     private var alt = false
     private var enterLabel = "Enter"
     private var heightScale = 1f
     private var bottomPaddingDp = KeyboardSettings.DEFAULT_BOTTOM_PADDING_DP
+    private var functionKeyBackgroundsEnabled = true
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
@@ -140,6 +142,13 @@ class ZnKeyboardView @JvmOverloads constructor(
             bottomPaddingDp = normalizedPaddingDp
             requestLayout()
             refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun setFunctionKeyBackgroundsEnabled(enabled: Boolean) {
+        if (functionKeyBackgroundsEnabled != enabled) {
+            functionKeyBackgroundsEnabled = enabled
             invalidate()
         }
     }
@@ -202,6 +211,27 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (ctrl || alt) {
             ctrl = false
             alt = false
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun setPhonePadMode(enabled: Boolean) {
+        val targetMode = if (enabled) LayoutMode.PhonePad else LayoutMode.Letters
+        if (enabled) {
+            lastNumericLayoutMode = LayoutMode.PhonePad
+        }
+        if (layoutMode != targetMode) {
+            layoutMode = targetMode
+            shiftState = ShiftState.Off
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
+    fun resetToLetters() {
+        if (layoutMode != LayoutMode.Letters) {
+            layoutMode = LayoutMode.Letters
             refreshHitTargets()
             invalidate()
         }
@@ -318,6 +348,9 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
             "apostrophe" -> scheduleLongPress(pointerId, "apostrophe") {
                 handleKey(KeySpec("backtick_long_press", "`", KeyIntent.Dispatch(KeyboardAction.Text("`"))))
+            }
+            "phone_star" -> scheduleLongPress(pointerId, "phone_star") {
+                handleKey(KeySpec("phone_slash_long_press", "/", KeyIntent.Dispatch(KeyboardAction.Text("/"))))
             }
             "space" -> scheduleLongPress(pointerId, "space") {
                 callback?.onSnippetPanelRequested()
@@ -643,6 +676,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         val selected = key.active && !rewriteLoading
         val keyAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_KEY_ALPHA
         val radius = dp(ImeLayout.KEY_RADIUS_DP.toFloat())
+        val drawBackground = key.role != KeyRole.Function ||
+            functionKeyBackgroundsEnabled ||
+            pressed ||
+            selected ||
+            rewriteLoading
         val containerColor = when {
             rewriteLoading -> PALETTE.aiLoadingSurface
             selected -> PALETTE.selected
@@ -664,7 +702,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
         keyPaint.alpha = keyAlpha
 
-        canvas.drawRoundRect(bounds, radius, radius, keyPaint)
+        if (drawBackground) {
+            canvas.drawRoundRect(bounds, radius, radius, keyPaint)
+        }
 
         if (rewriteLoading) {
             drawRewriteLoadingWash(canvas, bounds, radius)
@@ -677,19 +717,94 @@ class ZnKeyboardView @JvmOverloads constructor(
         } else key.icon?.let {
             drawIcon(canvas, it, bounds, contentColor, contentAlpha)
         } ?: run {
-            val textSize = fitTextSize(key.label, bounds, key.role)
-            textPaint.textSize = textSize
-            textPaint.color = contentColor
-            textPaint.alpha = contentAlpha
-            val metrics = textPaint.fontMetrics
-            val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
-            canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
+            if (key.subLabel != null) {
+                when (key.subLabelStyle) {
+                    SubLabelStyle.Small -> drawStackedLabel(canvas, key.label, key.subLabel, bounds, contentColor, contentAlpha)
+                    SubLabelStyle.Equal -> drawEqualStackedLabel(canvas, key.label, key.subLabel, bounds, contentColor, contentAlpha)
+                }
+            } else {
+                val textSize = fitTextSize(key.label, bounds, key.role)
+                textPaint.textSize = textSize
+                textPaint.color = contentColor
+                textPaint.alpha = contentAlpha
+                val metrics = textPaint.fontMetrics
+                val baseline = bounds.centerY() - (metrics.ascent + metrics.descent) / 2f
+                canvas.drawText(key.label, bounds.centerX(), baseline, textPaint)
+            }
         }
         drawLongPressHint(canvas, key.longPressHint, bounds, contentColor, contentAlpha)
 
         if (key.id == "shift" && shiftState == ShiftState.Locked) {
             drawShiftLockIndicator(canvas, bounds, contentColor)
         }
+    }
+
+    private fun drawStackedLabel(
+        canvas: Canvas,
+        label: String,
+        subLabel: String,
+        bounds: RectF,
+        color: Int,
+        alpha: Int,
+    ) {
+        val maxWidth = bounds.width() - dp(ImeDimensions.KEY_LABEL_HORIZONTAL_INSET_DP)
+        val primarySize = shrinkTextSizeToFit(
+            label = label,
+            initialSize = sp(ImeDimensions.KEY_LABEL_CHARACTER_TEXT_SIZE_SP)
+                .coerceAtMost(bounds.height() * PHONE_PAD_PRIMARY_MAX_HEIGHT_FRACTION),
+            maxWidth = maxWidth,
+        )
+        textPaint.textSize = primarySize
+        val primaryMetrics = textPaint.fontMetrics
+        val primaryHeight = primaryMetrics.descent - primaryMetrics.ascent
+
+        val secondarySize = shrinkTextSizeToFit(
+            label = subLabel,
+            initialSize = sp(PHONE_PAD_SUB_LABEL_TEXT_SIZE_SP)
+                .coerceAtMost(bounds.height() * PHONE_PAD_SUB_LABEL_MAX_HEIGHT_FRACTION),
+            maxWidth = maxWidth,
+        )
+        textPaint.textSize = secondarySize
+        val secondaryMetrics = textPaint.fontMetrics
+        val secondaryHeight = secondaryMetrics.descent - secondaryMetrics.ascent
+        val gap = dp(PHONE_PAD_LABEL_GAP_DP)
+        val top = bounds.centerY() - (primaryHeight + gap + secondaryHeight) / 2f
+
+        textPaint.color = color
+        textPaint.alpha = alpha
+        textPaint.textSize = primarySize
+        canvas.drawText(label, bounds.centerX(), top - primaryMetrics.ascent, textPaint)
+
+        textPaint.textSize = secondarySize
+        textPaint.alpha = (alpha * PHONE_PAD_SUB_LABEL_ALPHA_FRACTION).roundToInt().coerceIn(0, alpha)
+        canvas.drawText(subLabel, bounds.centerX(), top + primaryHeight + gap - secondaryMetrics.ascent, textPaint)
+    }
+
+    private fun drawEqualStackedLabel(
+        canvas: Canvas,
+        label: String,
+        subLabel: String,
+        bounds: RectF,
+        color: Int,
+        alpha: Int,
+    ) {
+        val maxWidth = bounds.width() - dp(ImeDimensions.KEY_LABEL_HORIZONTAL_INSET_DP)
+        val initialSize = sp(NUMERIC_TOGGLE_STACKED_TEXT_SIZE_SP)
+            .coerceAtMost(bounds.height() * NUMERIC_TOGGLE_STACKED_MAX_HEIGHT_FRACTION)
+        val textSize = min(
+            shrinkTextSizeToFit(label, initialSize, maxWidth),
+            shrinkTextSizeToFit(subLabel, initialSize, maxWidth),
+        )
+        textPaint.textSize = textSize
+        val metrics = textPaint.fontMetrics
+        val lineHeight = metrics.descent - metrics.ascent
+        val gap = dp(NUMERIC_TOGGLE_STACKED_GAP_DP)
+        val top = bounds.centerY() - (lineHeight * 2f + gap) / 2f
+
+        textPaint.color = color
+        textPaint.alpha = alpha
+        canvas.drawText(label, bounds.centerX(), top - metrics.ascent, textPaint)
+        canvas.drawText(subLabel, bounds.centerX(), top + lineHeight + gap - metrics.ascent, textPaint)
     }
 
     private fun drawLongPressHint(
@@ -840,6 +955,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIcon.Delete -> drawDeleteIcon(canvas)
             KeyIcon.Search -> drawSearchIcon(canvas)
             KeyIcon.Enter -> drawEnterIcon(canvas)
+            KeyIcon.Space -> drawSpaceIcon(canvas)
         }
         canvas.restore()
     }
@@ -956,6 +1072,16 @@ class ZnKeyboardView @JvmOverloads constructor(
         canvas.drawPath(path, iconPaint)
     }
 
+    private fun drawSpaceIcon(canvas: Canvas) {
+        val path = Path().apply {
+            moveTo(6f, 10f)
+            lineTo(6f, 15f)
+            lineTo(18f, 15f)
+            lineTo(18f, 10f)
+        }
+        canvas.drawPath(path, iconPaint)
+    }
+
     private fun Path.addRoundRect(
         left: Float,
         top: Float,
@@ -1010,11 +1136,22 @@ class ZnKeyboardView @JvmOverloads constructor(
                 ShiftState.Locked -> ShiftState.Off
             }
             KeyIntent.SwitchMode -> {
-                layoutMode = if (layoutMode == LayoutMode.Letters) LayoutMode.Symbols else LayoutMode.Letters
+                layoutMode = when (layoutMode) {
+                    LayoutMode.Letters -> lastNumericLayoutMode
+                    LayoutMode.Symbols,
+                    LayoutMode.MoreSymbols,
+                    LayoutMode.PhonePad -> LayoutMode.Letters
+                }
                 shiftState = ShiftState.Off
             }
             KeyIntent.ToggleMoreSymbols -> {
                 layoutMode = if (layoutMode == LayoutMode.MoreSymbols) LayoutMode.Symbols else LayoutMode.MoreSymbols
+                lastNumericLayoutMode = LayoutMode.Symbols
+                shiftState = ShiftState.Off
+            }
+            KeyIntent.ToggleNumericLayout -> {
+                layoutMode = if (layoutMode == LayoutMode.PhonePad) LayoutMode.Symbols else LayoutMode.PhonePad
+                lastNumericLayoutMode = layoutMode
                 shiftState = ShiftState.Off
             }
             KeyIntent.ToggleAlt -> alt = !alt
@@ -1139,6 +1276,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 moreSymbolBottomRow(),
                 bottomRow(),
             )
+            LayoutMode.PhonePad -> phonePadRows()
         }
         return buttonRows + mainRows
     }
@@ -1196,7 +1334,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 label = if (shortcutRowState.loading) "Rewriting" else "Rewrite",
                 intent = KeyIntent.AgentRewrite,
                 weight = weight,
-                role = KeyRole.Action,
+                role = KeyRole.Function,
                 active = shortcutRowState.loading,
                 enabled = enabled && shortcutRowState.rewriteEnabled && !shortcutRowState.loading,
                 emphasizedWhenDisabled = shortcutRowState.loading,
@@ -1333,66 +1471,202 @@ class ZnKeyboardView @JvmOverloads constructor(
         )
     }
 
-    private fun bottomRow(): RowSpec {
-        val switchLabel = if (layoutMode == LayoutMode.Letters) "123" else "ABC"
-        if (layoutMode != LayoutMode.Letters) {
-            return RowSpec(
+    private fun phonePadRows(): List<RowSpec> {
+        return listOf(
+            RowSpec(
                 listOf(
+                    phonePadOperatorKey(idSuffix = "plus", label = "+"),
+                    phonePadTextKey(idSuffix = "1", label = "1"),
+                    phonePadTextKey(idSuffix = "2", label = "2"),
+                    phonePadTextKey(idSuffix = "3", label = "3"),
+                    phonePadOperatorKey(idSuffix = "percent", label = "%"),
+                ),
+                ImeLayout.STANDARD_ROW_WEIGHT,
+            ),
+            RowSpec(
+                listOf(
+                    phonePadOperatorKey(idSuffix = "minus", label = "-"),
+                    phonePadTextKey(idSuffix = "4", label = "4"),
+                    phonePadTextKey(idSuffix = "5", label = "5"),
+                    phonePadTextKey(idSuffix = "6", label = "6"),
                     KeySpec(
-                        "switch",
-                        switchLabel,
-                        KeyIntent.SwitchMode,
-                        ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
-                        KeyRole.Function,
-                    ),
-                    emojiKeySpec(),
-                    KeySpec(
-                        "space",
+                        "phone_space",
                         "space",
                         KeyIntent.Dispatch(KeyboardAction.Text(" ")),
-                        ImeDimensions.SPACE_KEY_WEIGHT,
-                        KeyRole.Function,
-                        longPressHint = "Saved",
-                    ),
-                    KeySpec(
-                        "enter",
-                        enterLabel,
-                        KeyIntent.Dispatch(KeyboardAction.Enter),
-                        ImeDimensions.ENTER_KEY_WEIGHT,
-                        KeyRole.Action,
-                        icon = iconForEnterLabel(enterLabel),
+                        role = KeyRole.Function,
+                        icon = KeyIcon.Space,
                     ),
                 ),
-                heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
+                ImeLayout.STANDARD_ROW_WEIGHT,
+            ),
+            RowSpec(
+                listOf(
+                    phonePadOperatorKey(idSuffix = "star", label = "*", subLabel = "/"),
+                    phonePadTextKey(idSuffix = "7", label = "7"),
+                    phonePadTextKey(idSuffix = "8", label = "8"),
+                    phonePadTextKey(idSuffix = "9", label = "9"),
+                    KeySpec(
+                        "phone_backspace",
+                        "Del",
+                        KeyIntent.Dispatch(KeyboardAction.Backspace),
+                        role = KeyRole.Function,
+                        icon = KeyIcon.Delete,
+                    ),
+                ),
+                ImeLayout.STANDARD_ROW_WEIGHT,
+            ),
+            numericBottomRow(toggleLabel = "!?#", phonePad = true),
+        )
+    }
+
+    private fun phonePadTextKey(
+        idSuffix: String,
+        label: String,
+        subLabel: String? = null,
+    ): KeySpec {
+        return KeySpec(
+            id = "phone_$idSuffix",
+            label = label,
+            intent = KeyIntent.Dispatch(KeyboardAction.Text(label)),
+            role = KeyRole.Character,
+            subLabel = subLabel,
+        )
+    }
+
+    private fun phonePadOperatorKey(
+        idSuffix: String,
+        label: String,
+        subLabel: String? = null,
+    ): KeySpec {
+        return KeySpec(
+            id = "phone_$idSuffix",
+            label = label,
+            intent = KeyIntent.Dispatch(KeyboardAction.Text(label)),
+            role = KeyRole.Function,
+            subLabel = subLabel,
+        )
+    }
+
+    private fun numericBottomRow(toggleLabel: String, phonePad: Boolean): RowSpec {
+        val keys = mutableListOf<KeySpec>()
+        keys += KeySpec(
+            "switch",
+            "ABC",
+            KeyIntent.SwitchMode,
+            ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
+            KeyRole.Function,
+        )
+        keys += KeySpec(
+            "comma",
+            ",",
+            KeyIntent.Dispatch(KeyboardAction.Text(",")),
+            0.82f,
+            KeyRole.Character,
+        )
+        keys += KeySpec(
+            "numeric_layout_toggle",
+            if (toggleLabel == "1234") "12" else toggleLabel,
+            KeyIntent.ToggleNumericLayout,
+            1.16f,
+            KeyRole.Function,
+            subLabel = if (toggleLabel == "1234") "34" else null,
+            subLabelStyle = SubLabelStyle.Equal,
+        )
+        if (phonePad) {
+            keys += KeySpec(
+                "phone_0",
+                "0",
+                KeyIntent.Dispatch(KeyboardAction.Text("0")),
+                1.9f,
+                KeyRole.Character,
+            )
+            keys += KeySpec(
+                "phone_equals",
+                "=",
+                KeyIntent.Dispatch(KeyboardAction.Text("=")),
+                ImeDimensions.DEFAULT_KEY_WEIGHT,
+                KeyRole.Character,
+            )
+        } else {
+            keys += KeySpec(
+                "space",
+                "English",
+                KeyIntent.Dispatch(KeyboardAction.Text(" ")),
+                4.7f,
+                KeyRole.Function,
+                longPressHint = "Saved",
             )
         }
+        keys += KeySpec(
+            "period",
+            ".",
+            KeyIntent.Dispatch(KeyboardAction.Text(".")),
+            0.82f,
+            KeyRole.Character,
+        )
+        keys += KeySpec(
+            "enter",
+            enterLabel,
+            KeyIntent.Dispatch(KeyboardAction.Enter),
+            ImeDimensions.ENTER_KEY_WEIGHT,
+            roleForEnterLabel(enterLabel),
+            icon = iconForEnterLabel(enterLabel),
+        )
         return RowSpec(
-            listOf(
-                KeySpec(
-                    "switch",
-                    switchLabel,
-                    KeyIntent.SwitchMode,
-                    ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
-                    KeyRole.Function,
-                ),
-                emojiKeySpec(),
-                KeySpec(
-                    "space",
-                    "space",
-                    KeyIntent.Dispatch(KeyboardAction.Text(" ")),
-                    ImeDimensions.SPACE_KEY_WEIGHT,
-                    KeyRole.Function,
-                    longPressHint = "Saved",
-                ),
-                KeySpec(
-                    "enter",
-                    enterLabel,
-                    KeyIntent.Dispatch(KeyboardAction.Enter),
-                    ImeDimensions.ENTER_KEY_WEIGHT,
-                    KeyRole.Action,
-                    icon = iconForEnterLabel(enterLabel),
-                ),
+            keys,
+            heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
+        )
+    }
+
+    private fun bottomRow(): RowSpec {
+        val keys = mutableListOf(
+            KeySpec(
+                "switch",
+                if (layoutMode == LayoutMode.Letters) "123" else "ABC",
+                KeyIntent.SwitchMode,
+                ImeDimensions.MODE_SWITCH_KEY_WEIGHT,
+                KeyRole.Function,
             ),
+            emojiKeySpec(),
+        )
+        if (layoutMode != LayoutMode.Letters) {
+            keys += KeySpec(
+                "space",
+                "space",
+                KeyIntent.Dispatch(KeyboardAction.Text(" ")),
+                ImeDimensions.SPACE_KEY_WEIGHT,
+                KeyRole.Function,
+                longPressHint = "Saved",
+            )
+            keys += KeySpec(
+                "numeric_layout_toggle",
+                "12",
+                KeyIntent.ToggleNumericLayout,
+                1.18f,
+                KeyRole.Function,
+                subLabel = "34",
+                subLabelStyle = SubLabelStyle.Equal,
+            )
+        } else {
+            keys += KeySpec(
+                "space",
+                "space",
+                KeyIntent.Dispatch(KeyboardAction.Text(" ")),
+                ImeDimensions.SPACE_KEY_WEIGHT,
+                KeyRole.Function,
+                longPressHint = "Saved",
+            )
+        }
+        keys += KeySpec(
+            "enter",
+            enterLabel,
+            KeyIntent.Dispatch(KeyboardAction.Enter),
+            ImeDimensions.ENTER_KEY_WEIGHT,
+            roleForEnterLabel(enterLabel),
+            icon = iconForEnterLabel(enterLabel),
+        )
+        return RowSpec(
+            keys,
             heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
         )
     }
@@ -1433,12 +1707,28 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
+    private fun shrinkTextSizeToFit(label: String, initialSize: Float, maxWidth: Float): Float {
+        var size = initialSize
+        val min = sp(ImeDimensions.KEY_LABEL_MIN_TEXT_SIZE_SP)
+
+        textPaint.textSize = size
+        while (textPaint.measureText(label) > maxWidth && size > min) {
+            size -= sp(ImeDimensions.KEY_LABEL_SHRINK_STEP_SP)
+            textPaint.textSize = size
+        }
+        return size
+    }
+
     private fun iconForEnterLabel(label: String): KeyIcon? {
         return when (label) {
             "Enter" -> KeyIcon.Enter
             "Search" -> KeyIcon.Search
             else -> null
         }
+    }
+
+    private fun roleForEnterLabel(label: String): KeyRole {
+        return if (label == "Search") KeyRole.Function else KeyRole.Action
     }
 
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
@@ -1451,6 +1741,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         Letters,
         Symbols,
         MoreSymbols,
+        PhonePad,
     }
 
     private enum class ShiftState {
@@ -1465,6 +1756,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         Action,
     }
 
+    private enum class SubLabelStyle {
+        Small,
+        Equal,
+    }
+
     private enum class KeyIcon {
         Emoji,
         ArrowLeft,
@@ -1475,6 +1771,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         Delete,
         Search,
         Enter,
+        Space,
     }
 
     private enum class ArrowDirection {
@@ -1502,6 +1799,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val enabled: Boolean = true,
         val emphasizedWhenDisabled: Boolean = false,
         val longPressHint: String? = null,
+        val subLabel: String? = null,
+        val subLabelStyle: SubLabelStyle = SubLabelStyle.Small,
     )
 
     private data class KeyHit(
@@ -1548,6 +1847,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object Shift : KeyIntent()
         data object SwitchMode : KeyIntent()
         data object ToggleMoreSymbols : KeyIntent()
+        data object ToggleNumericLayout : KeyIntent()
         data object ToggleAlt : KeyIntent()
         data object ToggleCtrl : KeyIntent()
         data object OpenEmojiPanel : KeyIntent()
@@ -1584,6 +1884,14 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val SPACE_CURSOR_DRAG_MAX_CHARS = 120
         const val AI_LOADING_CYCLE_MS = 2200L
         const val TWO_PI = 6.2831855f
+        const val PHONE_PAD_PRIMARY_MAX_HEIGHT_FRACTION = 0.44f
+        const val PHONE_PAD_SUB_LABEL_TEXT_SIZE_SP = 8f
+        const val PHONE_PAD_SUB_LABEL_MAX_HEIGHT_FRACTION = 0.18f
+        const val PHONE_PAD_LABEL_GAP_DP = 1f
+        const val PHONE_PAD_SUB_LABEL_ALPHA_FRACTION = 0.78f
+        const val NUMERIC_TOGGLE_STACKED_TEXT_SIZE_SP = 12f
+        const val NUMERIC_TOGGLE_STACKED_MAX_HEIGHT_FRACTION = 0.28f
+        const val NUMERIC_TOGGLE_STACKED_GAP_DP = 1f
         val AI_LOADING_COLORS = intArrayOf(
             Color.argb(0, 73, 216, 255),
             Color.argb(88, 73, 216, 255),
