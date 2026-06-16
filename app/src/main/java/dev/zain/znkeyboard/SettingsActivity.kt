@@ -982,7 +982,7 @@ private fun TextSnippetTagInputPill(
                 ) {
                     if (value.isBlank()) {
                         Text(
-                            text = "tag, tag",
+                            text = "tag tag",
                             color = ZnKeyboardColors.Muted,
                             style = MaterialTheme.typography.labelMedium,
                         )

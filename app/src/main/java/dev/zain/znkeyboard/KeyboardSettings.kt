@@ -131,6 +131,7 @@ object KeyboardSettings {
     private val secondRowButtonOptionIds = shortcutRowKeyOptionIds
     private val keyboardRowIds = KeyboardRow.entries.mapTo(mutableSetOf()) { it.id }
     private val whitespaceRegex = Regex("\\s+")
+    private val textSnippetTagSeparatorRegex = Regex("[,\\s]+")
 
     fun readHeightScale(context: Context): Float {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -332,11 +333,12 @@ object KeyboardSettings {
     }
 
     fun parseTextSnippetTags(value: String): List<String> {
-        return normalizeTextSnippetTags(value.split(","))
+        return normalizeTextSnippetTags(value.split(textSnippetTagSeparatorRegex))
     }
 
     fun normalizeTextSnippetTags(tags: List<String>): List<String> {
         return tags
+            .flatMap { it.split(textSnippetTagSeparatorRegex) }
             .map {
                 it.trim()
                     .removePrefix("#")

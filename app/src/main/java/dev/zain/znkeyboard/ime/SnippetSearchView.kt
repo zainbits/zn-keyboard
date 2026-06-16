@@ -213,13 +213,10 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun visibleSnippets(): List<KeyboardSettings.TextSnippet> {
-        val needle = normalizedQuery()
-        if (needle.isBlank()) return snippets.take(MAX_RESULTS)
+        val terms = normalizedQueryTerms()
+        if (terms.isEmpty()) return snippets.take(MAX_RESULTS)
         return snippets
-            .filter { snippet ->
-                snippet.text.lowercase(Locale.US).contains(needle) ||
-                    snippet.tags.any { tag -> tag.lowercase(Locale.US).contains(needle) }
-            }
+            .filter { snippet -> snippet.matchesAll(terms) }
             .take(MAX_RESULTS)
     }
 
@@ -233,6 +230,30 @@ class SavedTextSearchView @JvmOverloads constructor(
 
     private fun normalizedQuery(): String {
         return query.trim().lowercase(Locale.US)
+    }
+
+    private fun normalizedQueryTerms(): List<String> {
+        return query
+            .trim()
+            .split(searchTermSeparatorRegex)
+            .map {
+                it.trim()
+                    .removePrefix("#")
+                    .lowercase(Locale.US)
+            }
+            .filter { it.isNotBlank() }
+            .distinct()
+    }
+
+    private fun KeyboardSettings.TextSnippet.matchesAll(terms: List<String>): Boolean {
+        val searchableText = buildString {
+            append(text)
+            tags.forEach { tag ->
+                append(' ')
+                append(tag)
+            }
+        }.lowercase(Locale.US)
+        return terms.all { term -> searchableText.contains(term) }
     }
 
     private fun resultCard(snippet: KeyboardSettings.TextSnippet): LinearLayout {
@@ -276,5 +297,6 @@ class SavedTextSearchView @JvmOverloads constructor(
     private companion object {
         const val MAX_QUERY_LENGTH = 80
         const val MAX_RESULTS = 24
+        val searchTermSeparatorRegex = Regex("[,\\s]+")
     }
 }
