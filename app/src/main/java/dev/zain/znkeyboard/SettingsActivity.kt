@@ -517,12 +517,33 @@ private fun TextSnippetsSection(
     onSnippetsChange: (List<KeyboardSettings.TextSnippet>) -> Unit,
 ) {
     var draft by remember { mutableStateOf("") }
+    var confirmingClearUntagged by remember { mutableStateOf(false) }
+    var lastClearedUntaggedSnippetCount by remember { mutableStateOf(0) }
+    var observedSnippetCount by remember { mutableStateOf(snippets.size) }
+    val untaggedSnippetCount = snippets.count { it.tags.isEmpty() }
+    val snippetsWereAdded = snippets.size > observedSnippetCount
+    val clearUntaggedButtonText = if (
+        lastClearedUntaggedSnippetCount > 0 &&
+        untaggedSnippetCount == 0 &&
+        !snippetsWereAdded
+    ) {
+        "Untagged deleted ($lastClearedUntaggedSnippetCount)"
+    } else {
+        "Clear untagged ($untaggedSnippetCount)"
+    }
     val normalizedDraft = KeyboardSettings.textSnippetFromText(
         text = draft,
     )
     val canAddSnippet = normalizedDraft.text.isNotBlank() &&
         snippets.none { it.text == normalizedDraft.text } &&
         snippets.size < KeyboardSettings.MAX_TEXT_SNIPPETS
+
+    LaunchedEffect(snippets.size) {
+        if (snippets.size > observedSnippetCount) {
+            lastClearedUntaggedSnippetCount = 0
+        }
+        observedSnippetCount = snippets.size
+    }
 
     SettingsSectionCard {
         SettingsSectionHeader(
@@ -541,6 +562,7 @@ private fun TextSnippetsSection(
 
         Button(
             onClick = {
+                lastClearedUntaggedSnippetCount = 0
                 onSnippetsChange(snippets + normalizedDraft)
                 draft = ""
             },
@@ -554,6 +576,19 @@ private fun TextSnippetsSection(
             )
             Spacer(Modifier.width(8.dp))
             Text("Add")
+        }
+
+        OutlinedButton(
+            onClick = { confirmingClearUntagged = true },
+            enabled = untaggedSnippetCount > 0,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.DeleteContent),
+            border = BorderStroke(1.dp, ZnKeyboardColors.DeleteContent.copy(alpha = 0.55f)),
+        ) {
+            SettingsIconTextButtonContent(
+                iconResId = R.drawable.ic_delete_24,
+                text = clearUntaggedButtonText,
+            )
         }
 
         if (snippets.isEmpty()) {
@@ -595,6 +630,76 @@ private fun TextSnippetsSection(
             }
         }
     }
+
+    if (confirmingClearUntagged) {
+        ClearUntaggedTextSnippetsDialog(
+            untaggedSnippetCount = untaggedSnippetCount,
+            onDismiss = { confirmingClearUntagged = false },
+            onConfirm = {
+                lastClearedUntaggedSnippetCount = untaggedSnippetCount
+                confirmingClearUntagged = false
+                onSnippetsChange(snippets.filter { it.tags.isNotEmpty() })
+            },
+        )
+    }
+}
+
+@Composable
+private fun ClearUntaggedTextSnippetsDialog(
+    untaggedSnippetCount: Int,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    var confirmationText by remember { mutableStateOf("") }
+    val confirmationMatches = confirmationText == CLEAR_UNTAGGED_SNIPPETS_CONFIRMATION
+    val plural = if (untaggedSnippetCount == 1) "" else "s"
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Clear untagged snippets?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "This removes $untaggedSnippetCount snippet$plural with no tags. Tagged snippets will stay.",
+                )
+                OutlinedTextField(
+                    value = confirmationText,
+                    onValueChange = { confirmationText = it.take(CLEAR_UNTAGGED_SNIPPETS_CONFIRMATION.length) },
+                    label = { Text("Type CONFIRM") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (confirmationMatches && untaggedSnippetCount > 0) {
+                                onConfirm()
+                            }
+                        },
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                enabled = confirmationMatches && untaggedSnippetCount > 0,
+            ) {
+                Text(
+                    text = "Clear",
+                    color = if (confirmationMatches && untaggedSnippetCount > 0) {
+                        ZnKeyboardColors.DeleteContent
+                    } else {
+                        ZnKeyboardColors.Muted
+                    },
+                )
+            }
+        },
+    )
 }
 
 @Composable
@@ -2460,4 +2565,4 @@ private val COMPACT_ITEM_CORNER_RADIUS = SettingsUiDimensions.COMPACT_ITEM_CORNE
 private val PICKER_CORNER_RADIUS = SettingsUiDimensions.PICKER_CORNER_RADIUS
 private val TEXT_SNIPPET_DELETE_REVEAL_WIDTH = 96.dp
 private const val TEXT_SNIPPET_DELETE_LOCK_THRESHOLD = 0.45f
-
+private const val CLEAR_UNTAGGED_SNIPPETS_CONFIRMATION = "CONFIRM"
