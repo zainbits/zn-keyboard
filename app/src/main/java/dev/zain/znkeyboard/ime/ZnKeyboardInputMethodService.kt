@@ -404,6 +404,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun applyKeyboardSettings() {
         val heightScale = KeyboardSettings.readHeightScale(this)
+        val bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         val updatedDefaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
         val updatedCustomEmojiTags = KeyboardSettings.readCustomEmojiTags(this)
@@ -417,6 +418,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         keyboardView?.let { view ->
             view.setHeightScale(heightScale)
+            view.setBottomPaddingDp(bottomPaddingDp)
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
             view.setSecondRowButtonIds(KeyboardSettings.readSecondRowButtonIds(this))
             view.setKeyboardRowOrder(KeyboardSettings.readKeyboardRowOrder(this))

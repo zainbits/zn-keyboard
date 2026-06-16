@@ -94,6 +94,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var alt = false
     private var enterLabel = "Enter"
     private var heightScale = 1f
+    private var bottomPaddingDp = KeyboardSettings.DEFAULT_BOTTOM_PADDING_DP
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
@@ -129,6 +130,16 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (heightScale != scale) {
             heightScale = scale
             requestLayout()
+            invalidate()
+        }
+    }
+
+    fun setBottomPaddingDp(paddingDp: Int) {
+        val normalizedPaddingDp = KeyboardSettings.normalizeBottomPaddingDp(paddingDp)
+        if (bottomPaddingDp != normalizedPaddingDp) {
+            bottomPaddingDp = normalizedPaddingDp
+            requestLayout()
+            refreshHitTargets()
             invalidate()
         }
     }
@@ -202,7 +213,13 @@ class ZnKeyboardView @JvmOverloads constructor(
         } else {
             0
         }
-        val desiredHeight = (ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density + bottomSystemControlGapPx)
+        val bottomPaddingDeltaPx = (bottomPaddingDp - ImeLayout.BASE_BOTTOM_PADDING_DP) *
+            resources.displayMetrics.density
+        val desiredHeight = (
+            ImeLayout.BASE_HEIGHT_DP * heightScale * resources.displayMetrics.density +
+                bottomSystemControlGapPx +
+                bottomPaddingDeltaPx
+            )
             .roundToInt()
             .plus(secondRowHeight)
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -1028,7 +1045,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val rows = rows()
         val horizontalPadding = dp(ImeLayout.HORIZONTAL_PADDING_DP.toFloat())
         val topPadding = dp(ImeLayout.TOP_PADDING_DP.toFloat())
-        val bottomPadding = dp(ImeLayout.BASE_BOTTOM_PADDING_DP.toFloat()) + bottomSystemControlGapPx
+        val bottomPadding = dp(bottomPaddingDp.toFloat()) + bottomSystemControlGapPx
         val keyGap = dp(ImeLayout.KEY_GAP_DP.toFloat())
         val rowGap = dp(ImeLayout.ROW_GAP_DP.toFloat())
         val rowWeightSum = rows.fold(0f) { total, row -> total + row.heightWeight }

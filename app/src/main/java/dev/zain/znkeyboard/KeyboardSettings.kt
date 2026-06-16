@@ -21,6 +21,9 @@ object KeyboardSettings {
     const val MIN_HEIGHT_SCALE = KeyboardDefaults.MIN_HEIGHT_SCALE
     const val MAX_HEIGHT_SCALE = KeyboardDefaults.MAX_HEIGHT_SCALE
     const val DEFAULT_HEIGHT_SCALE = KeyboardDefaults.DEFAULT_HEIGHT_SCALE
+    const val MIN_BOTTOM_PADDING_DP = KeyboardDefaults.MIN_BOTTOM_PADDING_DP
+    const val MAX_BOTTOM_PADDING_DP = KeyboardDefaults.MAX_BOTTOM_PADDING_DP
+    const val DEFAULT_BOTTOM_PADDING_DP = KeyboardDefaults.DEFAULT_BOTTOM_PADDING_DP
     const val DEFAULT_AGENT_API_BASE_URL = AgentDefaults.DEFAULT_API_BASE_URL
     const val OPENROUTER_API_BASE_URL = AgentDefaults.OPENROUTER_API_BASE_URL
     const val DEFAULT_AGENT_MODEL = AgentDefaults.DEFAULT_MODEL
@@ -42,6 +45,7 @@ object KeyboardSettings {
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
+    private const val KEY_BOTTOM_PADDING_DP = "bottom_padding_dp"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
     private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
@@ -138,6 +142,22 @@ object KeyboardSettings {
     fun saveHeightScale(context: Context, scale: Float) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putFloat(KEY_HEIGHT_SCALE, scale.coerceIn(MIN_HEIGHT_SCALE, MAX_HEIGHT_SCALE)).apply()
+    }
+
+    fun readBottomPaddingDp(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return normalizeBottomPaddingDp(
+            prefs.getInt(KEY_BOTTOM_PADDING_DP, DEFAULT_BOTTOM_PADDING_DP),
+        )
+    }
+
+    fun saveBottomPaddingDp(context: Context, paddingDp: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_BOTTOM_PADDING_DP, normalizeBottomPaddingDp(paddingDp)).apply()
+    }
+
+    fun normalizeBottomPaddingDp(paddingDp: Int): Int {
+        return paddingDp.coerceIn(MIN_BOTTOM_PADDING_DP, MAX_BOTTOM_PADDING_DP)
     }
 
     fun readUpperRowKeyIds(context: Context): List<String> {
@@ -717,6 +737,7 @@ object KeyboardSettings {
                         "keyboard",
                         JSONObject()
                             .put("heightScale", readHeightScale(context))
+                            .put("bottomPaddingDp", readBottomPaddingDp(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
                             .put("shortcutRowOrder", stringArrayJson(readKeyboardRowOrder(context))),
@@ -771,6 +792,9 @@ object KeyboardSettings {
 
         val heightScale = keyboard.optFiniteFloat("heightScale", readHeightScale(context))
             .coerceIn(MIN_HEIGHT_SCALE, MAX_HEIGHT_SCALE)
+        val bottomPaddingDp = normalizeBottomPaddingDp(
+            keyboard.optInt("bottomPaddingDp", readBottomPaddingDp(context)),
+        )
         val upperRowKeys = keyboard.optStringList("shortcutRowAKeys")
             ?.let(::normalizeUpperRowKeyIds)
             ?: readUpperRowKeyIds(context)
@@ -813,6 +837,7 @@ object KeyboardSettings {
         )
 
         saveHeightScale(context, heightScale)
+        saveBottomPaddingDp(context, bottomPaddingDp)
         saveUpperRowKeyIds(context, upperRowKeys)
         saveSecondRowButtonIds(context, secondRowButtons)
         saveKeyboardRowOrder(context, rowOrder)

@@ -126,6 +126,7 @@ private fun SettingsScreen() {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
+    var bottomPaddingDp by remember { mutableStateOf(KeyboardSettings.readBottomPaddingDp(context)) }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
     var secondRowButtonIds by remember { mutableStateOf(KeyboardSettings.readSecondRowButtonIds(context)) }
     var keyboardRowOrder by remember { mutableStateOf(KeyboardSettings.readKeyboardRowOrder(context)) }
@@ -150,6 +151,7 @@ private fun SettingsScreen() {
     fun refreshSettingsFromStorage() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
         heightScale = KeyboardSettings.readHeightScale(context)
+        bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(context)
         upperRowKeyIds = KeyboardSettings.readUpperRowKeyIds(context)
         secondRowButtonIds = KeyboardSettings.readSecondRowButtonIds(context)
         keyboardRowOrder = KeyboardSettings.readKeyboardRowOrder(context)
@@ -385,9 +387,9 @@ private fun SettingsScreen() {
 
             SettingsSectionCard {
                 SettingsSectionHeader(
-                    title = "Keyboard height",
+                    title = "Keyboard layout",
                     iconResId = R.drawable.ic_tune_24,
-                    trailingText = "${(heightScale * 100f).roundToInt()}%",
+                    trailingText = "Height ${(heightScale * 100f).roundToInt()}%",
                 )
 
                 Slider(
@@ -398,6 +400,14 @@ private fun SettingsScreen() {
                     },
                     valueRange = KeyboardSettings.MIN_HEIGHT_SCALE..KeyboardSettings.MAX_HEIGHT_SCALE,
                     steps = 6,
+                )
+
+                KeyboardBottomPaddingField(
+                    bottomPaddingDp = bottomPaddingDp,
+                    onBottomPaddingChange = {
+                        bottomPaddingDp = it
+                        KeyboardSettings.saveBottomPaddingDp(context, it)
+                    },
                 )
             }
 
@@ -443,6 +453,62 @@ private fun SettingsScreen() {
             )
         }
     }
+}
+
+@Composable
+private fun KeyboardBottomPaddingField(
+    bottomPaddingDp: Int,
+    onBottomPaddingChange: (Int) -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    var draft by remember { mutableStateOf(bottomPaddingDp.toString()) }
+
+    LaunchedEffect(bottomPaddingDp) {
+        draft = bottomPaddingDp.toString()
+    }
+
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { input ->
+            val digits = input.filter { it.isDigit() }.take(3)
+            draft = digits
+            digits.toIntOrNull()?.let { value ->
+                val normalizedValue = KeyboardSettings.normalizeBottomPaddingDp(value)
+                onBottomPaddingChange(normalizedValue)
+                if (normalizedValue != value) {
+                    draft = normalizedValue.toString()
+                }
+            }
+        },
+        label = { Text("Bottom padding (dp)") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = {
+                if (draft.isBlank()) {
+                    draft = bottomPaddingDp.toString()
+                }
+                focusManager.clearFocus()
+            },
+        ),
+        supportingText = {
+            Text(
+                text = "${KeyboardSettings.MIN_BOTTOM_PADDING_DP}-${KeyboardSettings.MAX_BOTTOM_PADDING_DP} dp. Default: ${KeyboardSettings.DEFAULT_BOTTOM_PADDING_DP}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+                if (!focusState.isFocused && draft.isBlank()) {
+                    draft = bottomPaddingDp.toString()
+                }
+            },
+    )
 }
 
 @Composable
