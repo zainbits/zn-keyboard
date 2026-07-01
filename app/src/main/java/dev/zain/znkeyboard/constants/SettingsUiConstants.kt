@@ -21,9 +21,9 @@ object SettingsUiDimensions {
     val SHORTCUT_KEY_ITEM_GAP = 8.dp
     val ROW_ORDER_ITEM_HEIGHT = 48.dp
     val ROW_ORDER_ITEM_GAP = 8.dp
-    val SECTION_CORNER_RADIUS = 8.dp
-    val COMPACT_ITEM_CORNER_RADIUS = 6.dp
-    val PICKER_CORNER_RADIUS = 10.dp
+    val SECTION_CORNER_RADIUS = 12.dp
+    val COMPACT_ITEM_CORNER_RADIUS = 8.dp
+    val PICKER_CORNER_RADIUS = 16.dp
 }
 
 object SettingsBackupDefaults {
