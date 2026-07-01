@@ -2,6 +2,7 @@ package dev.zain.znkeyboard
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
@@ -91,6 +92,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -150,6 +152,9 @@ private fun SettingsScreen() {
     var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
     var clipboardHistoryCount by remember { mutableStateOf(ClipboardHistoryStore.read(context).size) }
+    var backupPasswordDialogMode by remember { mutableStateOf<BackupPasswordDialogMode?>(null) }
+    var pendingExportPassword by remember { mutableStateOf<String?>(null) }
+    var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
 
     fun refreshSettingsFromStorage() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
@@ -180,15 +185,17 @@ private fun SettingsScreen() {
 
     val scope = rememberCoroutineScope()
     val exportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/json"),
+        contract = ActivityResultContracts.CreateDocument(SettingsBackupDefaults.MIME_TYPE),
     ) { uri ->
-        uri ?: return@rememberLauncherForActivityResult
+        val password = pendingExportPassword
+        pendingExportPassword = null
+        if (uri == null || password == null) return@rememberLauncherForActivityResult
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { writeSettingsBackup(context, uri) }
+                runCatching { writeEncryptedSettingsBackup(context, uri, password.toCharArray()) }
             }
             val message = result.fold(
-                onSuccess = { "Settings exported" },
+                onSuccess = { "Encrypted backup exported" },
                 onFailure = { error ->
                     error.message?.takeIf { it.isNotBlank() } ?: "Could not export settings"
                 },
@@ -204,27 +211,58 @@ private fun SettingsScreen() {
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { restoreSettingsBackup(context, uri) }
-            }
-            result
-                .onSuccess { restoreResult ->
-                    refreshSettingsFromStorage()
-                    Toast.makeText(
-                        context,
-                        "Settings restored (${restoreResult.snippetCount} snippets)",
-                        Toast.LENGTH_SHORT,
-                    ).show()
+        pendingImportUri = uri
+        backupPasswordDialogMode = BackupPasswordDialogMode.Import
+    }
+
+    when (backupPasswordDialogMode) {
+        BackupPasswordDialogMode.Export -> BackupPasswordDialog(
+            mode = BackupPasswordDialogMode.Export,
+            onDismiss = { backupPasswordDialogMode = null },
+            onConfirm = { password ->
+                backupPasswordDialogMode = null
+                pendingExportPassword = password
+                exportLauncher.launch(suggestedBackupFileName())
+            },
+        )
+
+        BackupPasswordDialogMode.Import -> BackupPasswordDialog(
+            mode = BackupPasswordDialogMode.Import,
+            onDismiss = {
+                backupPasswordDialogMode = null
+                pendingImportUri = null
+            },
+            onConfirm = { password ->
+                val uri = pendingImportUri
+                backupPasswordDialogMode = null
+                pendingImportUri = null
+                if (uri != null) {
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            runCatching { restoreEncryptedSettingsBackup(context, uri, password.toCharArray()) }
+                        }
+                        result
+                            .onSuccess { restoreResult ->
+                                refreshSettingsFromStorage()
+                                Toast.makeText(
+                                    context,
+                                    "Backup restored (${restoreResult.snippetCount} snippets, ${restoreResult.clipboardEntryCount} clipboard items)",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                            .onFailure { error ->
+                                Toast.makeText(
+                                    context,
+                                    error.message?.takeIf { it.isNotBlank() } ?: "Could not import settings",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                    }
                 }
-                .onFailure { error ->
-                    Toast.makeText(
-                        context,
-                        error.message?.takeIf { it.isNotBlank() } ?: "Could not import settings",
-                        Toast.LENGTH_LONG,
-                    ).show()
-                }
-        }
+            },
+        )
+
+        null -> Unit
     }
 
     DisposableEffect(context) {
@@ -297,7 +335,7 @@ private fun SettingsScreen() {
             SystemSetupActions()
 
             BackupRestoreSection(
-                onExport = { exportLauncher.launch(suggestedBackupFileName()) },
+                onExport = { backupPasswordDialogMode = BackupPasswordDialogMode.Export },
                 onImport = { importLauncher.launch(BACKUP_IMPORT_MIME_TYPES) },
             )
 
@@ -1149,11 +1187,11 @@ private fun BackupRestoreSection(
         SettingsSectionHeader(
             title = "Backup & restore",
             iconResId = R.drawable.ic_download_24,
-            trailingText = "JSON",
+            trailingText = "Encrypted",
         )
 
         Text(
-            text = "API keys stay out of backup files.",
+            text = "Password-encrypted backups include settings, clipboard history, and configured API keys.",
             color = ZnKeyboardColors.Muted,
             style = MaterialTheme.typography.bodySmall,
         )
@@ -1178,6 +1216,108 @@ private fun BackupRestoreSection(
             }
         }
     }
+}
+
+private enum class BackupPasswordDialogMode {
+    Export,
+    Import,
+}
+
+@Composable
+private fun BackupPasswordDialog(
+    mode: BackupPasswordDialogMode,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    val isExport = mode == BackupPasswordDialogMode.Export
+    var password by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    val validationMessage = when {
+        password.length < EncryptedBackupCodec.MIN_PASSWORD_LENGTH -> {
+            "Use at least ${EncryptedBackupCodec.MIN_PASSWORD_LENGTH} characters."
+        }
+
+        isExport && password != confirmation -> "Passwords do not match."
+        else -> null
+    }
+
+    fun dismiss() {
+        password = ""
+        confirmation = ""
+        onDismiss()
+    }
+
+    fun submit() {
+        if (validationMessage != null) return
+        val submittedPassword = password
+        password = ""
+        confirmation = ""
+        onConfirm(submittedPassword)
+    }
+
+    AlertDialog(
+        onDismissRequest = ::dismiss,
+        title = {
+            Text(if (isExport) "Encrypt backup" else "Unlock backup")
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = if (isExport) {
+                        "This backup includes clipboard history and configured API keys. Enter a new password for this export."
+                    } else {
+                        "Enter the password used to encrypt this backup."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    label = { Text("Backup password") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                )
+                if (isExport) {
+                    OutlinedTextField(
+                        value = confirmation,
+                        onValueChange = { confirmation = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("Confirm password") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    )
+                }
+                Text(
+                    text = "This password is not saved and cannot be recovered.",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                validationMessage?.let { message ->
+                    Text(
+                        text = message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = ::submit,
+                enabled = validationMessage == null,
+            ) {
+                Text(if (isExport) "Export" else "Restore")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = ::dismiss) {
+                Text("Cancel")
+            }
+        },
+    )
 }
 
 @Composable

@@ -28,7 +28,8 @@ object SettingsUiDimensions {
 
 object SettingsBackupDefaults {
     val FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US)
-    val IMPORT_MIME_TYPES = arrayOf("application/json", "text/json", "text/plain")
+    const val MIME_TYPE = "application/octet-stream"
+    val IMPORT_MIME_TYPES = arrayOf(MIME_TYPE, "application/json", "text/json", "text/plain")
 }
 
 object SettingsThemeColors {

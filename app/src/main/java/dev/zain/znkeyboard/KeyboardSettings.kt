@@ -8,6 +8,7 @@ import android.util.Base64
 import dev.zain.znkeyboard.constants.AgentDefaults
 import dev.zain.znkeyboard.constants.GifDefaults
 import dev.zain.znkeyboard.constants.KeyboardDefaults
+import dev.zain.znkeyboard.ime.ClipboardHistoryStore
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -40,7 +41,7 @@ object KeyboardSettings {
     const val MAX_CUSTOM_EMOJI_TAG_CHARS = KeyboardDefaults.MAX_CUSTOM_EMOJI_TAG_CHARS
 
     private const val BACKUP_FORMAT = "dev.zain.znkeyboard.settings-backup"
-    private const val BACKUP_SCHEMA_VERSION = 1
+    private const val BACKUP_SCHEMA_VERSION = 2
     private const val BACKUP_JSON_INDENT = 2
     private const val PREFS_NAME = "keyboard_settings"
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
@@ -733,18 +734,16 @@ object KeyboardSettings {
         )
     }
 
-    fun createBackupJson(context: Context): String {
+    /**
+     * Creates the backup payload that is encrypted before it leaves the device.
+     * Never write this JSON directly to user-selected storage.
+     */
+    fun createBackupPayloadJson(context: Context): String {
         val backup = JSONObject()
             .put("format", BACKUP_FORMAT)
             .put("schemaVersion", BACKUP_SCHEMA_VERSION)
             .put("createdAtEpochMillis", System.currentTimeMillis())
             .put("appId", context.packageName)
-            .put(
-                "excluded",
-                JSONArray()
-                    .put("agentApiKey")
-                    .put("gifAppKey"),
-            )
             .put(
                 "settings",
                 JSONObject()
@@ -782,13 +781,33 @@ object KeyboardSettings {
                             .put("openRouterProviderSlug", readOpenRouterProviderSlug(context))
                             .put("reasoningMode", readAgentReasoningMode(context).id)
                             .put("reasoningTextEnabled", readAgentReasoningTextEnabled(context)),
-                    ),
+                    )
+                    .put("clipboardHistory", clipboardHistoryJson(ClipboardHistoryStore.read(context))),
+            )
+            .put(
+                "secrets",
+                JSONObject()
+                    .put(
+                        "agentApiKeys",
+                        JSONObject().apply {
+                            AgentProviderType.entries.forEach { providerType ->
+                                put(
+                                    providerType.id,
+                                    JSONObject()
+                                        .put("value", readAgentApiKey(context, providerType))
+                                        .put("locked", readAgentApiKeyLocked(context, providerType)),
+                                )
+                            }
+                        },
+                    )
+                    .put("gifAppKey", readGifAppKey(context))
+                    .put("gifAppKeyLocked", readGifAppKeyLocked(context)),
             )
 
         return backup.toString(BACKUP_JSON_INDENT)
     }
 
-    fun restoreBackupJson(context: Context, backupJson: String): BackupRestoreResult {
+    fun restoreBackupPayloadJson(context: Context, backupJson: String): BackupRestoreResult {
         val backup = JSONObject(backupJson)
         if (backup.optString("format") != BACKUP_FORMAT) {
             throw JSONException("Not a ZnKeyboard settings backup.")
@@ -805,6 +824,7 @@ object KeyboardSettings {
         val emoji = settings.optJSONObject("emoji") ?: JSONObject()
         val gif = settings.optJSONObject("gif") ?: JSONObject()
         val rewrite = settings.optJSONObject("rewrite") ?: JSONObject()
+        val secrets = backup.optJSONObject("secrets")
 
         val heightScale = keyboard.optFiniteFloat("heightScale", readHeightScale(context))
             .coerceIn(MIN_HEIGHT_SCALE, MAX_HEIGHT_SCALE)
@@ -842,6 +862,27 @@ object KeyboardSettings {
         val customEmojiTags = emoji.optCustomEmojiTags("customTags")
             ?.let(::normalizeCustomEmojiTags)
             ?: readCustomEmojiTags(context)
+        val clipboardHistory = settings.optClipboardHistory("clipboardHistory")
+            ?.let(ClipboardHistoryStore::normalizeEntries)
+
+        val agentSecrets = secrets?.optJSONObject("agentApiKeys")
+        val restoredAgentSecrets = AgentProviderType.entries.mapNotNull { providerType ->
+            val secret = agentSecrets?.optJSONObject(providerType.id) ?: return@mapNotNull null
+            RestoredSecret(
+                providerType = providerType,
+                value = secret.optString("value"),
+                locked = secret.optBoolean(
+                    "locked",
+                    readAgentApiKeyLocked(context, providerType),
+                ),
+            )
+        }
+        val restoredGifAppKey = secrets
+            ?.takeIf { it.has("gifAppKey") }
+            ?.optString("gifAppKey")
+        val restoredGifAppKeyLocked = secrets
+            ?.takeIf { it.has("gifAppKeyLocked") }
+            ?.optBoolean("gifAppKeyLocked", readGifAppKeyLocked(context))
 
         val providerType = rewrite.optById(
             key = "providerType",
@@ -881,12 +922,22 @@ object KeyboardSettings {
             context,
             rewrite.optBoolean("reasoningTextEnabled", readAgentReasoningTextEnabled(context)),
         )
+        clipboardHistory?.let { ClipboardHistoryStore.replace(context, it) }
+        restoredAgentSecrets.forEach { secret ->
+            saveAgentApiKey(context, secret.providerType, secret.value)
+            saveAgentApiKeyLocked(context, secret.providerType, secret.locked)
+        }
+        restoredGifAppKey?.let { appKey ->
+            saveGifAppKey(context, appKey)
+            restoredGifAppKeyLocked?.let { locked -> saveGifAppKeyLocked(context, locked) }
+        }
 
         return BackupRestoreResult(
             schemaVersion = schemaVersion,
             snippetCount = snippets.size,
             customEmojiTagCount = customEmojiTags.size,
             recentEmojiCount = recentEmojis.size,
+            clipboardEntryCount = clipboardHistory?.size ?: ClipboardHistoryStore.read(context).size,
         )
     }
 
@@ -1073,6 +1124,22 @@ object KeyboardSettings {
         }
     }
 
+    private fun clipboardHistoryJson(entries: List<ClipboardHistoryStore.Entry>): JSONArray {
+        return JSONArray().apply {
+            ClipboardHistoryStore.normalizeEntries(entries).forEach { entry ->
+                put(
+                    JSONObject()
+                        .put("text", entry.text)
+                        .put("timestampMillis", entry.timestampMillis)
+                        .apply {
+                            entry.sourcePackageName?.let { put("sourcePackageName", it) }
+                            entry.sourceAppLabel?.let { put("sourceAppLabel", it) }
+                        },
+                )
+            }
+        }
+    }
+
     private fun JSONObject.optTextSnippetList(key: String): List<TextSnippet>? {
         val array = optJSONArray(key) ?: return null
         return array.toTextSnippetList()
@@ -1124,6 +1191,23 @@ object KeyboardSettings {
                             add(tags.optString(tagIndex))
                         }
                     },
+                )
+            }
+        }
+    }
+
+    private fun JSONObject.optClipboardHistory(key: String): List<ClipboardHistoryStore.Entry>? {
+        val array = optJSONArray(key) ?: return null
+        return buildList {
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                add(
+                    ClipboardHistoryStore.Entry(
+                        text = item.optString("text"),
+                        timestampMillis = item.optLong("timestampMillis", 0L),
+                        sourcePackageName = item.optString("sourcePackageName").takeIf { it.isNotBlank() },
+                        sourceAppLabel = item.optString("sourceAppLabel").takeIf { it.isNotBlank() },
+                    ),
                 )
             }
         }
@@ -1274,11 +1358,18 @@ object KeyboardSettings {
         val iv: String,
     )
 
+    private data class RestoredSecret(
+        val providerType: AgentProviderType,
+        val value: String,
+        val locked: Boolean,
+    )
+
     data class BackupRestoreResult(
         val schemaVersion: Int,
         val snippetCount: Int,
         val customEmojiTagCount: Int,
         val recentEmojiCount: Int,
+        val clipboardEntryCount: Int,
     )
 
 }

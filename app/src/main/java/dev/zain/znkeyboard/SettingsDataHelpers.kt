@@ -6,6 +6,7 @@ import dev.zain.znkeyboard.constants.SettingsBackupDefaults
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URLEncoder
@@ -198,29 +199,72 @@ internal fun List<ModelOption>.filterForQuery(query: String): List<ModelOption> 
     }
 }
 
-internal fun writeSettingsBackup(context: Context, uri: Uri) {
-    val output = context.contentResolver.openOutputStream(uri)
-        ?: throw IOException("Could not open export file.")
-    output.bufferedWriter(Charsets.UTF_8).use { writer ->
-        writer.write(KeyboardSettings.createBackupJson(context))
+internal fun writeEncryptedSettingsBackup(
+    context: Context,
+    uri: Uri,
+    password: CharArray,
+) {
+    try {
+        val output = context.contentResolver.openOutputStream(uri)
+            ?: throw IOException("Could not open export file.")
+        output.bufferedWriter(Charsets.UTF_8).use { writer ->
+            writer.write(
+                EncryptedBackupCodec.encrypt(
+                    plainText = KeyboardSettings.createBackupPayloadJson(context),
+                    password = password,
+                ),
+            )
+        }
+    } finally {
+        password.fill('\u0000')
     }
 }
 
-internal fun restoreSettingsBackup(
+internal fun restoreEncryptedSettingsBackup(
     context: Context,
     uri: Uri,
+    password: CharArray,
 ): KeyboardSettings.BackupRestoreResult {
+    return try {
+        KeyboardSettings.restoreBackupPayloadJson(
+            context = context,
+            backupJson = EncryptedBackupCodec.decrypt(
+                encryptedBackup = readBackupFile(context, uri),
+                password = password,
+            ),
+        )
+    } finally {
+        password.fill('\u0000')
+    }
+}
+
+private fun readBackupFile(context: Context, uri: Uri): String {
     val input = context.contentResolver.openInputStream(uri)
         ?: throw IOException("Could not open import file.")
-    val backupJson = input.bufferedReader(Charsets.UTF_8).use { reader ->
-        reader.readText()
+    val bytes = input.use { source ->
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(BACKUP_READ_BUFFER_BYTES)
+        var totalBytes = 0
+        while (true) {
+            val bytesRead = source.read(buffer)
+            if (bytesRead < 0) break
+            totalBytes += bytesRead
+            if (totalBytes > MAX_ENCRYPTED_BACKUP_BYTES) {
+                throw IOException("Backup is too large to import.")
+            }
+            output.write(buffer, 0, bytesRead)
+        }
+        output.toByteArray()
     }
-    return KeyboardSettings.restoreBackupJson(context, backupJson)
+    return String(bytes, Charsets.UTF_8)
 }
 
 internal fun suggestedBackupFileName(): String {
-    return "znkeyboard-backup-${SettingsBackupDefaults.FILE_TIMESTAMP_FORMAT.format(LocalDateTime.now())}.json"
+    return "znkeyboard-backup-${SettingsBackupDefaults.FILE_TIMESTAMP_FORMAT.format(LocalDateTime.now())}.znkb"
 }
+
+private const val BACKUP_READ_BUFFER_BYTES = 8 * 1024
+private const val MAX_ENCRYPTED_BACKUP_BYTES = 32 * 1024 * 1024
 
 internal data class ModelOption(
     val id: String,

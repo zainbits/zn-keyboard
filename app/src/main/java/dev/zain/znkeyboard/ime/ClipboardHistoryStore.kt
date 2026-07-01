@@ -20,6 +20,8 @@ object ClipboardHistoryStore {
     const val MAX_HISTORY = 100
     const val MAX_ENTRY_CHARS = 32_000
     const val HISTORY_FILE_NAME = "clipboard_history.enc"
+    private const val MAX_SOURCE_PACKAGE_NAME_CHARS = 256
+    private const val MAX_SOURCE_APP_LABEL_CHARS = 256
 
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val KEYSTORE_ALIAS = "znkeyboard_clipboard_history"
@@ -66,7 +68,7 @@ object ClipboardHistoryStore {
             addAll(read(context).filterNot { it.text == text })
         }.take(MAX_HISTORY)
 
-        write(context, entries)
+        write(context, normalizeEntries(entries))
     }
 
     fun clear(context: Context) {
@@ -81,6 +83,43 @@ object ClipboardHistoryStore {
         } else {
             write(context, entries)
         }
+    }
+
+    /** Replaces the local encrypted history with a validated imported snapshot. */
+    fun replace(context: Context, entries: List<Entry>) {
+        val normalized = normalizeEntries(entries)
+        if (normalized.isEmpty()) {
+            clear(context)
+        } else {
+            write(context, normalized)
+        }
+    }
+
+    fun normalizeEntries(entries: List<Entry>): List<Entry> {
+        val seenTexts = mutableSetOf<String>()
+        return entries
+            .asSequence()
+            .mapNotNull { entry ->
+                val text = entry.text
+                if (text.isBlank() || text.length > MAX_ENTRY_CHARS || !seenTexts.add(text)) {
+                    null
+                } else {
+                    Entry(
+                        text = text,
+                        timestampMillis = entry.timestampMillis.coerceAtLeast(0L),
+                        sourcePackageName = entry.sourcePackageName
+                            ?.trim()
+                            ?.take(MAX_SOURCE_PACKAGE_NAME_CHARS)
+                            ?.takeIf { it.isNotBlank() },
+                        sourceAppLabel = entry.sourceAppLabel
+                            ?.trim()
+                            ?.take(MAX_SOURCE_APP_LABEL_CHARS)
+                            ?.takeIf { it.isNotBlank() },
+                    )
+                }
+            }
+            .take(MAX_HISTORY)
+            .toList()
     }
 
     fun deleteLegacyRewriteHistory(context: Context) {
@@ -161,7 +200,7 @@ object ClipboardHistoryStore {
                         ),
                     )
                 }
-            }.take(MAX_HISTORY)
+            }.let(::normalizeEntries)
         } catch (_: JSONException) {
             emptyList()
         }

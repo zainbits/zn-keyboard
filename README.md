@@ -16,7 +16,7 @@ A modern, privacy-respecting custom keyboard (input method editor) for Android, 
 Most "AI keyboards" send your keystrokes to a vendor's cloud. ZnKeyboard takes the opposite stance:
 
 - **Bring your own key.** AI features call your own OpenAI / OpenAI‑compatible endpoint. There is no ZnKeyboard backend in the middle.
-- **Keys never leave the device in plaintext.** API keys are encrypted at rest with the Android Keystore (AES/GCM) and decrypted only to make a request.
+- **Keys never leave the device in plaintext.** API keys are encrypted at rest with the Android Keystore (AES/GCM). A user-created backup can include them only inside a password-encrypted file.
 - **AI is opt‑in.** The keyboard is fully usable with the agent disabled; nothing is sent anywhere unless you turn it on and trigger it.
 
 ## Features
@@ -54,7 +54,7 @@ Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from
 - Gboard‑style **spacebar cursor dragging** for precise caret movement.
 - Selection‑aware deletion and correct editor‑action handling (`Done`, `Go`, `Next`, `Search`, `Send`, etc.).
 - **GIF picker** powered by [KLIPY](https://klipy.com), with on‑device caching and content filtering.
-- **Settings backup & restore** as portable JSON.
+- **Password-encrypted backup & restore** for settings, clipboard history, and configured API credentials.
 
 ## Architecture
 
@@ -112,7 +112,7 @@ You are billed directly by your chosen provider for your own usage; ZnKeyboard n
 - No analytics, no telemetry, no third‑party SDKs for tracking.
 - AI requests go straight from your device to the endpoint you configured, using your key.
 - GIF search talks to KLIPY only while the GIF panel is open.
-- Settings and secrets stay on‑device; secrets are encrypted at rest.
+- Settings and secrets stay on-device; secrets are encrypted at rest. User-created backups are encrypted with a password that is never saved by the app.
 
 ## Contributing
 
