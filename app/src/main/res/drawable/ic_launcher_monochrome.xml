@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Material Symbols Outlined: keyboard, optically sized for adaptive launcher icons. -->
+<!-- Material Symbols Outlined: keyboard, monochrome layer for themed launcher icons. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
@@ -12,7 +12,7 @@
         android:scaleY="0.46">
         <group android:translateY="960">
             <path
-                android:fillColor="#FFFFFFFF"
+                android:fillColor="#FF000000"
                 android:pathData="M160,-200q-33,0 -56.5,-23.5T80,-280v-400q0,-33 23.5,-56.5T160,-760h640q33,0 56.5,23.5T880,-680v400q0,33 -23.5,56.5T800,-200H160ZM160,-280h640v-400H160v400ZM320,-320h320v-80H320v80ZM200,-440h80v-80h-80v80ZM320,-440h80v-80h-80v80ZM440,-440h80v-80h-80v80ZM560,-440h80v-80h-80v80ZM680,-440h80v-80h-80v80ZM200,-560h80v-80h-80v80ZM320,-560h80v-80h-80v80ZM440,-560h80v-80h-80v80ZM560,-560h80v-80h-80v80ZM680,-560h80v-80h-80v80ZM160,-280v-400,400Z" />
         </group>
     </group>
