@@ -1,11 +1,36 @@
+# Android Studio and local machine state
 *.iml
-.gradle
-/local.properties
 /.idea/
-/build/
-/app/build/
-/captures/
-.externalNativeBuild
-.cxx
 local.properties
+
+# Gradle, Kotlin, and generated build output
+/.gradle/
+/.kotlin/
+**/build/
+
+# Native and profiling output
+/.externalNativeBuild/
+/.cxx/
+/captures/
+*.hprof
+
+# Packaged artifacts and signing material
+*.apk
+*.aab
+*.ap_
+*.idsig
+*.dex
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+secrets.properties
+
+# Local secrets and OS metadata
+*.secret
+.env
+.env.*
+.DS_Store
+Thumbs.db
+
 /codex-oss-application.md
