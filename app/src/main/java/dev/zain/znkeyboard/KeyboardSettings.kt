@@ -97,6 +97,10 @@ object KeyboardSettings {
         UpperRowKeyOption("page_up", "PgUp"),
         UpperRowKeyOption("page_down", "PgDn"),
         UpperRowKeyOption("backspace", "Del"),
+        // One-tap tmux chords (prefix + next/prev window).
+        UpperRowKeyOption("tmux_prefix", "C-b"),
+        UpperRowKeyOption("tmux_next", "C-b n"),
+        UpperRowKeyOption("tmux_prev", "C-b p"),
         UpperRowKeyOption("pipe", "|"),
         UpperRowKeyOption("slash", "/"),
         UpperRowKeyOption("backslash", "\\"),

@@ -233,6 +233,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 cancelActiveAgentForEditorChange()
                 sendKey(action.keyCode, modifiers)
             }
+            is KeyboardAction.Chord -> {
+                cancelActiveAgentForEditorChange()
+                sendKey(action.keyCode, ModifierState(ctrl = action.ctrl, alt = action.alt))
+            }
+            is KeyboardAction.Sequence -> {
+                cancelActiveAgentForEditorChange()
+                for (step in action.steps) {
+                    sendKey(step.keyCode, ModifierState(ctrl = step.ctrl, alt = step.alt))
+                }
+            }
             is KeyboardAction.Text -> handleText(action.value, modifiers)
         }
     }
@@ -827,6 +837,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                     searchView.deleteQueryCharacter()
                 }
             }
+            is KeyboardAction.Chord,
+            is KeyboardAction.Sequence -> Unit
             is KeyboardAction.Text -> searchView.appendQueryText(action.value)
         }
         return true
@@ -845,6 +857,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                     searchView.deleteQueryCharacter()
                 }
             }
+            is KeyboardAction.Chord,
+            is KeyboardAction.Sequence -> Unit
             is KeyboardAction.Text -> searchView.appendQueryText(action.value)
         }
         return true
@@ -863,6 +877,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                     searchView.deleteQueryCharacter()
                 }
             }
+            is KeyboardAction.Chord,
+            is KeyboardAction.Sequence -> Unit
             is KeyboardAction.Text -> searchView.appendQueryText(action.value)
         }
         return true

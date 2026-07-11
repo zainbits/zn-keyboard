@@ -32,6 +32,7 @@ Most "AI keyboards" send your keystrokes to a vendor's cloud. ZnKeyboard takes t
 Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from a deep menu of keys most keyboards never give you:
 - **Cursor & navigation:** arrow keys, `Home`/`End`, `PgUp`/`PgDn`, `Del`.
 - **Modifiers & control:** `Ctrl`, `Alt`, `Tab`, `Esc` (latched only for the dispatched action).
+- **tmux chords:** one-tap `C-b` (prefix), `C-b n` (next window), `C-b p` (previous window).
 - **Symbols you actually type:** `|`, `/`, `\`, `-`, `=`, and more.
 - **Panel shortcuts:** jump straight to emoji, GIF, clipboard, or snippets.
 - **Reorderable rows** and adjustable keyboard height so the layout fits your thumbs and your workflow (great for coding and terminal apps on mobile).

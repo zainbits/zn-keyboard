@@ -1387,6 +1387,44 @@ class ZnKeyboardView @JvmOverloads constructor(
             "page_up" -> KeySpec(id, "PgUp", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_UP)), weight, KeyRole.Function, enabled = enabled)
             "page_down" -> KeySpec(id, "PgDn", KeyIntent.Dispatch(KeyboardAction.KeyCode(KeyEvent.KEYCODE_PAGE_DOWN)), weight, KeyRole.Function, enabled = enabled)
             "backspace" -> KeySpec(id, "Del", KeyIntent.Dispatch(KeyboardAction.Backspace), weight, KeyRole.Function, icon = KeyIcon.Delete, enabled = enabled)
+            "tmux_prefix" -> KeySpec(
+                id,
+                "C-b",
+                KeyIntent.Dispatch(KeyboardAction.Chord(KeyEvent.KEYCODE_B, ctrl = true)),
+                weight,
+                KeyRole.Function,
+                enabled = enabled,
+            )
+            "tmux_next" -> KeySpec(
+                id,
+                "C-b n",
+                KeyIntent.Dispatch(
+                    KeyboardAction.Sequence(
+                        listOf(
+                            KeyboardAction.Chord(KeyEvent.KEYCODE_B, ctrl = true),
+                            KeyboardAction.Chord(KeyEvent.KEYCODE_N),
+                        ),
+                    ),
+                ),
+                weight,
+                KeyRole.Function,
+                enabled = enabled,
+            )
+            "tmux_prev" -> KeySpec(
+                id,
+                "C-b p",
+                KeyIntent.Dispatch(
+                    KeyboardAction.Sequence(
+                        listOf(
+                            KeyboardAction.Chord(KeyEvent.KEYCODE_B, ctrl = true),
+                            KeyboardAction.Chord(KeyEvent.KEYCODE_P),
+                        ),
+                    ),
+                ),
+                weight,
+                KeyRole.Function,
+                enabled = enabled,
+            )
             "pipe" -> textUpperRowKey(id, "|", weight, enabled)
             "slash" -> textUpperRowKey(id, "/", weight, enabled)
             "backslash" -> textUpperRowKey(id, "\\", weight, enabled)
@@ -1948,6 +1986,19 @@ data class ModifierState(
 sealed class KeyboardAction {
     data class Text(val value: String) : KeyboardAction()
     data class KeyCode(val keyCode: Int) : KeyboardAction()
+    /**
+     * Single key with fixed modifiers. Unlike [KeyCode], latched Ctrl/Alt on the keyboard
+     * are not applied — useful for one-tap chords such as tmux's prefix (Ctrl+B).
+     */
+    data class Chord(
+        val keyCode: Int,
+        val ctrl: Boolean = false,
+        val alt: Boolean = false,
+    ) : KeyboardAction()
+    /**
+     * Ordered multi-key shortcut, e.g. tmux next/prev window: Ctrl+B then n/p.
+     */
+    data class Sequence(val steps: List<Chord>) : KeyboardAction()
     data object Backspace : KeyboardAction()
     data object Enter : KeyboardAction()
 }
