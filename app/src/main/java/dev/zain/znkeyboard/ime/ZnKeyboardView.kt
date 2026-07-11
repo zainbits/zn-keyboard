@@ -97,6 +97,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var heightScale = 1f
     private var bottomPaddingDp = KeyboardSettings.DEFAULT_BOTTOM_PADDING_DP
     private var functionKeyBackgroundsEnabled = true
+    private var numberRowEnabled = false
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
@@ -149,6 +150,15 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun setFunctionKeyBackgroundsEnabled(enabled: Boolean) {
         if (functionKeyBackgroundsEnabled != enabled) {
             functionKeyBackgroundsEnabled = enabled
+            invalidate()
+        }
+    }
+
+    fun setNumberRowEnabled(enabled: Boolean) {
+        if (numberRowEnabled != enabled) {
+            numberRowEnabled = enabled
+            requestLayout()
+            refreshHitTargets()
             invalidate()
         }
     }
@@ -224,6 +234,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (layoutMode != targetMode) {
             layoutMode = targetMode
             shiftState = ShiftState.Off
+            requestLayoutIfNumberRowHeightMayChange()
             refreshHitTargets()
             invalidate()
         }
@@ -232,6 +243,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun resetToLetters() {
         if (layoutMode != LayoutMode.Letters) {
             layoutMode = LayoutMode.Letters
+            requestLayoutIfNumberRowHeightMayChange()
             refreshHitTargets()
             invalidate()
         }
@@ -240,6 +252,11 @@ class ZnKeyboardView @JvmOverloads constructor(
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val secondRowHeight = if (hasVisibleSecondRow()) {
             ImeLayout.compactAgentRowHeightPx(context, heightScale)
+        } else {
+            0
+        }
+        val numberRowHeight = if (hasVisibleNumberRow()) {
+            ImeLayout.standardRowHeightPx(context, heightScale)
         } else {
             0
         }
@@ -252,6 +269,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
             .roundToInt()
             .plus(secondRowHeight)
+            .plus(numberRowHeight)
         val width = MeasureSpec.getSize(widthMeasureSpec)
         setMeasuredDimension(width, resolveSize(desiredHeight, heightMeasureSpec))
     }
@@ -1143,16 +1161,19 @@ class ZnKeyboardView @JvmOverloads constructor(
                     LayoutMode.PhonePad -> LayoutMode.Letters
                 }
                 shiftState = ShiftState.Off
+                requestLayoutIfNumberRowHeightMayChange()
             }
             KeyIntent.ToggleMoreSymbols -> {
                 layoutMode = if (layoutMode == LayoutMode.MoreSymbols) LayoutMode.Symbols else LayoutMode.MoreSymbols
                 lastNumericLayoutMode = LayoutMode.Symbols
                 shiftState = ShiftState.Off
+                requestLayoutIfNumberRowHeightMayChange()
             }
             KeyIntent.ToggleNumericLayout -> {
                 layoutMode = if (layoutMode == LayoutMode.PhonePad) LayoutMode.Symbols else LayoutMode.PhonePad
                 lastNumericLayoutMode = layoutMode
                 shiftState = ShiftState.Off
+                requestLayoutIfNumberRowHeightMayChange()
             }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
@@ -1258,12 +1279,15 @@ class ZnKeyboardView @JvmOverloads constructor(
         )
         val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
         val mainRows = when (layoutMode) {
-            LayoutMode.Letters -> listOf(
-                RowSpec(chars("qwertyuiop"), ImeLayout.STANDARD_ROW_WEIGHT),
-                RowSpec(chars("asdfghjkl"), ImeLayout.STANDARD_ROW_WEIGHT, layoutKeyCount = 10),
-                letterBottomRow(),
-                bottomRow(),
-            )
+            LayoutMode.Letters -> buildList {
+                if (hasVisibleNumberRow()) {
+                    add(RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT))
+                }
+                add(RowSpec(chars("qwertyuiop"), ImeLayout.STANDARD_ROW_WEIGHT))
+                add(RowSpec(chars("asdfghjkl"), ImeLayout.STANDARD_ROW_WEIGHT, layoutKeyCount = 10))
+                add(letterBottomRow())
+                add(bottomRow())
+            }
             LayoutMode.Symbols -> listOf(
                 RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT),
                 RowSpec(symbols("-/:;()\$&@\"", rowPrefix = "symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
@@ -1279,6 +1303,17 @@ class ZnKeyboardView @JvmOverloads constructor(
             LayoutMode.PhonePad -> phonePadRows()
         }
         return buttonRows + mainRows
+    }
+
+    private fun hasVisibleNumberRow(): Boolean {
+        // Static 1–0 row sits above letter keys only; numpad/phone pad already has its own layout.
+        return numberRowEnabled && layoutMode == LayoutMode.Letters
+    }
+
+    private fun requestLayoutIfNumberRowHeightMayChange() {
+        if (numberRowEnabled) {
+            requestLayout()
+        }
     }
 
     private fun terminalRow(): RowSpec? {

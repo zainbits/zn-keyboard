@@ -42,4 +42,13 @@ internal object ImeLayout {
         val unitHeight = (baseHeightPx - reservedHeightPx) / ROW_WEIGHT_SUM_WITH_UPPER_ROW
         return (TOP_PADDING_DP * density + COMPACT_ROW_WEIGHT * unitHeight).roundToInt()
     }
+
+    /** Extra height for one standard letter-row when the optional number row is visible. */
+    fun standardRowHeightPx(context: Context, scale: Float): Int {
+        val density = context.resources.displayMetrics.density
+        val baseHeightPx = BASE_HEIGHT_DP * scale * density
+        val reservedHeightPx = (TOP_PADDING_DP + BASE_BOTTOM_PADDING_DP + ROW_GAP_DP * (ROW_COUNT_WITH_UPPER_ROW - 1)) * density
+        val unitHeight = (baseHeightPx - reservedHeightPx) / ROW_WEIGHT_SUM_WITH_UPPER_ROW
+        return (STANDARD_ROW_WEIGHT * unitHeight + ROW_GAP_DP * density).roundToInt()
+    }
 }
