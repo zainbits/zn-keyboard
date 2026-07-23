@@ -1,5 +1,6 @@
 package dev.zain.znkeyboard.ime
 
+import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
@@ -9,6 +10,7 @@ import android.net.Uri
 import android.inputmethodservice.InputMethodService
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.os.SystemClock
 import android.text.InputType
 import android.util.Log
@@ -27,6 +29,7 @@ import androidx.core.content.FileProvider
 import dev.zain.znkeyboard.EmojiCatalog
 import dev.zain.znkeyboard.EmojiSkinTone
 import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.AgentDefaults
 import org.json.JSONArray
 import org.json.JSONException
@@ -404,6 +407,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         applyAgentReview()
     }
 
+    override fun onAgentErrorCopy() {
+        copyAgentError()
+    }
+
     override fun onAgentReviewCancel() {
         cancelAgentReview()
     }
@@ -646,7 +653,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.callback = this
         }
         reviewView.setHeightScale(KeyboardSettings.readHeightScale(this))
-        reviewView.render(review.replacementText)
+        reviewView.renderReview(review.replacementText)
+        activeSurface = KeyboardSurface.Review
+        swapKeyboardSurface(reviewView)
+        renderSecondRow()
+    }
+
+    private fun showAgentErrorPanel(message: String) {
+        hideEmojiSearchView()
+        hideGifSearchView()
+        hideSavedTextSearchView()
+        val reviewView = agentReviewView ?: AgentReviewView(this).also { view ->
+            agentReviewView = view
+            view.callback = this
+        }
+        reviewView.setHeightScale(KeyboardSettings.readHeightScale(this))
+        reviewView.renderError(message)
         activeSurface = KeyboardSurface.Review
         swapKeyboardSurface(reviewView)
         renderSecondRow()
@@ -1498,6 +1520,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
+    private fun copyAgentError() {
+        val error = agentError?.takeIf { it.isNotBlank() } ?: return
+        val clip = ClipData.newPlainText(getString(R.string.agent_error_clip_label), error).apply {
+            description.extras = PersistableBundle().apply {
+                putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+            }
+        }
+        clipboardManager.setPrimaryClip(clip)
+    }
+
     private fun captureRewriteTarget(): AgentEditTarget? {
         val snapshot = captureEditorSnapshot(MAX_REWRITE_SOURCE_CHARS + 1) ?: run {
             showAgentError("Couldn't read the current field.")
@@ -1582,7 +1614,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (!agentLoading && activeRequestTarget == null && activeReview == null) {
             if (agentError != null) {
                 agentError = null
-                renderSecondRow()
+                if (activeSurface == KeyboardSurface.Review) {
+                    showKeyboardPanel()
+                } else {
+                    renderSecondRow()
+                }
             }
             return
         }
@@ -2000,8 +2036,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentLoading = false
         agentError = message
         Log.w(TAG, message)
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-        renderSecondRow()
+        showAgentErrorPanel(message)
     }
 
     private fun resetAgentState(returnToKeyboard: Boolean = false) {

@@ -22,4 +22,5 @@ object ImeColors {
     val SECTION_TEXT = Color.rgb(145, 145, 145)
     val SECONDARY_TEXT = Color.rgb(170, 170, 170)
     val TAG_TEXT = Color.rgb(170, 210, 255)
+    val ERROR_TEXT = Color.rgb(255, 138, 138)
 }

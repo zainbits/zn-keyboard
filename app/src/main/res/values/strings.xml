@@ -3,4 +3,8 @@
     <string name="app_name">ZnKeyboard</string>
     <string name="ime_name">ZnKeyboard</string>
     <string name="ime_subtype_label">English</string>
+    <string name="agent_action_apply">Apply</string>
+    <string name="agent_action_cancel">Cancel</string>
+    <string name="agent_action_copy">Copy</string>
+    <string name="agent_error_clip_label">ZnKeyboard LLM error</string>
 </resources>

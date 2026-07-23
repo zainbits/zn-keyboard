@@ -8,6 +8,7 @@ import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
 import kotlin.math.roundToInt
 
@@ -17,10 +18,12 @@ class AgentReviewView @JvmOverloads constructor(
 ) : LinearLayout(context, attrs) {
     interface Callback {
         fun onAgentReviewApply()
+        fun onAgentErrorCopy()
         fun onAgentReviewCancel()
     }
 
     var callback: Callback? = null
+    private var showingError = false
 
     private val suggestionText = TextView(context).apply {
         setTextColor(PALETTE.text)
@@ -31,14 +34,20 @@ class AgentReviewView @JvmOverloads constructor(
         background = fieldBackground()
         importantForAutofill = IMPORTANT_FOR_AUTOFILL_NO
     }
-    private val applyButton = reviewActionButton(
-        label = "Apply",
+    private val primaryButton = reviewActionButton(
+        label = context.getString(R.string.agent_action_apply),
         backgroundColor = PALETTE.action,
         textColor = PALETTE.text,
-        onClick = { callback?.onAgentReviewApply() },
+        onClick = {
+            if (showingError) {
+                callback?.onAgentErrorCopy()
+            } else {
+                callback?.onAgentReviewApply()
+            }
+        },
     )
     private val cancelButton = reviewActionButton(
-        label = "Cancel",
+        label = context.getString(R.string.agent_action_cancel),
         backgroundColor = PALETTE.function,
         textColor = PALETTE.mutedText,
         onClick = { callback?.onAgentReviewCancel() },
@@ -77,7 +86,7 @@ class AgentReviewView @JvmOverloads constructor(
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(end = 4),
             )
             addView(
-                applyButton,
+                primaryButton,
                 LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).withMargins(start = 4),
             )
         }
@@ -94,8 +103,18 @@ class AgentReviewView @JvmOverloads constructor(
         }
     }
 
-    fun render(text: String) {
+    fun renderReview(text: String) {
+        showingError = false
         suggestionText.text = text
+        suggestionText.setTextColor(PALETTE.text)
+        primaryButton.setText(R.string.agent_action_apply)
+    }
+
+    fun renderError(error: String) {
+        showingError = true
+        suggestionText.text = error
+        suggestionText.setTextColor(PALETTE.errorText)
+        primaryButton.setText(R.string.agent_action_copy)
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -160,6 +179,7 @@ class AgentReviewView @JvmOverloads constructor(
         val action = ImeColors.FUNCTION
         const val text = ImeColors.TEXT
         val mutedText = ImeColors.MUTED_TEXT
+        val errorText = ImeColors.ERROR_TEXT
     }
 
 }
