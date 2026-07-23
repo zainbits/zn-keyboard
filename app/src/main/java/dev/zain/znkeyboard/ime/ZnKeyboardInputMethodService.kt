@@ -1690,9 +1690,23 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         text: String,
     ): String {
         val endpoint = buildChatCompletionsUrl(providerSettings)
-        var strictSchemaError: IOException? = null
+        var structuredOutputError: IOException? = null
+        val outputModes = when (providerSettings.providerType) {
+            KeyboardSettings.AgentProviderType.OpenRouter -> listOf(
+                StructuredOutputMode.StandardJsonSchema,
+                StructuredOutputMode.JsonObject,
+            )
+            KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp -> listOf(
+                StructuredOutputMode.NanbeigeLlamaCppJsonSchema,
+                StructuredOutputMode.JsonObject,
+            )
+            KeyboardSettings.AgentProviderType.OpenAiCompatible -> listOf(
+                StructuredOutputMode.StandardJsonSchema,
+                StructuredOutputMode.JsonObject,
+            )
+        }
 
-        for (outputMode in StructuredOutputMode.entries) {
+        for (outputMode in outputModes) {
             try {
                 return executeChatCompletionRequest(
                     endpoint = endpoint,
@@ -1701,16 +1715,19 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                     outputMode = outputMode,
                 )
             } catch (error: LlmHttpException) {
-                if (outputMode == StructuredOutputMode.JsonSchema && error.isStrictSchemaUnsupported()) {
-                    strictSchemaError = error
-                    Log.w(TAG, "Strict JSON schema output unsupported; retrying JSON object output.")
+                if (
+                    outputMode != StructuredOutputMode.JsonObject &&
+                    error.isStructuredOutputUnsupported()
+                ) {
+                    structuredOutputError = error
+                    Log.w(TAG, "Structured output mode $outputMode unsupported; trying compatibility fallback.")
                     continue
                 }
                 throw error
             }
         }
 
-        throw strictSchemaError ?: IOException("LLM request failed before returning structured output.")
+        throw structuredOutputError ?: IOException("LLM request failed before returning structured output.")
     }
 
     private fun executeChatCompletionRequest(
@@ -1742,6 +1759,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             .put("response_format", structuredResponseFormatFor(outputMode))
             .applyOpenRouterProviderPreferences(providerSettings, outputMode)
             .applyReasoningSettings(providerSettings)
+            .applyLlamaCppCompatibility(providerSettings, outputMode)
 
         return try {
             connection.outputStream.writer(Charsets.UTF_8).use { writer ->
@@ -1864,6 +1882,30 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             return JSONObject().put("type", "json_object")
         }
 
+        val schema = JSONObject()
+            .put("type", "object")
+            .put("additionalProperties", false)
+            .put(
+                "properties",
+                JSONObject()
+                    .put(
+                        STRUCTURED_OUTPUT_TEXT_FIELD,
+                        JSONObject()
+                            .put("type", "string")
+                            .put(
+                                "description",
+                                "The final rewritten text only, without labels, explanations, or prefaces.",
+                            ),
+                    ),
+            )
+            .put("required", JSONArray().put(STRUCTURED_OUTPUT_TEXT_FIELD))
+
+        if (outputMode == StructuredOutputMode.NanbeigeLlamaCppJsonSchema) {
+            return JSONObject()
+                .put("type", "json_schema")
+                .put("schema", schema)
+        }
+
         return JSONObject()
             .put("type", "json_schema")
             .put(
@@ -1871,26 +1913,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 JSONObject()
                     .put("name", "znkeyboard_rewrite_response")
                     .put("strict", true)
-                    .put(
-                        "schema",
-                        JSONObject()
-                            .put("type", "object")
-                            .put("additionalProperties", false)
-                            .put(
-                                "properties",
-                                JSONObject()
-                                    .put(
-                                        STRUCTURED_OUTPUT_TEXT_FIELD,
-                                        JSONObject()
-                                            .put("type", "string")
-                                            .put(
-                                                "description",
-                                                "The final rewritten text only, without labels, explanations, or prefaces.",
-                                            ),
-                                    ),
-                            )
-                            .put("required", JSONArray().put(STRUCTURED_OUTPUT_TEXT_FIELD)),
-                    ),
+                    .put("schema", schema),
             )
     }
 
@@ -1901,7 +1924,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (providerSettings.providerType != KeyboardSettings.AgentProviderType.OpenRouter) return this
 
         val provider = JSONObject()
-        if (outputMode == StructuredOutputMode.JsonSchema) {
+        if (outputMode == StructuredOutputMode.StandardJsonSchema) {
             provider.put("require_parameters", true)
         }
         val providerSlug = providerSettings.openRouterProviderSlug.trim()
@@ -1937,6 +1960,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
         return when (providerSettings.providerType) {
             KeyboardSettings.AgentProviderType.OpenRouter -> applyOpenRouterReasoningSettings(providerSettings)
+            KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp,
             KeyboardSettings.AgentProviderType.OpenAiCompatible -> applyOpenAiCompatibleReasoningSettings(providerSettings)
         }
     }
@@ -1954,6 +1978,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
 
         return put("reasoning", reasoning)
+    }
+
+    private fun JSONObject.applyLlamaCppCompatibility(
+        providerSettings: KeyboardSettings.AgentProviderSettings,
+        outputMode: StructuredOutputMode,
+    ): JSONObject {
+        if (
+            outputMode == StructuredOutputMode.NanbeigeLlamaCppJsonSchema &&
+            providerSettings.reasoningMode == KeyboardSettings.AgentReasoningMode.Off
+        ) {
+            put(
+                "chat_template_kwargs",
+                JSONObject().put("enable_thinking", false),
+            )
+        }
+        return this
     }
 
     private fun JSONObject.applyOpenAiCompatibleReasoningSettings(
@@ -2239,11 +2279,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         detailMessage: String,
     ) : IOException(detailMessage)
 
-    private fun LlmHttpException.isStrictSchemaUnsupported(): Boolean {
+    private fun LlmHttpException.isStructuredOutputUnsupported(): Boolean {
         if (responseCode !in setOf(400, 404, 422)) return false
 
         val normalized = responseText.lowercase(Locale.US)
         return normalized.contains("no endpoints found") ||
+            normalized.contains("failed to initialize samplers") ||
             normalized.contains("response_format") ||
             normalized.contains("json_schema") ||
             normalized.contains("structured output") ||
@@ -2251,7 +2292,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private enum class StructuredOutputMode {
-        JsonSchema,
+        StandardJsonSchema,
+        NanbeigeLlamaCppJsonSchema,
         JsonObject,
     }
 

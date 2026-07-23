@@ -23,6 +23,7 @@ import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,7 +35,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,7 +55,10 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -76,6 +79,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -153,11 +157,17 @@ private fun SettingsScreen() {
     var agentReasoningTextEnabled by remember { mutableStateOf(KeyboardSettings.readAgentReasoningTextEnabled(context)) }
     var agentApiKey by remember { mutableStateOf(KeyboardSettings.readAgentApiKey(context, agentProviderType)) }
     var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
+    var agentProfiles by remember { mutableStateOf(KeyboardSettings.readAgentProfiles(context)) }
+    var activeAgentProfileId by remember { mutableStateOf(KeyboardSettings.readActiveAgentProfileId(context)) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
     var clipboardHistoryCount by remember { mutableStateOf(ClipboardHistoryStore.read(context).size) }
     var backupPasswordDialogMode by remember { mutableStateOf<BackupPasswordDialogMode?>(null) }
     var pendingExportPassword by remember { mutableStateOf<String?>(null) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
+    var selectedDestinationId by rememberSaveable { mutableStateOf(SettingsDestination.Keyboard.id) }
+    val selectedDestination = SettingsDestination.entries.firstOrNull { it.id == selectedDestinationId }
+        ?: SettingsDestination.Keyboard
+    val destinationScrollState = remember(selectedDestinationId) { ScrollState(0) }
 
     fun refreshSettingsFromStorage() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
@@ -183,6 +193,8 @@ private fun SettingsScreen() {
         agentReasoningTextEnabled = KeyboardSettings.readAgentReasoningTextEnabled(context)
         agentApiKey = KeyboardSettings.readAgentApiKey(context, nextProviderType)
         agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, nextProviderType)
+        agentProfiles = KeyboardSettings.readAgentProfiles(context)
+        activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
         textSnippets = KeyboardSettings.readTextSnippets(context)
         clipboardHistoryCount = ClipboardHistoryStore.read(context).size
     }
@@ -323,196 +335,250 @@ private fun SettingsScreen() {
                 modifier = Modifier.statusBarsPadding(),
             )
         },
+        bottomBar = {
+            NavigationBar(
+                containerColor = ZnKeyboardColors.Surface,
+                contentColor = ZnKeyboardColors.OnSurface,
+            ) {
+                SettingsDestination.entries.forEach { destination ->
+                    NavigationBarItem(
+                        selected = selectedDestination == destination,
+                        onClick = {
+                            focusManager.clearFocus()
+                            selectedDestinationId = destination.id
+                        },
+                        icon = {
+                            Icon(
+                                painter = painterResource(destination.iconResId),
+                                contentDescription = null,
+                            )
+                        },
+                        label = { Text(destination.label) },
+                    )
+                }
+            }
+        },
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(destinationScrollState)
                 .pointerInput(focusManager) {
                     detectTapGestures(onTap = { focusManager.clearFocus() })
                 }
                 .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp),
         ) {
-            SystemSetupActions()
+            when (selectedDestination) {
+                SettingsDestination.Keyboard -> {
+                    SystemSetupActions()
 
-            BackupRestoreSection(
-                onExport = { backupPasswordDialogMode = BackupPasswordDialogMode.Export },
-                onImport = { importLauncher.launch(BACKUP_IMPORT_MIME_TYPES) },
-            )
+                    SettingsSectionCard {
+                        SettingsSectionHeader(
+                            title = "Keyboard layout",
+                            iconResId = R.drawable.ic_tune_24,
+                            trailingText = "Height ${(heightScale * 100f).roundToInt()}%",
+                        )
 
-            TextSnippetsSection(
-                snippets = textSnippets,
-                onSnippetsChange = ::updateTextSnippets,
-            )
+                        Slider(
+                            value = heightScale,
+                            onValueChange = {
+                                heightScale = it
+                                KeyboardSettings.saveHeightScale(context, it)
+                            },
+                            valueRange = KeyboardSettings.MIN_HEIGHT_SCALE..KeyboardSettings.MAX_HEIGHT_SCALE,
+                            steps = 6,
+                        )
 
-            ClipboardHistorySettingsSection(
-                entryCount = clipboardHistoryCount,
-                onClearConfirmed = {
-                    ClipboardHistoryStore.clear(context)
-                    clipboardHistoryCount = 0
-                    Toast.makeText(context, "Clipboard history cleared", Toast.LENGTH_SHORT).show()
-                },
-            )
+                        KeyboardBottomPaddingField(
+                            bottomPaddingDp = bottomPaddingDp,
+                            onBottomPaddingChange = {
+                                bottomPaddingDp = it
+                                KeyboardSettings.saveBottomPaddingDp(context, it)
+                            },
+                        )
 
-            AgentModeSection(
-                agentModeEnabled = agentModeEnabled,
-                agentProviderType = agentProviderType,
-                agentApiBaseUrl = agentApiBaseUrl,
-                agentModel = agentModel,
-                openRouterProviderSlug = openRouterProviderSlug,
-                agentReasoningMode = agentReasoningMode,
-                agentReasoningTextEnabled = agentReasoningTextEnabled,
-                agentApiKey = agentApiKey,
-                agentApiKeyLocked = agentApiKeyLocked,
-                onAgentModeEnabledChange = {
-                    agentModeEnabled = it
-                    KeyboardSettings.saveAgentModeEnabled(context, it)
-                },
-                onAgentProviderTypeChange = {
-                    agentProviderType = it
-                    KeyboardSettings.saveAgentProviderType(context, it)
-                    agentApiKey = KeyboardSettings.readAgentApiKey(context, it)
-                    agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, it)
-                },
-                onAgentApiBaseUrlChange = {
-                    agentApiBaseUrl = it
-                    KeyboardSettings.saveAgentApiBaseUrl(context, it)
-                },
-                onAgentModelChange = {
-                    agentModel = it
-                    KeyboardSettings.saveAgentModel(context, it)
-                },
-                onOpenRouterProviderSlugChange = {
-                    openRouterProviderSlug = it
-                    KeyboardSettings.saveOpenRouterProviderSlug(context, it)
-                },
-                onAgentReasoningModeChange = {
-                    agentReasoningMode = it
-                    KeyboardSettings.saveAgentReasoningMode(context, it)
-                },
-                onAgentReasoningTextEnabledChange = {
-                    agentReasoningTextEnabled = it
-                    KeyboardSettings.saveAgentReasoningTextEnabled(context, it)
-                },
-                onAgentApiKeyChange = {
-                    agentApiKey = it
-                    KeyboardSettings.saveAgentApiKey(context, agentProviderType, it)
-                    if (it.isBlank() && agentApiKeyLocked) {
-                        agentApiKeyLocked = false
+                        FunctionKeyBackgroundsSwitch(
+                            enabled = functionKeyBackgroundsEnabled,
+                            onEnabledChange = {
+                                functionKeyBackgroundsEnabled = it
+                                KeyboardSettings.saveFunctionKeyBackgroundsEnabled(context, it)
+                            },
+                        )
+
+                        NumberRowSwitch(
+                            enabled = numberRowEnabled,
+                            onEnabledChange = {
+                                numberRowEnabled = it
+                                KeyboardSettings.saveNumberRowEnabled(context, it)
+                            },
+                        )
                     }
-                },
-                onAgentApiKeyLockedChange = {
-                    agentApiKeyLocked = it
-                    KeyboardSettings.saveAgentApiKeyLocked(context, agentProviderType, it)
-                },
-            )
 
-            GifSearchSection(
-                gifApiBaseUrl = gifApiBaseUrl,
-                gifAppKey = gifAppKey,
-                gifAppKeyLocked = gifAppKeyLocked,
-                onGifApiBaseUrlChange = {
-                    gifApiBaseUrl = it
-                    KeyboardSettings.saveGifApiBaseUrl(context, it)
-                },
-                onGifAppKeyChange = {
-                    gifAppKey = it
-                    KeyboardSettings.saveGifAppKey(context, it)
-                    if (it.isBlank() && gifAppKeyLocked) {
-                        gifAppKeyLocked = false
-                    }
-                },
-                onGifAppKeyLockedChange = {
-                    gifAppKeyLocked = it
-                    KeyboardSettings.saveGifAppKeyLocked(context, it)
-                },
-            )
+                    RowButtonsSection(
+                        title = "Shortcut row B keys",
+                        keyIds = secondRowButtonIds,
+                        maxKeys = KeyboardSettings.MAX_SECOND_ROW_BUTTONS,
+                        defaultKeyIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS,
+                        keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
+                        labelForKey = KeyboardSettings::labelForShortcutRowKey,
+                        onKeyIdsChange = ::updateSecondRowButtonIds,
+                    )
 
-            SettingsSectionCard {
-                SettingsSectionHeader(
-                    title = "Keyboard layout",
-                    iconResId = R.drawable.ic_tune_24,
-                    trailingText = "Height ${(heightScale * 100f).roundToInt()}%",
-                )
+                    RowButtonsSection(
+                        title = "Shortcut row A keys",
+                        keyIds = upperRowKeyIds,
+                        maxKeys = KeyboardSettings.MAX_UPPER_ROW_KEYS,
+                        defaultKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
+                        keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
+                        labelForKey = KeyboardSettings::labelForShortcutRowKey,
+                        onKeyIdsChange = ::updateUpperRowKeyIds,
+                    )
 
-                Slider(
-                    value = heightScale,
-                    onValueChange = {
-                        heightScale = it
-                        KeyboardSettings.saveHeightScale(context, it)
-                    },
-                    valueRange = KeyboardSettings.MIN_HEIGHT_SCALE..KeyboardSettings.MAX_HEIGHT_SCALE,
-                    steps = 6,
-                )
+                    KeyboardRowOrderSection(
+                        rowOrder = keyboardRowOrder,
+                        onRowOrderChange = ::updateKeyboardRowOrder,
+                    )
+                }
 
-                KeyboardBottomPaddingField(
-                    bottomPaddingDp = bottomPaddingDp,
-                    onBottomPaddingChange = {
-                        bottomPaddingDp = it
-                        KeyboardSettings.saveBottomPaddingDp(context, it)
-                    },
-                )
+                SettingsDestination.Tools -> {
+                    AgentModeSection(
+                        agentModeEnabled = agentModeEnabled,
+                        agentProviderType = agentProviderType,
+                        agentApiBaseUrl = agentApiBaseUrl,
+                        agentModel = agentModel,
+                        openRouterProviderSlug = openRouterProviderSlug,
+                        agentReasoningMode = agentReasoningMode,
+                        agentReasoningTextEnabled = agentReasoningTextEnabled,
+                        agentApiKey = agentApiKey,
+                        agentApiKeyLocked = agentApiKeyLocked,
+                        agentProfiles = agentProfiles,
+                        activeAgentProfileId = activeAgentProfileId,
+                        onAgentModeEnabledChange = {
+                            agentModeEnabled = it
+                            KeyboardSettings.saveAgentModeEnabled(context, it)
+                        },
+                        onAgentProviderTypeChange = {
+                            agentProviderType = it
+                            KeyboardSettings.saveAgentProviderType(context, it)
+                            agentApiKey = KeyboardSettings.readAgentApiKey(context, it)
+                            agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, it)
+                        },
+                        onAgentApiBaseUrlChange = {
+                            agentApiBaseUrl = it
+                            KeyboardSettings.saveAgentApiBaseUrl(context, it)
+                        },
+                        onAgentModelChange = {
+                            agentModel = it
+                            KeyboardSettings.saveAgentModel(context, it)
+                        },
+                        onOpenRouterProviderSlugChange = {
+                            openRouterProviderSlug = it
+                            KeyboardSettings.saveOpenRouterProviderSlug(context, it)
+                        },
+                        onAgentReasoningModeChange = {
+                            agentReasoningMode = it
+                            KeyboardSettings.saveAgentReasoningMode(context, it)
+                        },
+                        onAgentReasoningTextEnabledChange = {
+                            agentReasoningTextEnabled = it
+                            KeyboardSettings.saveAgentReasoningTextEnabled(context, it)
+                        },
+                        onAgentApiKeyChange = {
+                            agentApiKey = it
+                            KeyboardSettings.saveAgentApiKey(context, agentProviderType, it)
+                            if (it.isBlank() && agentApiKeyLocked) {
+                                agentApiKeyLocked = false
+                            }
+                        },
+                        onAgentApiKeyLockedChange = {
+                            agentApiKeyLocked = it
+                            KeyboardSettings.saveAgentApiKeyLocked(context, agentProviderType, it)
+                        },
+                        onCreateAgentProfile = { name ->
+                            val created = KeyboardSettings.createAgentProfile(context, name)
+                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
+                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
+                            created != null
+                        },
+                        onUpdateAgentProfile = {
+                            KeyboardSettings.updateAgentProfileFromCurrent(context, activeAgentProfileId)
+                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
+                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
+                        },
+                        onActivateAgentProfile = { profileId ->
+                            KeyboardSettings.activateAgentProfile(context, profileId)
+                            refreshSettingsFromStorage()
+                        },
+                        onDeleteAgentProfile = { profileId ->
+                            KeyboardSettings.deleteAgentProfile(context, profileId)
+                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
+                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
+                        },
+                    )
 
-                FunctionKeyBackgroundsSwitch(
-                    enabled = functionKeyBackgroundsEnabled,
-                    onEnabledChange = {
-                        functionKeyBackgroundsEnabled = it
-                        KeyboardSettings.saveFunctionKeyBackgroundsEnabled(context, it)
-                    },
-                )
+                    GifSearchSection(
+                        gifApiBaseUrl = gifApiBaseUrl,
+                        gifAppKey = gifAppKey,
+                        gifAppKeyLocked = gifAppKeyLocked,
+                        onGifApiBaseUrlChange = {
+                            gifApiBaseUrl = it
+                            KeyboardSettings.saveGifApiBaseUrl(context, it)
+                        },
+                        onGifAppKeyChange = {
+                            gifAppKey = it
+                            KeyboardSettings.saveGifAppKey(context, it)
+                            if (it.isBlank() && gifAppKeyLocked) {
+                                gifAppKeyLocked = false
+                            }
+                        },
+                        onGifAppKeyLockedChange = {
+                            gifAppKeyLocked = it
+                            KeyboardSettings.saveGifAppKeyLocked(context, it)
+                        },
+                    )
 
-                NumberRowSwitch(
-                    enabled = numberRowEnabled,
-                    onEnabledChange = {
-                        numberRowEnabled = it
-                        KeyboardSettings.saveNumberRowEnabled(context, it)
-                    },
-                )
+                    EmojiPreferencesSection(
+                        skinTone = emojiSkinTone,
+                        recentEmojiRows = recentEmojiRows,
+                        customEmojiTags = customEmojiTags,
+                        onSkinToneChange = {
+                            emojiSkinTone = it
+                            KeyboardSettings.saveEmojiSkinTone(context, it)
+                        },
+                        onRecentEmojiRowsChange = {
+                            val rows = EmojiCatalog.normalizeRecentRowCount(it)
+                            recentEmojiRows = rows
+                            KeyboardSettings.saveRecentEmojiRows(context, rows)
+                        },
+                        onCustomEmojiTagsChange = ::updateCustomEmojiTags,
+                    )
+                }
+
+                SettingsDestination.Saved -> {
+                    TextSnippetsSection(
+                        snippets = textSnippets,
+                        onSnippetsChange = ::updateTextSnippets,
+                    )
+
+                    ClipboardHistorySettingsSection(
+                        entryCount = clipboardHistoryCount,
+                        onClearConfirmed = {
+                            ClipboardHistoryStore.clear(context)
+                            clipboardHistoryCount = 0
+                            Toast.makeText(context, "Clipboard history cleared", Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                }
+
+                SettingsDestination.Backup -> {
+                    BackupRestoreSection(
+                        onExport = { backupPasswordDialogMode = BackupPasswordDialogMode.Export },
+                        onImport = { importLauncher.launch(BACKUP_IMPORT_MIME_TYPES) },
+                    )
+                }
             }
-
-            EmojiPreferencesSection(
-                skinTone = emojiSkinTone,
-                recentEmojiRows = recentEmojiRows,
-                customEmojiTags = customEmojiTags,
-                onSkinToneChange = {
-                    emojiSkinTone = it
-                    KeyboardSettings.saveEmojiSkinTone(context, it)
-                },
-                onRecentEmojiRowsChange = {
-                    val rows = EmojiCatalog.normalizeRecentRowCount(it)
-                    recentEmojiRows = rows
-                    KeyboardSettings.saveRecentEmojiRows(context, rows)
-                },
-                onCustomEmojiTagsChange = ::updateCustomEmojiTags,
-            )
-
-            RowButtonsSection(
-                title = "Shortcut row B keys",
-                keyIds = secondRowButtonIds,
-                maxKeys = KeyboardSettings.MAX_SECOND_ROW_BUTTONS,
-                defaultKeyIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS,
-                keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
-                labelForKey = KeyboardSettings::labelForShortcutRowKey,
-                onKeyIdsChange = ::updateSecondRowButtonIds,
-            )
-
-            RowButtonsSection(
-                title = "Shortcut row A keys",
-                keyIds = upperRowKeyIds,
-                maxKeys = KeyboardSettings.MAX_UPPER_ROW_KEYS,
-                defaultKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS,
-                keyOptions = KeyboardSettings.SHORTCUT_ROW_KEY_OPTIONS,
-                labelForKey = KeyboardSettings::labelForShortcutRowKey,
-                onKeyIdsChange = ::updateUpperRowKeyIds,
-            )
-
-            KeyboardRowOrderSection(
-                rowOrder = keyboardRowOrder,
-                onRowOrderChange = ::updateKeyboardRowOrder,
-            )
         }
     }
 }
@@ -1259,6 +1325,17 @@ private fun BackupRestoreSection(
     }
 }
 
+private enum class SettingsDestination(
+    val id: String,
+    val label: String,
+    val iconResId: Int,
+) {
+    Keyboard("keyboard", "Keyboard", R.drawable.ic_keyboard_24),
+    Tools("tools", "Tools", R.drawable.ic_tune_24),
+    Saved("saved", "Saved", R.drawable.ic_save_24),
+    Backup("backup", "Backup", R.drawable.ic_download_24),
+}
+
 private enum class BackupPasswordDialogMode {
     Export,
     Import,
@@ -1691,6 +1768,8 @@ private fun AgentModeSection(
     agentReasoningTextEnabled: Boolean,
     agentApiKey: String,
     agentApiKeyLocked: Boolean,
+    agentProfiles: List<KeyboardSettings.AgentProfile>,
+    activeAgentProfileId: String,
     onAgentModeEnabledChange: (Boolean) -> Unit,
     onAgentProviderTypeChange: (KeyboardSettings.AgentProviderType) -> Unit,
     onAgentApiBaseUrlChange: (String) -> Unit,
@@ -1700,6 +1779,10 @@ private fun AgentModeSection(
     onAgentReasoningTextEnabledChange: (Boolean) -> Unit,
     onAgentApiKeyChange: (String) -> Unit,
     onAgentApiKeyLockedChange: (Boolean) -> Unit,
+    onCreateAgentProfile: (String) -> Boolean,
+    onUpdateAgentProfile: () -> Unit,
+    onActivateAgentProfile: (String) -> Unit,
+    onDeleteAgentProfile: (String) -> Unit,
 ) {
     SettingsSectionCard {
         SettingsSectionHeader(
@@ -1719,12 +1802,21 @@ private fun AgentModeSection(
             style = MaterialTheme.typography.bodySmall,
         )
 
+        AgentProfiles(
+            profiles = agentProfiles,
+            activeProfileId = activeAgentProfileId,
+            onCreateProfile = onCreateAgentProfile,
+            onUpdateProfile = onUpdateAgentProfile,
+            onActivateProfile = onActivateAgentProfile,
+            onDeleteProfile = onDeleteAgentProfile,
+        )
+
         ProviderTypeSelector(
             providerType = agentProviderType,
             onProviderTypeChange = onAgentProviderTypeChange,
         )
 
-        if (agentProviderType == KeyboardSettings.AgentProviderType.OpenAiCompatible) {
+        if (agentProviderType != KeyboardSettings.AgentProviderType.OpenRouter) {
             OutlinedTextField(
                 value = agentApiBaseUrl,
                 onValueChange = onAgentApiBaseUrlChange,
@@ -1733,6 +1825,13 @@ private fun AgentModeSection(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),
             )
+            if (agentProviderType == KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp) {
+                Text(
+                    text = "For the Nanbeige llama.cpp fork. Uses its compatible structured-output request format.",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
         } else {
             Text(
                 text = "OpenRouter endpoint is managed automatically. Pick a model first, then optionally pin a provider for that model.",
@@ -1776,6 +1875,207 @@ private fun AgentModeSection(
             lockContentDescription = "Lock API key",
             unlockContentDescription = "Unlock API key",
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AgentProfiles(
+    profiles: List<KeyboardSettings.AgentProfile>,
+    activeProfileId: String,
+    onCreateProfile: (String) -> Boolean,
+    onUpdateProfile: () -> Unit,
+    onActivateProfile: (String) -> Unit,
+    onDeleteProfile: (String) -> Unit,
+) {
+    var showingCreateDialog by remember { mutableStateOf(false) }
+    var pendingDeleteProfileId by remember { mutableStateOf<String?>(null) }
+    val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Profiles",
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "${profiles.size}/${KeyboardSettings.MAX_AGENT_PROFILES}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+
+        if (profiles.isEmpty()) {
+            Text(
+                text = "Save this configuration to switch providers and models with one tap.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                profiles.forEach { profile ->
+                    InputChip(
+                        selected = profile.id == activeProfileId,
+                        onClick = { onActivateProfile(profile.id) },
+                        label = {
+                            Text(
+                                text = profile.name,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        },
+                    )
+                }
+            }
+        }
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Button(
+                onClick = { showingCreateDialog = true },
+                enabled = profiles.size < KeyboardSettings.MAX_AGENT_PROFILES,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_add_24),
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Save new")
+            }
+
+            OutlinedButton(
+                onClick = onUpdateProfile,
+                enabled = activeProfile != null,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
+            ) {
+                Text("Update")
+            }
+
+            TextButton(
+                onClick = { pendingDeleteProfileId = activeProfile?.id },
+                enabled = activeProfile != null,
+            ) {
+                Text(
+                    text = "Delete",
+                    color = if (activeProfile != null) {
+                        ZnKeyboardColors.DeleteContent
+                    } else {
+                        ZnKeyboardColors.Muted
+                    },
+                )
+            }
+        }
+
+        activeProfile?.let { profile ->
+            Text(
+                text = "${profile.providerType.label} · ${profile.model}",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    if (showingCreateDialog) {
+        var name by remember { mutableStateOf("") }
+        var saveFailed by remember { mutableStateOf(false) }
+        val normalizedName = KeyboardSettings.normalizeAgentProfileName(name)
+        val duplicateName = profiles.any { it.name.equals(normalizedName, ignoreCase = true) }
+        val canSave = normalizedName.isNotBlank() && !duplicateName
+
+        AlertDialog(
+            onDismissRequest = { showingCreateDialog = false },
+            title = { Text("Save LLM profile") },
+            text = {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = {
+                        name = it.take(KeyboardSettings.MAX_AGENT_PROFILE_NAME_CHARS)
+                        saveFailed = false
+                    },
+                    label = { Text("Profile name") },
+                    supportingText = {
+                        val message = when {
+                            duplicateName -> "A profile with this name already exists."
+                            saveFailed -> "Could not save this profile."
+                            else -> "Examples: Nanbeige, OpenRouter, Work"
+                        }
+                        Text(message)
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (canSave) {
+                                if (onCreateProfile(normalizedName)) {
+                                    showingCreateDialog = false
+                                } else {
+                                    saveFailed = true
+                                }
+                            }
+                        },
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            dismissButton = {
+                TextButton(onClick = { showingCreateDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (onCreateProfile(normalizedName)) {
+                            showingCreateDialog = false
+                        } else {
+                            saveFailed = true
+                        }
+                    },
+                    enabled = canSave,
+                ) {
+                    Text("Save")
+                }
+            },
+        )
+    }
+
+    pendingDeleteProfileId?.let { profileId ->
+        val profile = profiles.firstOrNull { it.id == profileId }
+        if (profile != null) {
+            AlertDialog(
+                onDismissRequest = { pendingDeleteProfileId = null },
+                title = { Text("Delete ${profile.name}?") },
+                text = { Text("This removes the saved profile and its stored API key.") },
+                dismissButton = {
+                    TextButton(onClick = { pendingDeleteProfileId = null }) {
+                        Text("Cancel")
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            pendingDeleteProfileId = null
+                            onDeleteProfile(profile.id)
+                        },
+                    ) {
+                        Text("Delete", color = ZnKeyboardColors.DeleteContent)
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -1896,6 +2196,7 @@ private fun ModelSelectorField(
     var debouncedQuery by remember { mutableStateOf(value) }
     val effectiveBaseUrl = when (providerType) {
         KeyboardSettings.AgentProviderType.OpenRouter -> KeyboardSettings.OPENROUTER_API_BASE_URL
+        KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp,
         KeyboardSettings.AgentProviderType.OpenAiCompatible -> apiBaseUrl
     }
 
@@ -2146,6 +2447,8 @@ private fun ReasoningControls(
     val providerHint = when (providerType) {
         KeyboardSettings.AgentProviderType.OpenRouter ->
             "OpenRouter supports the normalized reasoning object and can include or exclude returned reasoning text."
+        KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp ->
+            "Nanbeige llama.cpp uses its fork-specific request format. Off disables template thinking for fast rewrites."
         KeyboardSettings.AgentProviderType.OpenAiCompatible ->
             "OpenAI-compatible servers vary. Effort values are sent manually as reasoning_effort only when selected."
     }
