@@ -159,7 +159,6 @@ class SnippetPanelView @JvmOverloads constructor(
     private var snippets = emptyList<KeyboardSettings.TextSnippet>()
     private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
     private var selectedTab = KeyboardSettings.SavedTextPanelTab.Snippets
-    private var clipboardEnabled = true
     private var heightScale = 1f
 
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
@@ -222,17 +221,6 @@ class SnippetPanelView @JvmOverloads constructor(
         selectTab(tab, notify = false)
     }
 
-    fun setClipboardEnabled(enabled: Boolean) {
-        if (clipboardEnabled == enabled) return
-        clipboardEnabled = enabled
-        clipboardTabButton.alpha = if (enabled) 1f else 0.36f
-        clipboardTabButton.isEnabled = enabled
-        clipboardTabButton.isClickable = enabled
-        if (!enabled && selectedTab == KeyboardSettings.SavedTextPanelTab.Clipboard) {
-            selectTab(KeyboardSettings.SavedTextPanelTab.Snippets, notify = true)
-        }
-    }
-
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val desiredHeight = ((ImeLayout.BASE_HEIGHT_DP + ImeLayout.EXTENDED_PANEL_EXTRA_HEIGHT_DP) *
             heightScale *
@@ -252,24 +240,19 @@ class SnippetPanelView @JvmOverloads constructor(
     }
 
     private fun selectTab(tab: KeyboardSettings.SavedTextPanelTab, notify: Boolean) {
-        val nextTab = if (tab == KeyboardSettings.SavedTextPanelTab.Clipboard && !clipboardEnabled) {
-            KeyboardSettings.SavedTextPanelTab.Snippets
-        } else {
-            tab
-        }
-        val changed = selectedTab != nextTab
-        selectedTab = nextTab
+        val changed = selectedTab != tab
+        selectedTab = tab
 
-        snippetContent.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
-        clipboardContent.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Clipboard) VISIBLE else GONE
-        searchBar.text = nextTab.searchLabel
-        searchBar.contentDescription = nextTab.searchLabel
-        saveButton.visibility = if (nextTab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
-        clipboardTabButton.updateForTab(selected = nextTab == KeyboardSettings.SavedTextPanelTab.Clipboard)
-        snippetsTabButton.updateForTab(selected = nextTab == KeyboardSettings.SavedTextPanelTab.Snippets)
+        snippetContent.visibility = if (tab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
+        clipboardContent.visibility = if (tab == KeyboardSettings.SavedTextPanelTab.Clipboard) VISIBLE else GONE
+        searchBar.text = tab.searchLabel
+        searchBar.contentDescription = tab.searchLabel
+        saveButton.visibility = if (tab == KeyboardSettings.SavedTextPanelTab.Snippets) VISIBLE else GONE
+        clipboardTabButton.updateForTab(selected = tab == KeyboardSettings.SavedTextPanelTab.Clipboard)
+        snippetsTabButton.updateForTab(selected = tab == KeyboardSettings.SavedTextPanelTab.Snippets)
 
         if (notify && changed) {
-            callback?.onSavedTextPanelTabChanged(nextTab)
+            callback?.onSavedTextPanelTabChanged(tab)
         }
     }
 

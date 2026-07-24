@@ -466,7 +466,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         snippetPanelView?.let { view ->
             view.setHeightScale(heightScale)
             view.setSnippets(KeyboardSettings.readTextSnippets(this))
-            view.setClipboardEnabled(!isSensitiveEditor(currentEditorInfo))
             view.submitClipboardHistory(ClipboardHistoryStore.read(this))
         }
         savedTextSearchView?.let { view ->
@@ -558,12 +557,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             snippetPanelView = view
             view.callback = this
         }
-        val sensitiveEditor = isSensitiveEditor(currentEditorInfo)
         val selectedTab = KeyboardSettings.readSavedTextPanelTab(this)
-            .takeUnless { sensitiveEditor && it == KeyboardSettings.SavedTextPanelTab.Clipboard }
-            ?: KeyboardSettings.SavedTextPanelTab.Snippets
         panel.setHeightScale(KeyboardSettings.readHeightScale(this))
-        panel.setClipboardEnabled(!sensitiveEditor)
         panel.setSnippets(KeyboardSettings.readTextSnippets(this))
         panel.submitClipboardHistory(ClipboardHistoryStore.read(this))
         panel.setSelectedTab(selectedTab)
@@ -573,9 +568,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun showSavedTextSearchPanel(tab: KeyboardSettings.SavedTextPanelTab) {
-        if (tab == KeyboardSettings.SavedTextPanelTab.Clipboard && isSensitiveEditor(currentEditorInfo)) {
-            return
-        }
         hideEmojiSearchView()
         hideGifSearchView()
         val keyboard = keyboardView ?: return
@@ -1434,7 +1426,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun pasteClipboardHistoryText(text: String) {
-        if (isSensitiveEditor(currentEditorInfo)) return
         val inputConnection = currentInputConnection ?: return
         cancelActiveAgentForEditorChange()
 
