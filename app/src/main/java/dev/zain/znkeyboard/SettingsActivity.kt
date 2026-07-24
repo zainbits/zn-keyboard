@@ -59,6 +59,7 @@ import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -354,6 +355,13 @@ private fun SettingsScreen() {
                             )
                         },
                         label = { Text(destination.label) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = ZnKeyboardColors.OnSurface,
+                            selectedTextColor = ZnKeyboardColors.OnSurface,
+                            indicatorColor = ZnKeyboardColors.FunctionKey,
+                            unselectedIconColor = ZnKeyboardColors.Muted,
+                            unselectedTextColor = ZnKeyboardColors.Muted,
+                        ),
                     )
                 }
             }

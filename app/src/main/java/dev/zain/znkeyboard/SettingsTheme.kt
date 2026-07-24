@@ -27,8 +27,12 @@ internal fun ZnKeyboardTheme(content: @Composable () -> Unit) {
             onBackground = ZnKeyboardColors.OnSurface,
             surface = ZnKeyboardColors.Surface,
             onSurface = ZnKeyboardColors.OnSurface,
+            onSurfaceVariant = ZnKeyboardColors.Muted,
             secondary = ZnKeyboardColors.FunctionKey,
             onSecondary = ZnKeyboardColors.OnSurface,
+            // Selected nav pills, chips, etc. — keep content light on a dark container.
+            secondaryContainer = ZnKeyboardColors.FunctionKey,
+            onSecondaryContainer = ZnKeyboardColors.OnSurface,
         ),
         shapes = ZainAppShapes,
         content = content,
