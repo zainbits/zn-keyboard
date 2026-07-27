@@ -97,7 +97,6 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var heightScale = 1f
     private var bottomPaddingDp = KeyboardSettings.DEFAULT_BOTTOM_PADDING_DP
     private var functionKeyBackgroundsEnabled = true
-    private var numberRowEnabled = false
     private var upperRowKeyIds = KeyboardSettings.DEFAULT_UPPER_ROW_KEY_IDS
     private var secondRowButtonIds = KeyboardSettings.DEFAULT_SECOND_ROW_BUTTON_IDS
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
@@ -150,15 +149,6 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun setFunctionKeyBackgroundsEnabled(enabled: Boolean) {
         if (functionKeyBackgroundsEnabled != enabled) {
             functionKeyBackgroundsEnabled = enabled
-            invalidate()
-        }
-    }
-
-    fun setNumberRowEnabled(enabled: Boolean) {
-        if (numberRowEnabled != enabled) {
-            numberRowEnabled = enabled
-            requestLayout()
-            refreshHitTargets()
             invalidate()
         }
     }
@@ -234,7 +224,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (layoutMode != targetMode) {
             layoutMode = targetMode
             shiftState = ShiftState.Off
-            requestLayoutIfNumberRowHeightMayChange()
+            requestLayout()
             refreshHitTargets()
             invalidate()
         }
@@ -243,7 +233,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     fun resetToLetters() {
         if (layoutMode != LayoutMode.Letters) {
             layoutMode = LayoutMode.Letters
-            requestLayoutIfNumberRowHeightMayChange()
+            requestLayout()
             refreshHitTargets()
             invalidate()
         }
@@ -255,7 +245,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         } else {
             0
         }
-        val numberRowHeight = if (hasVisibleNumberRow()) {
+        val numberRowHeight = if (layoutMode != LayoutMode.PhonePad) {
             ImeLayout.standardRowHeightPx(context, heightScale)
         } else {
             0
@@ -1161,19 +1151,19 @@ class ZnKeyboardView @JvmOverloads constructor(
                     LayoutMode.PhonePad -> LayoutMode.Letters
                 }
                 shiftState = ShiftState.Off
-                requestLayoutIfNumberRowHeightMayChange()
+                requestLayout()
             }
             KeyIntent.ToggleMoreSymbols -> {
                 layoutMode = if (layoutMode == LayoutMode.MoreSymbols) LayoutMode.Symbols else LayoutMode.MoreSymbols
                 lastNumericLayoutMode = LayoutMode.Symbols
                 shiftState = ShiftState.Off
-                requestLayoutIfNumberRowHeightMayChange()
+                requestLayout()
             }
             KeyIntent.ToggleNumericLayout -> {
                 layoutMode = if (layoutMode == LayoutMode.PhonePad) LayoutMode.Symbols else LayoutMode.PhonePad
                 lastNumericLayoutMode = layoutMode
                 shiftState = ShiftState.Off
-                requestLayoutIfNumberRowHeightMayChange()
+                requestLayout()
             }
             KeyIntent.ToggleAlt -> alt = !alt
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
@@ -1279,22 +1269,22 @@ class ZnKeyboardView @JvmOverloads constructor(
         )
         val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
         val mainRows = when (layoutMode) {
-            LayoutMode.Letters -> buildList {
-                if (hasVisibleNumberRow()) {
-                    add(RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT))
-                }
-                add(RowSpec(chars("qwertyuiop"), ImeLayout.STANDARD_ROW_WEIGHT))
-                add(RowSpec(chars("asdfghjkl"), ImeLayout.STANDARD_ROW_WEIGHT, layoutKeyCount = 10))
-                add(letterBottomRow())
-                add(bottomRow())
-            }
+            LayoutMode.Letters -> listOf(
+                numberRow(),
+                RowSpec(chars("qwertyuiop"), ImeLayout.STANDARD_ROW_WEIGHT),
+                RowSpec(chars("asdfghjkl"), ImeLayout.STANDARD_ROW_WEIGHT, layoutKeyCount = 10),
+                letterBottomRow(),
+                bottomRow(),
+            )
             LayoutMode.Symbols -> listOf(
-                RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT),
-                RowSpec(symbols("-/:;()\$&@\"", rowPrefix = "symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
+                numberRow(),
+                RowSpec(symbols("@#\$%&-+()/", rowPrefix = "symbol_top"), ImeLayout.STANDARD_ROW_WEIGHT),
+                RowSpec(symbols("*\":;!?\\|=~", rowPrefix = "symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
                 symbolBottomRow(),
                 bottomRow(),
             )
             LayoutMode.MoreSymbols -> listOf(
+                numberRow(),
                 RowSpec(symbols("[]{}#%^*+=", rowPrefix = "more_symbol_top"), ImeLayout.STANDARD_ROW_WEIGHT),
                 RowSpec(symbols("_\\|~<>€£¥•", rowPrefix = "more_symbol_middle"), ImeLayout.STANDARD_ROW_WEIGHT),
                 moreSymbolBottomRow(),
@@ -1305,15 +1295,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         return buttonRows + mainRows
     }
 
-    private fun hasVisibleNumberRow(): Boolean {
-        // Static 1–0 row sits above letter keys only; numpad/phone pad already has its own layout.
-        return numberRowEnabled && layoutMode == LayoutMode.Letters
-    }
-
-    private fun requestLayoutIfNumberRowHeightMayChange() {
-        if (numberRowEnabled) {
-            requestLayout()
-        }
+    private fun numberRow(): RowSpec {
+        return RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT)
     }
 
     private fun terminalRow(): RowSpec? {
@@ -1502,7 +1485,8 @@ class ZnKeyboardView @JvmOverloads constructor(
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
-                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
+                KeySpec("backtick", "`", KeyIntent.Dispatch(KeyboardAction.Text("`")), role = KeyRole.Character),
                 KeySpec(
                     "backspace",
                     "Del",
@@ -1530,7 +1514,8 @@ class ZnKeyboardView @JvmOverloads constructor(
                 KeySpec("comma", ",", KeyIntent.Dispatch(KeyboardAction.Text(",")), role = KeyRole.Character),
                 KeySpec("question", "?", KeyIntent.Dispatch(KeyboardAction.Text("?")), role = KeyRole.Character),
                 KeySpec("bang", "!", KeyIntent.Dispatch(KeyboardAction.Text("!")), role = KeyRole.Character),
-                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character, longPressHint = "`"),
+                KeySpec("apostrophe", "'", KeyIntent.Dispatch(KeyboardAction.Text("'")), role = KeyRole.Character),
+                KeySpec("backtick", "`", KeyIntent.Dispatch(KeyboardAction.Text("`")), role = KeyRole.Character),
                 KeySpec(
                     "backspace",
                     "Del",

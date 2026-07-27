@@ -137,9 +137,6 @@ private fun SettingsScreen() {
     var functionKeyBackgroundsEnabled by remember {
         mutableStateOf(KeyboardSettings.readFunctionKeyBackgroundsEnabled(context))
     }
-    var numberRowEnabled by remember {
-        mutableStateOf(KeyboardSettings.readNumberRowEnabled(context))
-    }
     var upperRowKeyIds by remember { mutableStateOf(KeyboardSettings.readUpperRowKeyIds(context)) }
     var secondRowButtonIds by remember { mutableStateOf(KeyboardSettings.readSecondRowButtonIds(context)) }
     var keyboardRowOrder by remember { mutableStateOf(KeyboardSettings.readKeyboardRowOrder(context)) }
@@ -175,7 +172,6 @@ private fun SettingsScreen() {
         heightScale = KeyboardSettings.readHeightScale(context)
         bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(context)
         functionKeyBackgroundsEnabled = KeyboardSettings.readFunctionKeyBackgroundsEnabled(context)
-        numberRowEnabled = KeyboardSettings.readNumberRowEnabled(context)
         upperRowKeyIds = KeyboardSettings.readUpperRowKeyIds(context)
         secondRowButtonIds = KeyboardSettings.readSecondRowButtonIds(context)
         keyboardRowOrder = KeyboardSettings.readKeyboardRowOrder(context)
@@ -414,14 +410,6 @@ private fun SettingsScreen() {
                                 KeyboardSettings.saveFunctionKeyBackgroundsEnabled(context, it)
                             },
                         )
-
-                        NumberRowSwitch(
-                            enabled = numberRowEnabled,
-                            onEnabledChange = {
-                                numberRowEnabled = it
-                                KeyboardSettings.saveNumberRowEnabled(context, it)
-                            },
-                        )
                     }
 
                     RowButtonsSection(
@@ -609,35 +597,6 @@ private fun FunctionKeyBackgroundsSwitch(
             )
             Text(
                 text = "Show filled backgrounds behind utility keys.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Switch(
-            checked = enabled,
-            onCheckedChange = onEnabledChange,
-        )
-    }
-}
-
-@Composable
-private fun NumberRowSwitch(
-    enabled: Boolean,
-    onEnabledChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Number row",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "Show 1–0 above letter keys (not in numpad mode).",
                 color = ZnKeyboardColors.Muted,
                 style = MaterialTheme.typography.bodySmall,
             )

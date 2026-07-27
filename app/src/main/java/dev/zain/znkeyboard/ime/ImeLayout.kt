@@ -43,7 +43,7 @@ internal object ImeLayout {
         return (TOP_PADDING_DP * density + COMPACT_ROW_WEIGHT * unitHeight).roundToInt()
     }
 
-    /** Extra height for one standard letter-row when the optional number row is visible. */
+    /** Extra height for the permanent number row in letter and symbol layouts. */
     fun standardRowHeightPx(context: Context, scale: Float): Int {
         val density = context.resources.displayMetrics.density
         val baseHeightPx = BASE_HEIGHT_DP * scale * density

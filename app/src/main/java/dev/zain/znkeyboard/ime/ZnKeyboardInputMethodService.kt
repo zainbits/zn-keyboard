@@ -441,7 +441,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setHeightScale(heightScale)
             view.setBottomPaddingDp(bottomPaddingDp)
             view.setFunctionKeyBackgroundsEnabled(KeyboardSettings.readFunctionKeyBackgroundsEnabled(this))
-            view.setNumberRowEnabled(KeyboardSettings.readNumberRowEnabled(this))
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
             view.setSecondRowButtonIds(KeyboardSettings.readSecondRowButtonIds(this))
             view.setKeyboardRowOrder(KeyboardSettings.readKeyboardRowOrder(this))
