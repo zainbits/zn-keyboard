@@ -47,6 +47,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onSnippetPanelRequested()
         fun onEmojiKeySuggestionSelected(emoji: String)
         fun onAgentRewriteRequested()
+        fun onSaveComposerTextRequested()
+        fun onComposerSuggestionSelected(text: String)
     }
 
     var callback: Callback? = null
@@ -102,6 +104,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var keyboardRowOrder = KeyboardSettings.DEFAULT_KEYBOARD_ROW_ORDER
     private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
     private var emojiKeySuggestion: String? = null
+    private var composerSuggestion: String? = null
     // The system can draw close-keyboard and IME-switch controls inside the IME window.
     private val bottomSystemControlGapPx by lazy(LazyThreadSafetyMode.NONE) {
         ImeLayout.bottomSystemControlGapPx(context)
@@ -207,6 +210,15 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
+    fun setComposerSuggestion(text: String?) {
+        if (composerSuggestion != text) {
+            composerSuggestion = text
+            requestLayout()
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
     fun clearLatchedModifiers() {
         if (ctrl || alt) {
             ctrl = false
@@ -240,6 +252,11 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val suggestionRowHeight = if (composerSuggestion != null) {
+            ImeLayout.compactAgentRowHeightPx(context, heightScale)
+        } else {
+            0
+        }
         val secondRowHeight = if (hasVisibleSecondRow()) {
             ImeLayout.compactAgentRowHeightPx(context, heightScale)
         } else {
@@ -258,6 +275,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 bottomPaddingDeltaPx
             )
             .roundToInt()
+            .plus(suggestionRowHeight)
             .plus(secondRowHeight)
             .plus(numberRowHeight)
         val width = MeasureSpec.getSize(widthMeasureSpec)
@@ -1169,6 +1187,8 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIntent.ToggleCtrl -> ctrl = !ctrl
             KeyIntent.OpenEmojiPanel -> callback?.onEmojiPanelRequested()
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
+            KeyIntent.SaveComposerText -> callback?.onSaveComposerTextRequested()
+            is KeyIntent.AcceptComposerSuggestion -> callback?.onComposerSuggestionSelected(intent.text)
             is KeyIntent.Dispatch -> {
                 callback?.onKeyboardAction(intent.action, ModifierState(ctrl = ctrl, alt = alt))
                 if (shiftState == ShiftState.OneShot && key.consumesOneShotShift) {
@@ -1292,7 +1312,28 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
             LayoutMode.PhonePad -> phonePadRows()
         }
-        return buttonRows + mainRows
+        return listOfNotNull(composerSuggestionRow()) + buttonRows + mainRows
+    }
+
+    private fun composerSuggestionRow(): RowSpec? {
+        val suggestion = composerSuggestion ?: return null
+        return RowSpec(
+            keys = listOf(
+                KeySpec(
+                    id = "composer_suggestion",
+                    label = composerSuggestionDisplayLabel(suggestion),
+                    intent = KeyIntent.AcceptComposerSuggestion(suggestion),
+                    role = KeyRole.Function,
+                ),
+            ),
+            heightWeight = ImeLayout.COMPACT_ROW_WEIGHT,
+        )
+    }
+
+    private fun composerSuggestionDisplayLabel(text: String): String {
+        val singleLine = text.replace(SUGGESTION_WHITESPACE_REGEX, " ").trim()
+        if (singleLine.length <= MAX_SUGGESTION_LABEL_CHARS) return singleLine
+        return singleLine.take(MAX_SUGGESTION_LABEL_CHARS - 1) + "…"
     }
 
     private fun numberRow(): RowSpec {
@@ -1356,6 +1397,14 @@ class ZnKeyboardView @JvmOverloads constructor(
                 active = shortcutRowState.loading,
                 enabled = enabled && shortcutRowState.rewriteEnabled && !shortcutRowState.loading,
                 emphasizedWhenDisabled = shortcutRowState.loading,
+            )
+            "save_text" -> KeySpec(
+                id = id,
+                label = "Save",
+                intent = KeyIntent.SaveComposerText,
+                weight = weight,
+                role = KeyRole.Function,
+                enabled = enabled,
             )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
             "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt, enabled = enabled)
@@ -1910,6 +1959,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object ToggleCtrl : KeyIntent()
         data object OpenEmojiPanel : KeyIntent()
         data object AgentRewrite : KeyIntent()
+        data object SaveComposerText : KeyIntent()
+        data class AcceptComposerSuggestion(val text: String) : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
 
@@ -1947,9 +1998,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val PHONE_PAD_SUB_LABEL_MAX_HEIGHT_FRACTION = 0.18f
         const val PHONE_PAD_LABEL_GAP_DP = 1f
         const val PHONE_PAD_SUB_LABEL_ALPHA_FRACTION = 0.78f
+        const val MAX_SUGGESTION_LABEL_CHARS = 48
         const val NUMERIC_TOGGLE_STACKED_TEXT_SIZE_SP = 12f
         const val NUMERIC_TOGGLE_STACKED_MAX_HEIGHT_FRACTION = 0.28f
         const val NUMERIC_TOGGLE_STACKED_GAP_DP = 1f
+        val SUGGESTION_WHITESPACE_REGEX = Regex("\\s+")
         val AI_LOADING_COLORS = intArrayOf(
             Color.argb(0, 73, 216, 255),
             Color.argb(88, 73, 216, 255),

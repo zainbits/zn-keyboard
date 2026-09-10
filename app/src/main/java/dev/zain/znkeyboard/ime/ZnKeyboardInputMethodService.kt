@@ -38,6 +38,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class ZnKeyboardInputMethodService : InputMethodService(),
     ZnKeyboardView.Callback,
@@ -64,7 +65,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var emojiSuggestionTags: List<EmojiSuggestionTag> = emptyList()
     private var emojiKeySuggestion: String? = null
     private var pendingEmojiSuggestionRefresh: Runnable? = null
+    private var composerSuggestionHistory: List<ComposerSuggestionStore.Entry> = emptyList()
+    private var activeComposerSuggestion: String? = null
+    private var pendingComposerSuggestionRefresh: Runnable? = null
+    private var composerSuggestionGeneration = 0
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val composerSuggestionStoreExecutor = Executors.newSingleThreadExecutor()
     private var activeSurface = KeyboardSurface.Keyboard
     private var activeRequestTarget: AgentEditTarget? = null
     private var activeReview: AgentReview? = null
@@ -89,6 +95,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         ClipboardLinkPreviewRepository.loadPersistedPreviews(this)
         registerClipboardListener()
         capturePrimaryClipboardText()
+        loadComposerSuggestionHistory()
     }
 
     override fun onCreateInputView(): View {
@@ -103,6 +110,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             keyboardView = view
             view.callback = this
             view.setEmojiKeySuggestion(emojiKeySuggestion)
+            view.setComposerSuggestion(activeComposerSuggestion)
             view.setPhonePadMode(shouldUsePhonePadMode(currentEditorInfo))
         }
         val emojiSearch = EmojiSearchView(this).also { view ->
@@ -172,6 +180,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         scheduleEmojiSuggestionRefresh(delayMillis = 0L)
+        scheduleComposerSuggestionRefresh(delayMillis = 0L)
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
@@ -184,13 +193,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderSecondRow()
         capturePrimaryClipboardText()
         scheduleEmojiSuggestionRefresh(delayMillis = 0L)
+        scheduleComposerSuggestionRefresh(delayMillis = 0L)
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         keyboardView?.clearLatchedModifiers()
         keyboardView?.resetToLetters()
         cancelEmojiSuggestionRefresh()
+        cancelComposerSuggestionRefresh()
         setEmojiKeySuggestion(null)
+        setComposerSuggestion(null)
         resetAgentState(returnToKeyboard = true)
         super.onFinishInputView(finishingInput)
     }
@@ -200,6 +212,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         gifShareGeneration++
         unregisterClipboardListener()
         cancelEmojiSuggestionRefresh()
+        cancelComposerSuggestionRefresh()
+        composerSuggestionStoreExecutor.shutdownNow()
         gifSearchView?.dispose()
         gifSearchView = null
         super.onDestroy()
@@ -216,6 +230,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         if (oldSelStart != newSelStart || oldSelEnd != newSelEnd) {
             scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
         }
     }
 
@@ -359,6 +374,24 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onEmojiKeySuggestionSelected(emoji: String) {
         handleText(emoji, ModifierState(ctrl = false, alt = false))
         persistRecentEmojis(EmojiCatalog.promoteRecentEmoji(emoji, recentEmojis))
+    }
+
+    override fun onSaveComposerTextRequested() {
+        saveCurrentInputForSuggestions()
+    }
+
+    override fun onComposerSuggestionSelected(text: String) {
+        if (isSensitiveEditor(currentEditorInfo)) return
+        val snapshot = captureEditorSnapshot(ComposerSuggestionStore.MAX_ENTRY_CHARS + 1) ?: return
+        if (snapshot.textStartOffset != 0 || snapshot.text.length > ComposerSuggestionStore.MAX_ENTRY_CHARS) return
+        val currentText = snapshot.text
+        val cursorAtEnd = snapshot.selectionStart == snapshot.text.length &&
+            snapshot.selectionEnd == snapshot.text.length
+        if (!cursorAtEnd || !text.startsWith(currentText) || text == currentText) {
+            setComposerSuggestion(null)
+            return
+        }
+        handleText(text.substring(currentText.length), ModifierState(ctrl = false, alt = false))
     }
 
     override fun onSnippetSelected(snippet: String) {
@@ -909,10 +942,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         if (wrapSelectedText(inputConnection, value)) {
             scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
             return
         }
         if (inputConnection.commitText(value, 1)) {
             scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
         }
     }
 
@@ -945,6 +980,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
         }
         scheduleEmojiSuggestionRefresh()
+        scheduleComposerSuggestionRefresh()
     }
 
     private fun startBackspaceGestureDelete(): Boolean {
@@ -1043,6 +1079,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
         if (committed) {
             scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
         } else {
             restoreBackspaceGestureDeleteSelection(inputConnection, state)
         }
@@ -1155,6 +1192,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             sendKey(keyCode, ModifierState(ctrl = false, alt = false))
         }
         scheduleEmojiSuggestionRefresh()
+        scheduleComposerSuggestionRefresh()
     }
 
     private fun isBackspaceGestureDeleteTargetCurrent(
@@ -1222,9 +1260,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
         if (!forceEnter && action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED) {
             inputConnection.performEditorAction(action)
+            scheduleComposerSuggestionRefresh()
         } else {
             sendKey(KeyEvent.KEYCODE_ENTER, modifiers)
             scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
         }
     }
 
@@ -1518,6 +1558,124 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
         }
         clipboardManager.setPrimaryClip(clip)
+    }
+
+    private fun loadComposerSuggestionHistory() {
+        val generation = ++composerSuggestionGeneration
+        composerSuggestionStoreExecutor.execute {
+            val history = ComposerSuggestionStore.read(applicationContext)
+            mainHandler.post {
+                if (generation != composerSuggestionGeneration) return@post
+                composerSuggestionHistory = history
+                scheduleComposerSuggestionRefresh(delayMillis = 0L)
+            }
+        }
+    }
+
+    private fun saveCurrentInputForSuggestions() {
+        if (isSensitiveEditor(currentEditorInfo)) {
+            Toast.makeText(this, "Save text is disabled in password fields.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val snapshot = captureEditorSnapshot(ComposerSuggestionStore.MAX_ENTRY_CHARS + 1) ?: run {
+            Toast.makeText(this, "Couldn't read the current field.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (snapshot.textStartOffset != 0) {
+            Toast.makeText(this, "Couldn't read the full field.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val text = snapshot.text
+        if (text.isBlank()) {
+            Toast.makeText(this, "No text to save.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (text.length > ComposerSuggestionStore.MAX_ENTRY_CHARS) {
+            Toast.makeText(this, "Text is too long to save.", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val entry = ComposerSuggestionStore.Entry(text = text, timestampMillis = System.currentTimeMillis())
+        composerSuggestionHistory = buildList {
+            add(entry)
+            addAll(composerSuggestionHistory.filterNot { it.text == text })
+        }.take(ComposerSuggestionStore.MAX_HISTORY)
+        setComposerSuggestion(null)
+        Toast.makeText(this, "Text saved for suggestions.", Toast.LENGTH_SHORT).show()
+
+        val generation = ++composerSuggestionGeneration
+        composerSuggestionStoreExecutor.execute {
+            ComposerSuggestionStore.recordText(applicationContext, text)
+            val persisted = ComposerSuggestionStore.read(applicationContext)
+            mainHandler.post {
+                if (generation != composerSuggestionGeneration) return@post
+                composerSuggestionHistory = persisted
+                scheduleComposerSuggestionRefresh(delayMillis = 0L)
+            }
+        }
+    }
+
+    private fun scheduleComposerSuggestionRefresh(
+        delayMillis: Long = COMPOSER_SUGGESTION_REFRESH_DELAY_MS,
+    ) {
+        cancelComposerSuggestionRefresh()
+        if (isSensitiveEditor(currentEditorInfo) || composerSuggestionHistory.isEmpty()) {
+            setComposerSuggestion(null)
+            return
+        }
+        val refresh = Runnable {
+            pendingComposerSuggestionRefresh = null
+            refreshComposerSuggestion()
+        }
+        pendingComposerSuggestionRefresh = refresh
+        if (delayMillis <= 0L) {
+            mainHandler.post(refresh)
+        } else {
+            mainHandler.postDelayed(refresh, delayMillis)
+        }
+    }
+
+    private fun cancelComposerSuggestionRefresh() {
+        pendingComposerSuggestionRefresh?.let(mainHandler::removeCallbacks)
+        pendingComposerSuggestionRefresh = null
+    }
+
+    private fun refreshComposerSuggestion() {
+        if (isSensitiveEditor(currentEditorInfo) || composerSuggestionHistory.isEmpty()) {
+            setComposerSuggestion(null)
+            return
+        }
+        val snapshot = captureEditorSnapshot(ComposerSuggestionStore.MAX_ENTRY_CHARS + 1) ?: run {
+            setComposerSuggestion(null)
+            return
+        }
+        if (snapshot.textStartOffset != 0 || snapshot.text.length > ComposerSuggestionStore.MAX_ENTRY_CHARS) {
+            setComposerSuggestion(null)
+            return
+        }
+
+        val currentText = snapshot.text
+        val cursorAtEnd = snapshot.selectionStart == snapshot.text.length &&
+            snapshot.selectionEnd == snapshot.text.length
+        if (!cursorAtEnd) {
+            setComposerSuggestion(null)
+            return
+        }
+        val suggestion = if (currentText.isEmpty()) {
+            composerSuggestionHistory.firstOrNull()?.text
+        } else {
+            composerSuggestionHistory
+                .firstOrNull { entry -> entry.text != currentText && entry.text.startsWith(currentText) }
+                ?.text
+        }
+        setComposerSuggestion(suggestion)
+    }
+
+    private fun setComposerSuggestion(text: String?) {
+        if (activeComposerSuggestion == text) return
+        activeComposerSuggestion = text
+        keyboardView?.setComposerSuggestion(text)
     }
 
     private fun captureRewriteTarget(): AgentEditTarget? {
@@ -2296,6 +2454,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val CURSOR_DRAG_MAX_CHARS = 120
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
         const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
+        const val COMPOSER_SUGGESTION_REFRESH_DELAY_MS = 80L
         const val REQUEST_TIMEOUT_MS = AgentDefaults.REQUEST_TIMEOUT_MS
         const val MIN_REWRITE_LLM_TOKENS = AgentDefaults.MIN_REWRITE_LLM_TOKENS
         const val MAX_REWRITE_LLM_TOKENS = AgentDefaults.MAX_REWRITE_LLM_TOKENS
