@@ -1663,13 +1663,13 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             setComposerSuggestion(null)
             return
         }
-        val suggestion = if (currentText.isEmpty()) {
-            composerSuggestionHistory.firstOrNull()?.text
-        } else {
-            composerSuggestionHistory
-                .firstOrNull { entry -> entry.text != currentText && entry.text.startsWith(currentText) }
-                ?.text
-        }
+        val suggestion = currentText
+            .takeIf { it.isNotEmpty() }
+            ?.let { prefix ->
+                composerSuggestionHistory
+                    .firstOrNull { entry -> entry.text != prefix && entry.text.startsWith(prefix) }
+                    ?.text
+            }
         setComposerSuggestion(suggestion)
     }
 
