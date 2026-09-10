@@ -57,6 +57,7 @@ object KeyboardSettings {
     private const val KEY_KEYBOARD_ROW_ORDER = "keyboard_row_order"
     private const val KEY_SAVED_TEXT_PANEL_TAB = "saved_text_panel_tab"
     private const val KEY_TEXT_SNIPPETS = "text_snippets"
+    private const val KEY_COMPOSER_SUGGESTION_MAX_ITEMS = "composer_suggestion_max_items"
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
     private const val KEY_EMOJI_SKIN_TONE = "emoji_skin_tone"
@@ -86,6 +87,9 @@ object KeyboardSettings {
     val DEFAULT_UPPER_ROW_KEY_IDS = KeyboardDefaults.DEFAULT_UPPER_ROW_KEY_IDS
     val DEFAULT_SECOND_ROW_BUTTON_IDS = KeyboardDefaults.DEFAULT_SECOND_ROW_BUTTON_IDS
     val DEFAULT_KEYBOARD_ROW_ORDER = KeyboardDefaults.DEFAULT_KEYBOARD_ROW_ORDER
+    const val DEFAULT_COMPOSER_SUGGESTION_MAX_ITEMS = 100
+    const val MIN_COMPOSER_SUGGESTION_MAX_ITEMS = 1
+    const val MAX_COMPOSER_SUGGESTION_MAX_ITEMS = 1_000
 
     private val FUNCTION_KEY_OPTIONS = listOf(
         UpperRowKeyOption("ctrl", "Ctrl"),
@@ -171,6 +175,24 @@ object KeyboardSettings {
 
     fun normalizeBottomPaddingDp(paddingDp: Int): Int {
         return paddingDp.coerceIn(MIN_BOTTOM_PADDING_DP, MAX_BOTTOM_PADDING_DP)
+    }
+
+    fun readComposerSuggestionMaxItems(context: Context): Int {
+        return normalizeComposerSuggestionMaxItems(
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getInt(KEY_COMPOSER_SUGGESTION_MAX_ITEMS, DEFAULT_COMPOSER_SUGGESTION_MAX_ITEMS),
+        )
+    }
+
+    fun saveComposerSuggestionMaxItems(context: Context, maxItems: Int) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_COMPOSER_SUGGESTION_MAX_ITEMS, normalizeComposerSuggestionMaxItems(maxItems))
+            .apply()
+    }
+
+    fun normalizeComposerSuggestionMaxItems(maxItems: Int): Int {
+        return maxItems.coerceIn(MIN_COMPOSER_SUGGESTION_MAX_ITEMS, MAX_COMPOSER_SUGGESTION_MAX_ITEMS)
     }
 
     fun readFunctionKeyBackgroundsEnabled(context: Context): Boolean {
@@ -932,6 +954,7 @@ object KeyboardSettings {
                         JSONObject()
                             .put("heightScale", readHeightScale(context))
                             .put("bottomPaddingDp", readBottomPaddingDp(context))
+                            .put("composerSuggestionMaxItems", readComposerSuggestionMaxItems(context))
                             .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
@@ -1013,6 +1036,9 @@ object KeyboardSettings {
             .coerceIn(MIN_HEIGHT_SCALE, MAX_HEIGHT_SCALE)
         val bottomPaddingDp = normalizeBottomPaddingDp(
             keyboard.optInt("bottomPaddingDp", readBottomPaddingDp(context)),
+        )
+        val composerSuggestionMaxItems = normalizeComposerSuggestionMaxItems(
+            keyboard.optInt("composerSuggestionMaxItems", readComposerSuggestionMaxItems(context)),
         )
         val functionKeyBackgroundsEnabled = keyboard.optBoolean(
             "functionKeyBackgroundsEnabled",
@@ -1117,6 +1143,7 @@ object KeyboardSettings {
 
         saveHeightScale(context, heightScale)
         saveBottomPaddingDp(context, bottomPaddingDp)
+        saveComposerSuggestionMaxItems(context, composerSuggestionMaxItems)
         saveFunctionKeyBackgroundsEnabled(context, functionKeyBackgroundsEnabled)
         saveUpperRowKeyIds(context, upperRowKeys)
         saveSecondRowButtonIds(context, secondRowButtons)

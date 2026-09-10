@@ -180,7 +180,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
         scheduleEmojiSuggestionRefresh(delayMillis = 0L)
-        scheduleComposerSuggestionRefresh(delayMillis = 0L)
+        loadComposerSuggestionHistory()
     }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
@@ -1562,8 +1562,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun loadComposerSuggestionHistory() {
         val generation = ++composerSuggestionGeneration
+        val maxItems = KeyboardSettings.readComposerSuggestionMaxItems(this)
         composerSuggestionStoreExecutor.execute {
-            val history = ComposerSuggestionStore.read(applicationContext)
+            val history = ComposerSuggestionStore.trimToLimit(applicationContext, maxItems)
             mainHandler.post {
                 if (generation != composerSuggestionGeneration) return@post
                 composerSuggestionHistory = history
@@ -1596,22 +1597,22 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             return
         }
 
-        val entry = ComposerSuggestionStore.Entry(text = text, timestampMillis = System.currentTimeMillis())
-        composerSuggestionHistory = buildList {
-            add(entry)
-            addAll(composerSuggestionHistory.filterNot { it.text == text })
-        }.take(ComposerSuggestionStore.MAX_HISTORY)
         setComposerSuggestion(null)
-        Toast.makeText(this, "Text saved for suggestions.", Toast.LENGTH_SHORT).show()
-
         val generation = ++composerSuggestionGeneration
+        val maxItems = KeyboardSettings.readComposerSuggestionMaxItems(this)
         composerSuggestionStoreExecutor.execute {
-            ComposerSuggestionStore.recordText(applicationContext, text)
-            val persisted = ComposerSuggestionStore.read(applicationContext)
+            val result = ComposerSuggestionStore.recordText(applicationContext, text, maxItems)
+            val persisted = ComposerSuggestionStore.trimToLimit(applicationContext, maxItems)
             mainHandler.post {
                 if (generation != composerSuggestionGeneration) return@post
                 composerSuggestionHistory = persisted
                 scheduleComposerSuggestionRefresh(delayMillis = 0L)
+                val message = when (result) {
+                    ComposerSuggestionStore.RecordResult.Saved -> "Text saved for suggestions."
+                    ComposerSuggestionStore.RecordResult.Duplicate -> "That text is already saved."
+                    ComposerSuggestionStore.RecordResult.Invalid -> "Text could not be saved."
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
         }
     }

@@ -17,7 +17,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 object ComposerSuggestionStore {
-    const val MAX_HISTORY = 50
+    const val MAX_STORED_HISTORY = 1_000
     const val MAX_ENTRY_CHARS = 32_000
     private const val HISTORY_FILE_NAME = "composer_suggestion_history.enc"
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
@@ -30,6 +30,7 @@ object ComposerSuggestionStore {
     private const val JSON_CIPHERTEXT = "ciphertext"
     private const val JSON_IV = "iv"
 
+    @Synchronized
     fun read(context: Context): List<Entry> {
         return runCatching {
             val encrypted = readEncryptedFile(context) ?: return emptyList()
@@ -37,13 +38,35 @@ object ComposerSuggestionStore {
         }.getOrElse { emptyList() }
     }
 
-    fun recordText(context: Context, text: String) {
-        if (text.isBlank() || text.length > MAX_ENTRY_CHARS) return
+    @Synchronized
+    fun recordText(context: Context, text: String, maxItems: Int): RecordResult {
+        if (text.isBlank() || text.length > MAX_ENTRY_CHARS) return RecordResult.Invalid
+        val current = read(context)
+        if (current.any { it.text == text }) return RecordResult.Duplicate
+
         val entries = buildList {
             add(Entry(text = text, timestampMillis = System.currentTimeMillis()))
-            addAll(read(context).filterNot { it.text == text })
-        }.take(MAX_HISTORY)
+            addAll(current)
+        }.take(normalizeMaxItems(maxItems))
         write(context, entries)
+        return RecordResult.Saved
+    }
+
+    @Synchronized
+    fun deleteText(context: Context, text: String): List<Entry> {
+        val entries = read(context).filterNot { it.text == text }
+        writeOrClear(context, entries)
+        return entries
+    }
+
+    @Synchronized
+    fun trimToLimit(context: Context, maxItems: Int): List<Entry> {
+        val current = read(context)
+        val trimmed = current.take(normalizeMaxItems(maxItems))
+        if (trimmed.size != current.size) {
+            writeOrClear(context, trimmed)
+        }
+        return trimmed
     }
 
     private fun historyFile(context: Context): File =
@@ -62,7 +85,7 @@ object ComposerSuggestionStore {
     private fun write(context: Context, entries: List<Entry>) {
         val plainText = JSONObject()
             .put(JSON_ENTRIES, JSONArray().apply {
-                entries.take(MAX_HISTORY).forEach { entry ->
+                entries.take(MAX_STORED_HISTORY).forEach { entry ->
                     put(JSONObject()
                         .put(JSON_TEXT, entry.text)
                         .put(JSON_TIMESTAMP_MILLIS, entry.timestampMillis))
@@ -88,6 +111,14 @@ object ComposerSuggestionStore {
         }
     }
 
+    private fun writeOrClear(context: Context, entries: List<Entry>) {
+        if (entries.isEmpty()) {
+            historyFile(context).delete()
+        } else {
+            write(context, entries)
+        }
+    }
+
     private fun parseEntries(plainText: String): List<Entry> {
         return try {
             val entries = JSONObject(plainText).optJSONArray(JSON_ENTRIES) ?: return emptyList()
@@ -101,7 +132,7 @@ object ComposerSuggestionStore {
                         text = text,
                         timestampMillis = item.optLong(JSON_TIMESTAMP_MILLIS, 0L).coerceAtLeast(0L),
                     ))
-                    if (size >= MAX_HISTORY) break
+                    if (size >= MAX_STORED_HISTORY) break
                 }
             }
         } catch (_: JSONException) {
@@ -145,6 +176,15 @@ object ComposerSuggestionStore {
             .setRandomizedEncryptionRequired(true)
             .build())
         return keyGenerator.generateKey()
+    }
+
+    private fun normalizeMaxItems(maxItems: Int): Int =
+        maxItems.coerceIn(1, MAX_STORED_HISTORY)
+
+    enum class RecordResult {
+        Saved,
+        Duplicate,
+        Invalid,
     }
 
     data class Entry(

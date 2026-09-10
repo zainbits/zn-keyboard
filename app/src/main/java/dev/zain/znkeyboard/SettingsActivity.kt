@@ -41,6 +41,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -108,6 +110,7 @@ import dev.zain.znkeyboard.constants.SettingsBackupDefaults
 import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
+import dev.zain.znkeyboard.ime.ComposerSuggestionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -159,6 +162,12 @@ private fun SettingsScreen() {
     var activeAgentProfileId by remember { mutableStateOf(KeyboardSettings.readActiveAgentProfileId(context)) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
     var clipboardHistoryCount by remember { mutableStateOf(ClipboardHistoryStore.read(context).size) }
+    var composerSuggestionEntries by remember {
+        mutableStateOf<List<ComposerSuggestionStore.Entry>>(emptyList())
+    }
+    var composerSuggestionMaxItems by remember {
+        mutableStateOf(KeyboardSettings.readComposerSuggestionMaxItems(context))
+    }
     var backupPasswordDialogMode by remember { mutableStateOf<BackupPasswordDialogMode?>(null) }
     var pendingExportPassword by remember { mutableStateOf<String?>(null) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
@@ -166,6 +175,15 @@ private fun SettingsScreen() {
     val selectedDestination = SettingsDestination.entries.firstOrNull { it.id == selectedDestinationId }
         ?: SettingsDestination.Keyboard
     val destinationScrollState = remember(selectedDestinationId) { ScrollState(0) }
+    val scope = rememberCoroutineScope()
+
+    fun refreshComposerSuggestionHistory(maxItems: Int = composerSuggestionMaxItems) {
+        scope.launch {
+            composerSuggestionEntries = withContext(Dispatchers.IO) {
+                ComposerSuggestionStore.trimToLimit(context, maxItems)
+            }
+        }
+    }
 
     fun refreshSettingsFromStorage() {
         val nextProviderType = KeyboardSettings.readAgentProviderType(context)
@@ -194,9 +212,15 @@ private fun SettingsScreen() {
         activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
         textSnippets = KeyboardSettings.readTextSnippets(context)
         clipboardHistoryCount = ClipboardHistoryStore.read(context).size
+        composerSuggestionMaxItems = KeyboardSettings.readComposerSuggestionMaxItems(context)
+        refreshComposerSuggestionHistory(composerSuggestionMaxItems)
     }
 
-    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        composerSuggestionEntries = withContext(Dispatchers.IO) {
+            ComposerSuggestionStore.trimToLimit(context, composerSuggestionMaxItems)
+        }
+    }
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(SettingsBackupDefaults.MIME_TYPE),
     ) { uri ->
@@ -558,6 +582,25 @@ private fun SettingsScreen() {
                         onSnippetsChange = ::updateTextSnippets,
                     )
 
+                    ComposerSuggestionSettingsSection(
+                        entries = composerSuggestionEntries,
+                        maxItems = composerSuggestionMaxItems,
+                        onMaxItemsChange = { newMaxItems ->
+                            val normalized = KeyboardSettings.normalizeComposerSuggestionMaxItems(newMaxItems)
+                            composerSuggestionMaxItems = normalized
+                            KeyboardSettings.saveComposerSuggestionMaxItems(context, normalized)
+                            refreshComposerSuggestionHistory(normalized)
+                        },
+                        onDeleteEntry = { entry ->
+                            scope.launch {
+                                composerSuggestionEntries = withContext(Dispatchers.IO) {
+                                    ComposerSuggestionStore.deleteText(context, entry.text)
+                                }
+                                Toast.makeText(context, "Saved text deleted", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    )
+
                     ClipboardHistorySettingsSection(
                         entryCount = clipboardHistoryCount,
                         onClearConfirmed = {
@@ -577,6 +620,146 @@ private fun SettingsScreen() {
             }
         }
     }
+}
+
+@Composable
+private fun ComposerSuggestionSettingsSection(
+    entries: List<ComposerSuggestionStore.Entry>,
+    maxItems: Int,
+    onMaxItemsChange: (Int) -> Unit,
+    onDeleteEntry: (ComposerSuggestionStore.Entry) -> Unit,
+) {
+    SettingsSectionCard {
+        SettingsSectionHeader(
+            title = "Composer suggestions",
+            iconResId = R.drawable.ic_history_24,
+            trailingText = "${entries.size}/$maxItems",
+        )
+
+        Text(
+            text = "Texts saved with the keyboard's Save button are encrypted locally. Duplicate saves are ignored and the oldest item is dropped when this limit is exceeded.",
+            color = ZnKeyboardColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        ComposerSuggestionMaxItemsField(
+            maxItems = maxItems,
+            onMaxItemsChange = onMaxItemsChange,
+        )
+
+        if (entries.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .clip(RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS))
+                    .background(ZnKeyboardColors.Key),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "No saved suggestion texts",
+                    color = ZnKeyboardColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 360.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(entries) { entry ->
+                    Surface(
+                        color = ZnKeyboardColors.Key,
+                        shape = RoundedCornerShape(COMPACT_ITEM_CORNER_RADIUS),
+                        tonalElevation = 0.dp,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(start = 12.dp, top = 8.dp, end = 4.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = entry.text,
+                                color = ZnKeyboardColors.OnSurface,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = { onDeleteEntry(entry) }) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_delete_24),
+                                    contentDescription = "Delete saved suggestion text",
+                                    tint = ZnKeyboardColors.DeleteContent,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ComposerSuggestionMaxItemsField(
+    maxItems: Int,
+    onMaxItemsChange: (Int) -> Unit,
+) {
+    val focusManager = LocalFocusManager.current
+    var draft by remember { mutableStateOf(maxItems.toString()) }
+
+    LaunchedEffect(maxItems) {
+        draft = maxItems.toString()
+    }
+
+    fun commitDraft() {
+        val parsed = draft.toIntOrNull()
+        if (parsed == null) {
+            draft = maxItems.toString()
+            return
+        }
+        val normalized = KeyboardSettings.normalizeComposerSuggestionMaxItems(parsed)
+        draft = normalized.toString()
+        if (normalized != maxItems) {
+            onMaxItemsChange(normalized)
+        }
+    }
+
+    OutlinedTextField(
+        value = draft,
+        onValueChange = { input ->
+            draft = input.filter { it.isDigit() }.take(4)
+        },
+        label = { Text("Max saved items") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done,
+        ),
+        keyboardActions = KeyboardActions(
+            onDone = {
+                commitDraft()
+                focusManager.clearFocus()
+            },
+        ),
+        supportingText = {
+            Text(
+                text = "${KeyboardSettings.MIN_COMPOSER_SUGGESTION_MAX_ITEMS}-${KeyboardSettings.MAX_COMPOSER_SUGGESTION_MAX_ITEMS}. Default: ${KeyboardSettings.DEFAULT_COMPOSER_SUGGESTION_MAX_ITEMS}.",
+                color = ZnKeyboardColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+                if (!focusState.isFocused) {
+                    commitDraft()
+                }
+            },
+    )
 }
 
 @Composable
