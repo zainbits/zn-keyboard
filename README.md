@@ -9,6 +9,11 @@ A modern, privacy-respecting custom keyboard (input method editor) for Android, 
 ![UI](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
+<p align="center">
+  <img src="docs/screenshot-keyboard.png" width="280" alt="ZnKeyboard with shortcut rows and the Rewrite key">
+  <img src="docs/screenshot-settings.png" width="280" alt="ZnKeyboard settings for layout and shortcut rows">
+</p>
+
 ---
 
 ## Why ZnKeyboard
