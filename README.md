@@ -2,7 +2,7 @@
 
 A modern, privacy-respecting custom keyboard (input method editor) for Android, built with Kotlin and Jetpack Compose. ZnKeyboard pairs a fast custom typing surface with a built‑in **AI rewrite assistant** that polishes your text in place using your own OpenAI (or OpenAI‑compatible) API key.
 
-> Status: early and actively developed (`v0.1.0`). Built and maintained in the open.
+> Status: actively developed. Built and maintained in the open.
 
 ![Platform](https://img.shields.io/badge/platform-Android%2013%2B-3DDC84?logo=android&logoColor=white)
 ![Language](https://img.shields.io/badge/kotlin-2.3-7F52FF?logo=kotlin&logoColor=white)
@@ -121,8 +121,6 @@ Issues and pull requests are welcome. Please:
 - Keep changes aligned with the existing `InputMethodService` + custom `View` architecture.
 - Treat keyboard changes as device‑facing — verify typing behavior on a real field/device.
 - Follow Kotlin / AndroidX / Material 3 conventions already in the codebase.
-
-See [`AGENTS.md`](AGENTS.md) for detailed implementation and IME‑specific guidelines.
 
 ## License
 
