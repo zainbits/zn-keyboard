@@ -78,6 +78,20 @@ Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from
 - **GIF picker** powered by [KLIPY](https://klipy.com), with on‑device caching and content filtering.
 - **Password-encrypted backup & restore** for settings, clipboard history, learned typing, and configured API credentials.
 
+### 💧 Liquid navigation in the settings app
+
+<p align="center">
+  <img src="docs/liquid-nav.gif" width="392" alt="Settings nav bar: the selected tab pinches off its group like a liquid drop and merges back when you leave it">
+</p>
+
+The settings app is edge-to-edge: content scrolls behind a floating title pill and a floating nav bar. The selected tab is its own accent pill. Switching tabs makes it **pinch off like a drop of liquid**, and the old tab flows back into its group.
+- **No built-in API could do this.** Android's shape morphing only turns one outline into another, and a drop goes from one shape to two. So ZnKeyboard has a small engine of its own.
+- **Based on how real liquid behaves:** the neck between pills is drawn as circular arcs, which is the shape liquid takes in 2D. The neck thins faster just before it snaps, and a new bridge grows fast at first when two pills merge.
+- **Pure-Kotlin physics core** (`liquidnav/LiquidNavModel`): exact damped springs on a fixed 500 Hz step, so the motion is the same on 60, 90 and 120 Hz screens. Tapping another tab mid-animation continues smoothly from wherever it is.
+- **AGSL shader renderer:** crisp 1px anti-aliased edges and a thin outline that wraps the neck as it stretches. Icons and labels sit in a separate layer, so they stay sharp. No per-frame allocation.
+- The bar's outer bottom corners follow your phone's rounded screen corners. It respects the system animation scale, TalkBack tab semantics, RTL, and light/dark themes.
+- Tune the motion in [previews/liquid-nav-drop.html](previews/liquid-nav-drop.html), which runs the same engine and shader in a browser.
+
 ## Architecture
 
 Single‑module Android app (`:app`), package `dev.zain.znkeyboard`.
@@ -88,7 +102,8 @@ Single‑module Android app (`:app`), package `dev.zain.znkeyboard`.
 | `ime/ZnKeyboardView` | The custom keyboard surface — drawing, touch handling, gestures. |
 | `ime/AgentReviewView` + prompt assets | AI rewrite UI and the OpenAI request/response flow. |
 | `ime/*PanelView` (emoji, GIF, clipboard, snippet) | The expression and productivity panels. |
-| `SettingsActivity` (Jetpack Compose, Material 3) | Settings app with five tabs: Typing, Layout, Tools (AI / GIF), Snippets, and Backup. |
+| `SettingsActivity` (Jetpack Compose, Material 3) | Edge-to-edge settings app with a floating title pill and five tabs: Typing, Layout, Tools (AI / GIF), Snippets, and Backup. |
+| `liquidnav/` | Liquid nav bar: `LiquidNavModel` (pure-Kotlin springs and neck physics) and `LiquidNavBar` (Compose layout and AGSL shader). |
 | `ShortcutsScreen` + `ShortcutMacros` | Shortcut row editor, key palette, and macro definitions/dispatch. |
 | `typing/` | Adaptive touch decoding (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`) in pure Kotlin, wired up by `AdaptiveTypingEngine`. |
 | `KeyboardSettings` | Single source of truth for persisted settings and encrypted secrets. |
@@ -113,6 +128,9 @@ echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
 # Verify the adaptive typing engine (unit checks + simulated-typist comparison)
 curl -sSLO https://norvig.com/ngrams/count_1w.txt
 tools/typing/verify_engine.sh count_1w.txt
+
+# Verify the liquid nav engine (springs, neck geometry, 60/90/120 Hz timing, interruption)
+tools/liquidnav/verify_liquid_nav.sh
 ```
 
 Install on a connected device/emulator with `./gradlew :app:installDebug` (or `adb install -r`).
