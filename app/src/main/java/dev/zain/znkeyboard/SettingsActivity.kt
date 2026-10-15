@@ -2,19 +2,23 @@ package dev.zain.znkeyboard
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.Spring
@@ -36,16 +40,25 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -64,19 +77,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.LargeTopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -98,12 +105,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -113,10 +121,14 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
+import dev.zain.znkeyboard.constants.LiquidNavDimensions
 import dev.zain.znkeyboard.constants.SettingsBackupDefaults
+import dev.zain.znkeyboard.constants.SettingsShellDimensions
 import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
+import dev.zain.znkeyboard.liquidnav.LiquidNavBar
+import dev.zain.znkeyboard.liquidnav.LiquidNavItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -126,7 +138,12 @@ import kotlin.math.roundToInt
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
+        )
+        // Content scrolls behind the floating pills, so no system scrim behind 3-button navigation either.
+        window.isNavigationBarContrastEnforced = false
 
         setContent {
             ZnKeyboardTheme {
@@ -191,7 +208,6 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
     var selectedDestinationId by rememberSaveable { mutableStateOf(SettingsDestination.Typing.id) }
     val selectedDestination = SettingsDestination.entries.firstOrNull { it.id == selectedDestinationId }
         ?: SettingsDestination.Typing
-    val topBarScrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val destinationScrollState = rememberSaveable(selectedDestinationId, saver = ScrollState.Saver) { ScrollState(0) }
     val scope = rememberCoroutineScope()
 
@@ -323,51 +339,29 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
         KeyboardSettings.saveCustomEmojiTags(context, normalizedTags)
     }
 
-    Scaffold(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .nestedScroll(topBarScrollBehavior.nestedScrollConnection),
-        containerColor = ZnKeyboardColors.Background,
-        topBar = {
-            LargeTopAppBar(
-                title = { Text(selectedDestination.title) },
-                scrollBehavior = topBarScrollBehavior,
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = ZnKeyboardColors.Background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
-                ),
-            )
-        },
-        bottomBar = {
-            NavigationBar {
-                SettingsDestination.entries.forEach { destination ->
-                    NavigationBarItem(
-                        selected = selectedDestination == destination,
-                        onClick = {
-                            focusManager.clearFocus()
-                            selectedDestinationId = destination.id
-                        },
-                        icon = {
-                            Icon(
-                                painter = painterResource(destination.iconResId),
-                                contentDescription = null,
-                            )
-                        },
-                        label = { Text(destination.label) },
-                    )
-                }
-            }
-        },
-    ) { padding ->
+            .background(ZnKeyboardColors.Background),
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .verticalScroll(destinationScrollState)
                 .pointerInput(focusManager) {
                     detectTapGestures(onTap = { focusManager.clearFocus() })
                 }
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                .padding(
+                    start = SettingsShellDimensions.CONTENT_HORIZONTAL_PADDING,
+                    end = SettingsShellDimensions.CONTENT_HORIZONTAL_PADDING,
+                    top = SettingsShellDimensions.TITLE_PILL_TOP_GAP +
+                        SettingsShellDimensions.TITLE_PILL_HEIGHT +
+                        SettingsShellDimensions.CONTENT_CLEARANCE,
+                    bottom = LiquidNavDimensions.BOTTOM_GAP +
+                        LiquidNavDimensions.BAR_HEIGHT +
+                        SettingsShellDimensions.CONTENT_CLEARANCE,
+                ),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             when (selectedDestination) {
@@ -576,8 +570,82 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
                 }
             }
         }
+
+        SettingsTitlePill(
+            title = selectedDestination.title,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(
+                    WindowInsets.statusBars.union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal),
+                )
+                .padding(
+                    start = SettingsShellDimensions.TITLE_PILL_START_MARGIN,
+                    top = SettingsShellDimensions.TITLE_PILL_TOP_GAP,
+                ),
+        )
+
+        LiquidNavBar(
+            items = settingsNavItems,
+            selectedIndex = selectedDestination.ordinal,
+            onSelect = { index ->
+                focusManager.clearFocus()
+                selectedDestinationId = SettingsDestination.entries[index].id
+            },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(
+                    WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
+                )
+                .padding(
+                    start = LiquidNavDimensions.SIDE_MARGIN,
+                    end = LiquidNavDimensions.SIDE_MARGIN,
+                    bottom = LiquidNavDimensions.BOTTOM_GAP,
+                ),
+        )
     }
 }
+
+@Composable
+private fun SettingsTitlePill(title: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(SettingsShellDimensions.TITLE_PILL_BORDER_WIDTH, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        AnimatedContent(
+            targetState = title,
+            transitionSpec = {
+                (fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) + slideInVertically { it / 3 }) togetherWith
+                    fadeOut(spring(stiffness = Spring.StiffnessMedium)) using
+                    SizeTransform(clip = false) { _, _ ->
+                        spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessMediumLow)
+                    }
+            },
+            contentAlignment = Alignment.CenterStart,
+            label = "settings-title",
+        ) { text ->
+            Box(
+                modifier = Modifier
+                    .height(SettingsShellDimensions.TITLE_PILL_HEIGHT)
+                    .padding(horizontal = SettingsShellDimensions.TITLE_PILL_HORIZONTAL_PADDING)
+                    .semantics { heading() },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = ZnKeyboardColors.OnSurface,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+private val settingsNavItems = SettingsDestination.entries.map { LiquidNavItem(it.label, it.iconResId) }
 
 @Composable
 private fun TextSnippetsSection(

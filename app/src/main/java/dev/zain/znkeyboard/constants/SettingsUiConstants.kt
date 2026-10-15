@@ -22,6 +22,35 @@ object SettingsUiDimensions {
     val PICKER_CORNER_RADIUS = 16.dp
 }
 
+/** Floating title pill and content clearance for the edge-to-edge settings shell. */
+object SettingsShellDimensions {
+    val TITLE_PILL_HEIGHT = 48.dp
+    val TITLE_PILL_HORIZONTAL_PADDING = 20.dp
+    val TITLE_PILL_START_MARGIN = 12.dp
+    val TITLE_PILL_TOP_GAP = 8.dp
+    val TITLE_PILL_BORDER_WIDTH = 1.dp
+    val CONTENT_HORIZONTAL_PADDING = 16.dp
+
+    /** Extra space so the first and last items can scroll fully clear of the pills. */
+    val CONTENT_CLEARANCE = 16.dp
+}
+
+object LiquidNavDimensions {
+    val BAR_HEIGHT = 64.dp
+    val SELECTED_PILL_WIDTH = 64.dp
+    val GROUP_GAP = 10.dp
+    val SIDE_MARGIN = 12.dp
+    val BOTTOM_GAP = 8.dp
+    val BORDER_WIDTH = 1.dp
+
+    /** Outer bottom corner radius when the display reports no rounded corners (emulators, square screens). */
+    val FALLBACK_OUTER_CORNER_RADIUS = 32.dp
+    val ICON_SIZE = 24.dp
+    val ICON_LABEL_GAP = 2.dp
+    val RIPPLE_RADIUS = 28.dp
+    const val LABEL_SELECTED_SCALE = 0.85f
+}
+
 object SettingsBackupDefaults {
     val FILE_TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.US)
     const val MIME_TYPE = "application/octet-stream"

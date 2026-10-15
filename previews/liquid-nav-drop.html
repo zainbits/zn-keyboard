@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Liquid nav bar – drop pinch-off prototype</title>
+    <!--
+      Mirrors app/src/main/java/dev/zain/znkeyboard/liquidnav/LiquidNavModel.kt (engine) and
+      LiquidNavBar.kt (AGSL shader) so motion can be tuned in a browser. Units below are dp; the
+      canvas renders at SCALE px per dp like a ~3x phone.
+    -->
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #121316;
+        --text: #e3e2e6;
+        --muted: #a9abb4;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      body { margin: 0; background: #08090c; color: var(--text); }
+      main { display: flex; gap: 28px; padding: 24px; flex-wrap: wrap; align-items: flex-start; }
+      .phone {
+        position: relative; width: 384px; height: 700px; border-radius: 46px; overflow: hidden;
+        background: var(--bg); box-shadow: 0 0 0 2px #2c2e35;
+      }
+      .phone .content { position: absolute; inset: 0; overflow: auto; padding: 112px 16px 120px; }
+      .card { height: 120px; border-radius: 12px; background: #1e1f24; margin-bottom: 16px; }
+      .title {
+        position: absolute; left: 12px; top: 44px; height: 48px; padding: 0 20px; border-radius: 24px;
+        display: flex; align-items: center; background: #292a2f; font-size: 22px; transition: width .3s;
+      }
+      .bar { position: absolute; left: 12px; right: 12px; bottom: 32px; height: 64px; }
+      .bar canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .slot {
+        position: absolute; top: 0; height: 64px; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; font-size: 12px; color: #c5c6d0; cursor: pointer;
+        user-select: none; will-change: transform;
+      }
+      .slot .icon { width: 24px; height: 24px; border-radius: 6px; border: 2px solid currentColor; box-sizing: border-box; }
+      .slot .label { margin-top: 2px; line-height: 16px; white-space: nowrap; }
+      .panel { max-width: 560px; }
+      .panel label { display: grid; grid-template-columns: 210px 1fr 60px; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+      .panel h2 { font-size: 15px; margin: 18px 0 8px; }
+      #film { width: 384px; image-rendering: auto; background: var(--bg); border-radius: 8px; }
+      button { background: #2a2c33; color: var(--text); border: 1px solid #3a3d46; border-radius: 8px; padding: 6px 10px; margin: 2px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="phone" id="phone">
+        <div class="content" id="content"></div>
+        <div class="title" id="title">Typing</div>
+        <div class="bar" id="bar"><canvas id="live"></canvas></div>
+      </div>
+      <div class="panel">
+        <h2>Motion</h2>
+        <div id="sliders"></div>
+        <label><span>slow motion</span><input id="slow" type="range" min="1" max="10" step="1" value="1" /><span id="slowv">1×</span></label>
+        <h2>Filmstrip (deterministic, 33 ms per row, stepped at 120 Hz)</h2>
+        <div>
+          <button data-film="4,0">E → A</button>
+          <button data-film="0,2">A → C</button>
+          <button data-film="2,3">C → D</button>
+          <button data-film="0,4">A → E</button>
+          <button data-film="interrupt">A → E, then C at 90 ms</button>
+        </div>
+        <canvas id="film"></canvas>
+      </div>
+    </main>
+    <script>
+      const SCALE = 3;
+      const DIM = { width: 360, height: 64, gap: 10, selectedWidth: 64, outerRadius: 30, border: 1 };
+      const LABELS = ["Typing", "Layout", "Tools", "Snippets", "Backup"];
+      const TITLES = ["Typing", "Layout & rows", "Tools", "Snippets & clipboard", "Backup"];
+      const M = {
+        MAX_SLOTS: 6, SUBSTEP: 0.002, MAX_FRAME: 0.064,
+        EDGE_STIFFNESS: 520, EDGE_DAMPING_RATIO: 0.52,
+        NECK_STIFFNESS: 340, NECK_DAMPING_RATIO: 0.9,
+        PINCH_STIFFNESS: 3200, PINCH_DAMPING_RATIO: 1, PINCH_TARGET_FRACTION: -0.4,
+        COLOR_STIFFNESS: 300, COLOR_DAMPING_RATIO: 1,
+        BREAK_GAP_FRACTION: 0.6, JOIN_GAP_FRACTION: 0.7, PULL_GAP_FRACTION: 0.35,
+        JOIN_NECK_VELOCITY: 10, REST_POSITION_PX: 0.25, REST_VELOCITY_PX: 4, REST_COLOR: 0.002,
+        FLAT_NECK_EPS_PX: 0.5, MAX_FILLET_RADIUS_PX: 20000,
+      };
+
+      function springStep(k, z, h) {
+        const w = Math.sqrt(k);
+        if (z < 1) {
+          const wd = w * Math.sqrt(1 - z * z), e = Math.exp(-z * w * h), c = Math.cos(wd * h), s = Math.sin(wd * h);
+          return [e * (c + z * w * s / wd), e * s / wd, -e * w * w * s / wd, e * (c - z * w * s / wd)];
+        }
+        if (z === 1) { const e = Math.exp(-w * h); return [e * (1 + w * h), e * h, -e * w * w * h, e * (1 - w * h)]; }
+        const q = w * Math.sqrt(z * z - 1), r1 = -z * w + q, r2 = -z * w - q, e1 = Math.exp(r1 * h), e2 = Math.exp(r2 * h), dr = r1 - r2;
+        return [(r1 * e2 - r2 * e1) / dr, (e1 - e2) / dr, r1 * r2 * (e2 - e1) / dr, (r1 * e1 - r2 * e2) / dr];
+      }
+      function adv(a, x, v, i, t) { const d = x[i] - t, vi = v[i]; x[i] = t + a[0] * d + a[1] * vi; v[i] = a[2] * d + a[3] * vi; }
+
+      class Model {
+        constructor() {
+          const n = M.MAX_SLOTS;
+          for (const k of ["tL", "tR", "tC", "L", "LV", "R", "RV", "C", "CV"]) this[k] = new Float32Array(n);
+          this.neck = new Float32Array(n); this.neckV = new Float32Array(n);
+          this.bonded = new Array(n).fill(false); this.open = new Array(n).fill(false);
+          this.count = 0; this.selected = 0; this.pending = 0; this.rest = true; this.springs();
+        }
+        springs() {
+          this.edge = springStep(M.EDGE_STIFFNESS, M.EDGE_DAMPING_RATIO, M.SUBSTEP);
+          this.neckS = springStep(M.NECK_STIFFNESS, M.NECK_DAMPING_RATIO, M.SUBSTEP);
+          this.pinch = springStep(M.PINCH_STIFFNESS, M.PINCH_DAMPING_RATIO, M.SUBSTEP);
+          this.color = springStep(M.COLOR_STIFFNESS, M.COLOR_DAMPING_RATIO, M.SUBSTEP);
+        }
+        configure(count, w, h, gap, sw, sel) {
+          Object.assign(this, { count, width: w, radius: h / 2, gap, sw, selected: sel });
+          this.layout(); this.snap();
+        }
+        select(i) { if (i === this.selected) return; this.selected = i; this.layout(); this.rest = false; }
+        layout() {
+          const n = this.count, s = this.selected;
+          const gaps = (s > 0 ? 1 : 0) + (s < n - 1 ? 1 : 0);
+          const u = (this.width - this.sw - gaps * this.gap) / (n - 1);
+          let x = 0;
+          for (let i = 0; i < n; i++) {
+            if (i === s) { if (i > 0) x += this.gap; this.tL[i] = x; x += this.sw; this.tR[i] = x; if (i < n - 1) x += this.gap; this.tC[i] = 1; }
+            else { this.tL[i] = x; x += u; this.tR[i] = x; this.tC[i] = 0; }
+          }
+          for (let j = 0; j < n - 1; j++) this.open[j] = j === s || j + 1 === s;
+        }
+        snap() {
+          for (let i = 0; i < this.count; i++) { this.L[i] = this.tL[i]; this.R[i] = this.tR[i]; this.C[i] = this.tC[i]; this.LV[i] = this.RV[i] = this.CV[i] = 0; }
+          for (let j = 0; j < this.count - 1; j++) { this.bonded[j] = !this.open[j]; this.neck[j] = this.bonded[j] ? this.radius : M.PINCH_TARGET_FRACTION * this.radius; this.neckV[j] = 0; }
+          this.pending = 0; this.rest = true;
+        }
+        step(dt) {
+          if (this.rest) return false;
+          this.pending += Math.min(Math.max(dt, 0), M.MAX_FRAME);
+          while (this.pending >= M.SUBSTEP - 1e-9) { this.substep(); this.pending -= M.SUBSTEP; }
+          if (this.settled()) this.snap();
+          return !this.rest;
+        }
+        substep() {
+          const pullHalf = M.PULL_GAP_FRACTION * this.gap * 0.5, br = M.BREAK_GAP_FRACTION * this.gap, jn = M.JOIN_GAP_FRACTION * this.gap;
+          const last = this.count - 1, r = this.radius;
+          for (let j = 0; j < last; j++) {
+            const g = this.L[j + 1] - this.R[j];
+            if (this.bonded[j] && this.open[j] && (g >= br || this.neck[j] <= 0)) this.bonded[j] = false;
+            else if (!this.bonded[j] && !this.open[j] && g <= jn) {
+              this.bonded[j] = true; this.neck[j] = Math.max(this.neck[j], 0); this.neckV[j] = Math.max(this.neckV[j], M.JOIN_NECK_VELOCITY * r);
+            }
+          }
+          for (let i = 0; i <= last; i++) {
+            let tl = this.tL[i], tr = this.tR[i];
+            if (i > 0 && this.bonded[i - 1] && this.open[i - 1]) tl -= pullHalf;
+            if (i < last && this.bonded[i] && this.open[i]) tr += pullHalf;
+            adv(this.edge, this.L, this.LV, i, tl); adv(this.edge, this.R, this.RV, i, tr); adv(this.color, this.C, this.CV, i, this.tC[i]);
+          }
+          for (let j = 0; j < last; j++) {
+            if (this.bonded[j]) {
+              const g = this.L[j + 1] - this.R[j];
+              const t = this.open[j] ? r * Math.min(Math.max(1 - g / br, 0), 1) : r;
+              adv(this.neckS, this.neck, this.neckV, j, t);
+            } else adv(this.pinch, this.neck, this.neckV, j, M.PINCH_TARGET_FRACTION * r);
+          }
+        }
+        settled() {
+          const pe = M.REST_POSITION_PX, ve = M.REST_VELOCITY_PX;
+          for (let i = 0; i < this.count; i++) {
+            if (Math.abs(this.L[i] - this.tL[i]) > pe || Math.abs(this.LV[i]) > ve) return false;
+            if (Math.abs(this.R[i] - this.tR[i]) > pe || Math.abs(this.RV[i]) > ve) return false;
+            if (Math.abs(this.C[i] - this.tC[i]) > M.REST_COLOR) return false;
+          }
+          for (let j = 0; j < this.count - 1; j++) {
+            if (this.bonded[j] === this.open[j]) return false;
+            if (this.bonded[j]) { if (Math.abs(this.neck[j] - this.radius) > pe || Math.abs(this.neckV[j]) > ve) return false; }
+            else if (this.neck[j] > 0) return false;
+          }
+          return true;
+        }
+        rl(i) { const c = (this.L[i] + this.R[i]) / 2; return Math.min(this.L[i], c - this.radius); }
+        rr(i) { const c = (this.L[i] + this.R[i]) / 2; return Math.max(this.R[i], c + this.radius); }
+        center(i) { return (this.L[i] + this.R[i]) / 2; }
+        accent(i) { return Math.min(Math.max(this.C[i], 0), 1); }
+        fill(slots, bridges) {
+          const r = this.radius;
+          for (let i = 0; i < this.count; i++) { slots[i * 4] = this.rl(i); slots[i * 4 + 1] = this.rr(i); slots[i * 4 + 2] = this.accent(i); slots[i * 4 + 3] = 0; }
+          for (let j = 0; j < this.count - 1; j++) {
+            const n = this.neck[j];
+            slots[j * 4 + 3] = Math.max((this.rl(j + 1) - this.rr(j)) / 2, Math.min(Math.max(n, 0), r), 0.5);
+            bridge(this.rr(j) - r, this.rl(j + 1) + r, r, n > 0 ? Math.min(n, r) : -1, bridges, j * 4);
+          }
+        }
+      }
+      function bridge(a, b, r, neck, out, o) {
+        const half = (b - a) / 2; out[o] = (a + b) / 2;
+        if (neck <= 0 || half <= 0) { out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = -1; return; }
+        if (r - neck <= M.FLAT_NECK_EPS_PX) { out[o + 1] = half; out[o + 2] = 0; out[o + 3] = r; return; }
+        const k = (half * half + neck * neck - r * r) / (2 * (r - neck));
+        if (k <= 0) { out[o + 1] = 0; out[o + 2] = 0; out[o + 3] = -1; return; }
+        if (k > M.MAX_FILLET_RADIUS_PX) { out[o + 1] = half; out[o + 2] = 0; out[o + 3] = r; return; }
+        out[o + 1] = half * k / (r + k); out[o + 2] = k; out[o + 3] = neck;
+      }
+
+      // Same SDF program as the AGSL shader, translated to GLSL ES 1.0 (y flipped to canvas space).
+      const FRAG = `
+        precision highp float;
+        uniform vec2 uOrigin; uniform float uCanvasH;
+        uniform float uCount, uCy, uR, uOuterBL, uOuterBR, uBorder;
+        uniform float uSlots[24]; uniform float uBridges[20];
+        uniform vec4 uNeutral, uAccent, uBg, uBorderColor;
+        float sdSlot(vec2 p, float l, float r, float rbl, float rbr) {
+          vec2 q = vec2(p.x - 0.5 * (l + r), p.y - uCy);
+          float rad = q.y > 0.0 ? (q.x > 0.0 ? rbr : rbl) : uR;
+          vec2 d = abs(q) - vec2(0.5 * (r - l), uR) + rad;
+          return min(max(d.x, d.y), 0.0) + length(max(d, 0.0)) - rad;
+        }
+        float sdBridge(vec2 p, float xm, float hw, float k, float n) {
+          vec2 q = vec2(p.x - xm, abs(p.y - uCy));
+          float hh = n + k;
+          vec2 d = vec2(abs(q.x) - hw, q.y - hh);
+          float box = min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+          return max(box, k - length(vec2(q.x, q.y - hh)));
+        }
+        void main() {
+          vec2 p = vec2(gl_FragCoord.x, uCanvasH - gl_FragCoord.y) - uOrigin;
+          float d = 1e4; float a = uSlots[2];
+          for (int i = 0; i < 6; i++) {
+            if (float(i) < uCount) {
+              float rbl = i == 0 ? uOuterBL : uR;
+              float rbr = float(i) == uCount - 1.0 ? uOuterBR : uR;
+              d = min(d, sdSlot(p, uSlots[i * 4], uSlots[i * 4 + 1], rbl, rbr));
+            }
+          }
+          for (int j = 0; j < 5; j++) {
+            if (float(j) < uCount - 1.0) {
+              float xm = uBridges[j * 4];
+              float t = uSlots[j * 4 + 3];
+              a += (uSlots[j * 4 + 6] - uSlots[j * 4 + 2]) * smoothstep(xm - t, xm + t, p.x);
+              if (uBridges[j * 4 + 3] > 0.0) {
+                d = min(d, sdBridge(p, xm, uBridges[j * 4 + 1], uBridges[j * 4 + 2], uBridges[j * 4 + 3]));
+              }
+            }
+          }
+          float cov = clamp(0.5 - d, 0.0, 1.0);
+          vec4 c = mix(uBorderColor, mix(uNeutral, uAccent, clamp(a, 0.0, 1.0)), clamp(0.5 - d - uBorder, 0.0, 1.0));
+          gl_FragColor = mix(uBg, c, cov);
+        }`;
+
+      function makeGl(canvas) {
+        const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false });
+        const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw gl.getShaderInfoLog(o); return o; };
+        const prog = gl.createProgram();
+        gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec2 a; void main(){gl_Position=vec4(a,0.,1.);}"));
+        gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+        gl.linkProgram(prog); gl.useProgram(prog);
+        const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        const loc = gl.getAttribLocation(prog, "a"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+        const u = {}; for (const n of ["uOrigin", "uCanvasH", "uCount", "uCy", "uR", "uOuterBL", "uOuterBR", "uBorder", "uBorderColor", "uSlots", "uBridges", "uNeutral", "uAccent", "uBg"]) u[n] = gl.getUniformLocation(prog, n);
+        return { gl, u };
+      }
+      const slotsBuf = new Float32Array(24), bridgesBuf = new Float32Array(20);
+      const NEUTRAL = [0.17, 0.176, 0.2, 1], ACCENT = [0.66, 0.78, 1.0, 1], BG = [0.071, 0.075, 0.086, 1], BORDER = [0.27, 0.28, 0.31, 1];
+      function drawBar(ctx, model, x, y, w, h, canvasH) {
+        const { gl, u } = ctx;
+        model.fill(slotsBuf, bridgesBuf);
+        gl.viewport(x, canvasH - y - h, w, h);
+        gl.uniform2f(u.uOrigin, x, y); gl.uniform1f(u.uCanvasH, canvasH);
+        gl.uniform1f(u.uCount, model.count); gl.uniform1f(u.uCy, model.radius); gl.uniform1f(u.uR, model.radius);
+        gl.uniform1f(u.uOuterBL, DIM.outerRadius * SCALE); gl.uniform1f(u.uOuterBR, DIM.outerRadius * SCALE);
+        gl.uniform1f(u.uBorder, DIM.border * SCALE); gl.uniform4fv(u.uBorderColor, BORDER);
+        gl.uniform1fv(u.uSlots, slotsBuf); gl.uniform1fv(u.uBridges, bridgesBuf);
+        gl.uniform4fv(u.uNeutral, NEUTRAL); gl.uniform4fv(u.uAccent, ACCENT); gl.uniform4fv(u.uBg, BG);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+
+      // Live bar
+      const live = document.getElementById("live");
+      live.width = DIM.width * SCALE; live.height = DIM.height * SCALE;
+      const liveCtx = makeGl(live);
+      const model = new Model();
+      model.configure(5, DIM.width * SCALE, DIM.height * SCALE, DIM.gap * SCALE, DIM.selectedWidth * SCALE, 0);
+      const bar = document.getElementById("bar");
+      const slotsEl = LABELS.map((label, i) => {
+        const el = document.createElement("div");
+        el.className = "slot"; el.innerHTML = `<div class="icon"></div><div class="label">${label}</div>`;
+        el.onclick = () => { model.select(i); document.getElementById("title").textContent = TITLES[i]; };
+        bar.appendChild(el); return el;
+      });
+      document.getElementById("content").innerHTML = '<div class="card"></div>'.repeat(10);
+      let last = performance.now();
+      function frame(now) {
+        const slow = +document.getElementById("slow").value;
+        model.step((now - last) / 1000 / slow); last = now;
+        drawBar(liveCtx, model, 0, 0, live.width, live.height, live.height);
+        slotsEl.forEach((el, i) => {
+          const a = model.accent(i), w = model.tR[i] - model.tL[i];
+          el.style.width = `${w / SCALE}px`;
+          el.style.transform = `translateX(${(model.center(i) - w / 2) / SCALE}px)`;
+          el.style.color = a > 0.5 ? "#0b1d4a" : "#c5c6d0";
+          el.querySelector(".icon").style.transform = `translateY(${a * 9}px)`;
+          const lab = el.querySelector(".label"); lab.style.opacity = Math.max(0, 1 - 2 * a); lab.style.transform = `scale(${1 - 0.2 * a})`;
+        });
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+
+      // Sliders
+      const tunables = [
+        ["EDGE_STIFFNESS", 100, 1500, 10], ["EDGE_DAMPING_RATIO", 0.2, 1.2, 0.01],
+        ["NECK_STIFFNESS", 50, 1500, 10], ["NECK_DAMPING_RATIO", 0.2, 1.5, 0.01],
+        ["PINCH_STIFFNESS", 500, 6000, 50], ["BREAK_GAP_FRACTION", 0.1, 1, 0.01],
+        ["JOIN_GAP_FRACTION", 0.1, 1, 0.01], ["PULL_GAP_FRACTION", 0, 0.8, 0.01], ["JOIN_NECK_VELOCITY", 0, 40, 0.5],
+      ];
+      const sliders = document.getElementById("sliders");
+      for (const [k, min, max, step] of tunables) {
+        const l = document.createElement("label");
+        l.innerHTML = `<span>${k}</span><input type="range" min="${min}" max="${max}" step="${step}" value="${M[k]}" /><span>${M[k]}</span>`;
+        const [input, out] = [l.children[1], l.children[2]];
+        input.oninput = () => { M[k] = +input.value; out.textContent = input.value; model.springs(); };
+        sliders.appendChild(l);
+      }
+      document.getElementById("slow").oninput = (e) => (document.getElementById("slowv").textContent = `${e.target.value}×`);
+
+      // Filmstrip: one row every 30 ms of simulated time, stepped at 120 Hz.
+      const film = document.getElementById("film");
+      const ROWS = 22, ROW_H = (DIM.height + 8) * SCALE;
+      film.width = DIM.width * SCALE; film.height = ROWS * ROW_H;
+      film.style.height = `${(ROWS * ROW_H) / SCALE}px`;
+      const filmCtx = makeGl(film);
+      function filmstrip(from, to, interruptAt, interruptTo) {
+        const m = new Model();
+        m.configure(5, DIM.width * SCALE, DIM.height * SCALE, DIM.gap * SCALE, DIM.selectedWidth * SCALE, from);
+        m.select(to);
+        const g = filmCtx.gl; g.viewport(0, 0, film.width, film.height); g.clearColor(0.03, 0.035, 0.05, 1); g.clear(g.COLOR_BUFFER_BIT);
+        let t = 0;
+        for (let row = 0; row < ROWS; row++) {
+          drawBar(filmCtx, m, 0, row * ROW_H, film.width, DIM.height * SCALE, film.height);
+          for (let k = 0; k < 4; k++) {
+            m.step(1 / 120);
+            t += 1 / 120;
+            if (interruptAt && Math.abs(t - interruptAt) < 1 / 240) m.select(interruptTo);
+          }
+        }
+      }
+      document.querySelectorAll("[data-film]").forEach((b) => (b.onclick = () => {
+        const v = b.dataset.film;
+        if (v === "interrupt") filmstrip(0, 4, 0.09, 2); else { const [a, c] = v.split(",").map(Number); filmstrip(a, c); }
+      }));
+      filmstrip(4, 0);
+      window.__filmstrip = filmstrip; window.__M = M; window.__model = model;
+    </script>
+  </body>
+</html>
