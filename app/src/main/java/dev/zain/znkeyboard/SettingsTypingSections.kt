@@ -190,6 +190,7 @@ internal fun TypingFeelSection() {
     var preview by remember { mutableStateOf(KeyboardSettings.readKeyPreviewEnabled(context)) }
     var autoCaps by remember { mutableStateOf(KeyboardSettings.readAutoCapitalizeEnabled(context)) }
     var doubleSpace by remember { mutableStateOf(KeyboardSettings.readDoubleSpacePeriodEnabled(context)) }
+    var suggestionDelayMs by remember { mutableIntStateOf(KeyboardSettings.readSuggestionDelayMs(context)) }
     SettingsSectionCard(verticalSpacing = 18.dp) {
         SettingsSectionHeader(title = "Feel", iconResId = R.drawable.ic_touch_24)
         SettingsSwitchRow(
@@ -215,6 +216,24 @@ internal fun TypingFeelSection() {
             description = "Tap space twice quickly to end a sentence with \". \"",
             checked = doubleSpace,
             onCheckedChange = { doubleSpace = it; KeyboardSettings.saveDoubleSpacePeriodEnabled(context, it) },
+        )
+        LabeledSlider(
+            title = "Suggestion delay",
+            valueLabel = "$suggestionDelayMs ms",
+            value = suggestionDelayMs.toFloat(),
+            valueRange = KeyboardSettings.MIN_SUGGESTION_DELAY_MS.toFloat()..KeyboardSettings.MAX_SUGGESTION_DELAY_MS.toFloat(),
+            steps = 0,
+            onValueChange = {
+                val value = KeyboardSettings.normalizeSuggestionDelayMs(it.roundToInt())
+                suggestionDelayMs = value
+                KeyboardSettings.saveSuggestionDelayMs(context, value)
+            },
+            defaultLabel = "${KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS} ms",
+            isDefault = suggestionDelayMs == KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS,
+            onReset = {
+                suggestionDelayMs = KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS
+                KeyboardSettings.saveSuggestionDelayMs(context, KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS)
+            },
         )
     }
 }

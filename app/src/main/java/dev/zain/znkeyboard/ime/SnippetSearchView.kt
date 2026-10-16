@@ -26,7 +26,9 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     var callback: Callback? = null
+    var searchDelayMillis = KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS.toLong()
 
+    private val pendingResultsUpdate = Runnable { updateResults() }
     private var activeTab = KeyboardSettings.SavedTextPanelTab.Snippets
     private var snippets = emptyList<KeyboardSettings.TextSnippet>()
     private var clipboardEntries = emptyList<ClipboardHistoryStore.Entry>()
@@ -141,11 +143,18 @@ class SavedTextSearchView @JvmOverloads constructor(
 
     private fun setQuery(value: String) {
         val normalized = value.take(MAX_QUERY_LENGTH)
-        if (query != normalized) {
-            query = normalized
+        if (query == normalized) {
+            updateQueryText()
+            return
+        }
+        query = normalized
+        // An emptied query restores the full list right away.
+        if (query.isEmpty() || searchDelayMillis <= 0L) {
             updateResults()
         } else {
             updateQueryText()
+            removeCallbacks(pendingResultsUpdate)
+            postDelayed(pendingResultsUpdate, searchDelayMillis)
         }
     }
 
@@ -161,6 +170,7 @@ class SavedTextSearchView @JvmOverloads constructor(
     }
 
     private fun updateResults() {
+        removeCallbacks(pendingResultsUpdate)
         updateQueryText()
         if (activeTab == KeyboardSettings.SavedTextPanelTab.Clipboard) {
             updateClipboardResults()
