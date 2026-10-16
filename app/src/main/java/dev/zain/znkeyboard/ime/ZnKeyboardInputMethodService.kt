@@ -69,6 +69,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var snippetCompletionSources: List<String> = emptyList()
     private var activeComposerSuggestion: String? = null
     private var pendingComposerSuggestionRefresh: Runnable? = null
+    private var suggestionDelayMillis = KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS.toLong()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var snippetChangeListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     private lateinit var typingEngine: AdaptiveTypingEngine
@@ -521,6 +522,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         typingEngine.adaptiveEnabled = KeyboardSettings.readAdaptiveTouchEnabled(this)
         autoCapitalizeEnabled = KeyboardSettings.readAutoCapitalizeEnabled(this)
         doubleSpacePeriodEnabled = KeyboardSettings.readDoubleSpacePeriodEnabled(this)
+        suggestionDelayMillis = KeyboardSettings.readSuggestionDelayMs(this).toLong()
         val bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
         val updatedDefaultEmojiSkinTone = KeyboardSettings.readEmojiSkinTone(this)
@@ -567,6 +569,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.submitClipboardHistory(ClipboardHistoryStore.read(this))
         }
         savedTextSearchView?.let { view ->
+            view.searchDelayMillis = suggestionDelayMillis
             view.setSnippets(KeyboardSettings.readTextSnippets(this))
             view.setClipboardEntries(ClipboardHistoryStore.read(this))
         }
@@ -847,7 +850,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
     }
 
-    private fun scheduleEmojiSuggestionRefresh(delayMillis: Long = EMOJI_SUGGESTION_REFRESH_DELAY_MS) {
+    private fun scheduleEmojiSuggestionRefresh(delayMillis: Long = suggestionDelayMillis) {
         cancelEmojiSuggestionRefresh()
         if (isSensitiveEditor(currentEditorInfo) || emojiSuggestionTags.isEmpty()) {
             setEmojiKeySuggestion(null)
@@ -1744,7 +1747,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun scheduleComposerSuggestionRefresh(
-        delayMillis: Long = COMPOSER_SUGGESTION_REFRESH_DELAY_MS,
+        delayMillis: Long = suggestionDelayMillis,
     ) {
         cancelComposerSuggestionRefresh()
         if (isSensitiveEditor(currentEditorInfo) || snippetCompletionSources.isEmpty()) {
@@ -2607,8 +2610,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val CURSOR_DRAG_CONTEXT_CHARS = 8_192
         const val CURSOR_DRAG_MAX_CHARS = 120
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
-        const val EMOJI_SUGGESTION_REFRESH_DELAY_MS = 120L
-        const val COMPOSER_SUGGESTION_REFRESH_DELAY_MS = 80L
         const val COMPOSER_WORD_OPENERS = "([{\"“"
         const val TYPING_CONTEXT_CHARS = 16
         const val OWN_EDIT_SETTLE_MS = 1_000L

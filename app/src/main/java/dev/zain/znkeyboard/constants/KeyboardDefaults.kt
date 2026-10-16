@@ -8,6 +8,11 @@ object KeyboardDefaults {
     const val MAX_BOTTOM_PADDING_DP = 96
     const val DEFAULT_BOTTOM_PADDING_DP = 20
 
+    const val MIN_SUGGESTION_DELAY_MS = 0
+    const val MAX_SUGGESTION_DELAY_MS = 1_000
+    // Roughly one average phone keystroke gap, so lookups mostly run when typing pauses.
+    const val DEFAULT_SUGGESTION_DELAY_MS = 339
+
     const val MAX_UPPER_ROW_KEYS = 9
     const val MAX_SECOND_ROW_BUTTONS = MAX_UPPER_ROW_KEYS
 

@@ -28,6 +28,9 @@ object KeyboardSettings {
     const val MIN_BOTTOM_PADDING_DP = KeyboardDefaults.MIN_BOTTOM_PADDING_DP
     const val MAX_BOTTOM_PADDING_DP = KeyboardDefaults.MAX_BOTTOM_PADDING_DP
     const val DEFAULT_BOTTOM_PADDING_DP = KeyboardDefaults.DEFAULT_BOTTOM_PADDING_DP
+    const val MIN_SUGGESTION_DELAY_MS = KeyboardDefaults.MIN_SUGGESTION_DELAY_MS
+    const val MAX_SUGGESTION_DELAY_MS = KeyboardDefaults.MAX_SUGGESTION_DELAY_MS
+    const val DEFAULT_SUGGESTION_DELAY_MS = KeyboardDefaults.DEFAULT_SUGGESTION_DELAY_MS
     const val DEFAULT_AGENT_API_BASE_URL = AgentDefaults.DEFAULT_API_BASE_URL
     const val OPENROUTER_API_BASE_URL = AgentDefaults.OPENROUTER_API_BASE_URL
     const val DEFAULT_AGENT_MODEL = AgentDefaults.DEFAULT_MODEL
@@ -52,6 +55,7 @@ object KeyboardSettings {
     private const val SECRET_PREFS_NAME = "keyboard_agent_secrets"
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_BOTTOM_PADDING_DP = "bottom_padding_dp"
+    private const val KEY_SUGGESTION_DELAY_MS = "suggestion_delay_ms"
     private const val KEY_FUNCTION_KEY_BACKGROUNDS_ENABLED = "function_key_backgrounds_enabled"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
@@ -194,6 +198,21 @@ object KeyboardSettings {
 
     fun normalizeBottomPaddingDp(paddingDp: Int): Int {
         return paddingDp.coerceIn(MIN_BOTTOM_PADDING_DP, MAX_BOTTOM_PADDING_DP)
+    }
+
+    /** Wait after the last keystroke before typing suggestions and saved-text search update. */
+    fun readSuggestionDelayMs(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return normalizeSuggestionDelayMs(prefs.getInt(KEY_SUGGESTION_DELAY_MS, DEFAULT_SUGGESTION_DELAY_MS))
+    }
+
+    fun saveSuggestionDelayMs(context: Context, delayMs: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_SUGGESTION_DELAY_MS, normalizeSuggestionDelayMs(delayMs)).apply()
+    }
+
+    fun normalizeSuggestionDelayMs(delayMs: Int): Int {
+        return delayMs.coerceIn(MIN_SUGGESTION_DELAY_MS, MAX_SUGGESTION_DELAY_MS)
     }
 
     private fun readFlag(context: Context, key: String, default: Boolean): Boolean =
@@ -1026,6 +1045,7 @@ object KeyboardSettings {
                             .put("keyPreview", readKeyPreviewEnabled(context))
                             .put("autoCapitalize", readAutoCapitalizeEnabled(context))
                             .put("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
+                            .put("suggestionDelayMs", readSuggestionDelayMs(context))
                             .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
@@ -1116,6 +1136,7 @@ object KeyboardSettings {
         val keyPreview = keyboard.optBoolean("keyPreview", readKeyPreviewEnabled(context))
         val autoCapitalize = keyboard.optBoolean("autoCapitalize", readAutoCapitalizeEnabled(context))
         val doubleSpacePeriod = keyboard.optBoolean("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
+        val suggestionDelayMs = keyboard.optInt("suggestionDelayMs", readSuggestionDelayMs(context))
         val functionKeyBackgroundsEnabled = keyboard.optBoolean(
             "functionKeyBackgroundsEnabled",
             readFunctionKeyBackgroundsEnabled(context),
@@ -1233,6 +1254,7 @@ object KeyboardSettings {
         saveKeyPreviewEnabled(context, keyPreview)
         saveAutoCapitalizeEnabled(context, autoCapitalize)
         saveDoubleSpacePeriodEnabled(context, doubleSpacePeriod)
+        saveSuggestionDelayMs(context, suggestionDelayMs)
         saveFunctionKeyBackgroundsEnabled(context, functionKeyBackgroundsEnabled)
         shortcutMacros?.let { saveShortcutMacros(context, it) }
         saveUpperRowKeyIds(context, upperRowKeys)
