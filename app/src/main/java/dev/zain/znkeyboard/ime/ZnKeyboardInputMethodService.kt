@@ -32,6 +32,7 @@ import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.AgentDefaults
 import dev.zain.znkeyboard.constants.ImeColors
+import dev.zain.znkeyboard.integrations.KeyboardIntegrations
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
 import org.json.JSONArray
 import org.json.JSONException
@@ -1582,7 +1583,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 ?.toString()
                 ?.takeIf { it.isNotBlank() && it.length <= ClipboardHistoryStore.MAX_ENTRY_CHARS }
                 ?: return@runCatching null
-            val sourceApp = if (inferSourceApp) resolveClipboardSourceApp() else null
+            // A companion app (e.g. Ferry for clips from the Mac) knows the real source better than the
+            // app currently being typed in.
+            val sourceApp = KeyboardIntegrations.clipSource(this, description)
+                ?.let { ClipboardSourceApp(packageName = it.packageName, label = it.label) }
+                ?: if (inferSourceApp) resolveClipboardSourceApp() else null
             ClipboardSnapshot(
                 text = text,
                 timestampMillis = description.timestamp,

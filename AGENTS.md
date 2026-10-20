@@ -21,6 +21,8 @@
 - The same applies to `liquidnav/LiquidNavModel.kt` and `constants/LiquidNavMotion.kt`; Compose and AGSL code belongs in `LiquidNavBar.kt`.
 - Hot paths (`onDraw`, `onTouchEvent`, input dispatch) must not allocate, do I/O, or block.
 - Put dimensions, colors, and defaults in `constants/`; persisted settings and secrets go through `KeyboardSettings`.
+- Companion-app features live in `integrations/` behind `KeyboardIntegrations`. They must be optional: when the companion app is missing, signed with another key, or fails, the keyboard behaves exactly as without it. Never call them from hot paths, and do their IPC off the main thread with unstable provider clients.
+- Ferry (the Mac bridge) must be signed with the same release key; its contract is `protocol/BRIDGE.md` in the Ferry repo.
 - Architecture and design background: [README.md](README.md#architecture), [docs/typing-accuracy.md](docs/typing-accuracy.md).
 
 ## Signing

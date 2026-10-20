@@ -64,6 +64,7 @@ Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from
 ### 📋 Clipboard history
 - Recent copies are kept on a dedicated panel for quick re‑pasting — no more re‑copying the same address, code, or link.
 - On‑device only.
+- **Optional Ferry integration:** with the Ferry companion app installed, swipe a history item to **Send to Mac**, and clips sent from your Mac show up labelled with the Mac's name. Without Ferry, nothing changes.
 
 ### ✂️ Text snippets
 - Save reusable phrases, templates, and boilerplate from settings, the snippet panel, or a **Save snippet** shortcut key.
@@ -107,6 +108,7 @@ Single‑module Android app (`:app`), package `dev.zain.znkeyboard`.
 | `ShortcutsScreen` + `ShortcutMacros` | Shortcut row editor, key palette, and macro definitions/dispatch. |
 | `typing/` | Adaptive touch decoding (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`) in pure Kotlin, wired up by `AdaptiveTypingEngine`. |
 | `KeyboardSettings` | Single source of truth for persisted settings and encrypted secrets. |
+| `integrations/` | Optional companion-app hooks (`KeyboardIntegrations`), currently Ferry's "Send to Mac". The keyboard works the same without them. |
 | `constants/` | Centralized dimensions, colors, and defaults. |
 
 Hot paths (`onDraw`, `onTouchEvent`, input dispatch) deliberately avoid allocation, I/O, and blocking work.

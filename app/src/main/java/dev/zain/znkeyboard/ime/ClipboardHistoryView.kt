@@ -24,6 +24,8 @@ import android.widget.ListView
 import android.widget.TextView
 import com.bumptech.glide.Glide
 import dev.zain.znkeyboard.constants.ImeColors
+import dev.zain.znkeyboard.integrations.ClipboardItemAction
+import dev.zain.znkeyboard.integrations.KeyboardIntegrations
 import java.text.DateFormat
 import java.util.Date
 import kotlin.math.abs
@@ -80,6 +82,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
     }
 
     fun submitHistory(entries: List<ClipboardHistoryStore.Entry>) {
+        historyAdapter.itemActions = KeyboardIntegrations.clipboardItemActions(context)
         allEntries = entries.take(ClipboardHistoryStore.MAX_HISTORY)
         updateSourceFilters()
         submitFilteredHistory()
@@ -178,6 +181,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         private val appIconCache = mutableMapOf<String, Drawable?>()
         private val timestampFormat = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
         private var entries: List<ClipboardHistoryStore.Entry> = emptyList()
+        var itemActions: List<ClipboardItemAction> = emptyList()
 
         fun submitList(newEntries: List<ClipboardHistoryStore.Entry>) {
             entries = newEntries
@@ -214,6 +218,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 onSelected = onSelected,
                 onDeleted = onDeleted,
                 onPreviewRequested = ::requestPreview,
+                itemActions = itemActions,
             )
             return row
         }
@@ -239,8 +244,9 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
     }
 
     private class SwipeRevealHistoryRow(context: Context) : FrameLayout(context) {
-        private val revealWidthPx = dp(96)
-        private val lockThresholdPx = revealWidthPx * 0.45f
+        private val actionWidthPx = dp(96)
+        private var revealWidthPx = actionWidthPx
+        private val lockThresholdPx get() = revealWidthPx * 0.45f
         private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
         private var downX = 0f
         private var downY = 0f
@@ -252,6 +258,7 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         private var onSelected: ((String) -> Unit)? = null
         private var onDeleted: ((String) -> Unit)? = null
         private var onPreviewRequested: ((String) -> Unit)? = null
+        private var boundItemActions: List<ClipboardItemAction> = emptyList()
 
         private val timestamp = TextView(context).apply {
             setTextColor(PALETTE.mutedText)
@@ -377,6 +384,11 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 }
             }
         }
+        // Delete plus any integration actions (e.g. "Send to Mac"), revealed by swiping left.
+        private val actionStrip = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+        }
         private val headerRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -425,9 +437,10 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
         init {
             clipChildren = true
             background = deleteBackground()
+            actionStrip.addView(deleteAction, LinearLayout.LayoutParams(actionWidthPx, LinearLayout.LayoutParams.MATCH_PARENT))
             addView(
-                deleteAction,
-                LayoutParams(revealWidthPx, LayoutParams.MATCH_PARENT, Gravity.END),
+                actionStrip,
+                LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT, Gravity.END),
             )
             addView(
                 content,
@@ -445,7 +458,9 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
             onSelected: (String) -> Unit,
             onDeleted: (String) -> Unit,
             onPreviewRequested: (String) -> Unit,
+            itemActions: List<ClipboardItemAction>,
         ) {
+            bindItemActions(itemActions)
             boundEntry = entry
             boundPreviewUrl = previewUrl
             this.onSelected = onSelected
@@ -464,6 +479,53 @@ internal class ClipboardHistoryListView @JvmOverloads constructor(
                 sourceIcon.contentDescription = entry.sourceAppLabel?.let { "Copied from $it" }
             }
             close(animated = false)
+        }
+
+        private fun bindItemActions(itemActions: List<ClipboardItemAction>) {
+            if (itemActions == boundItemActions) return
+            boundItemActions = itemActions
+            while (actionStrip.childCount > 1) actionStrip.removeViewAt(0)
+            itemActions.forEachIndexed { index, action ->
+                actionStrip.addView(
+                    itemActionView(action),
+                    index,
+                    LinearLayout.LayoutParams(actionWidthPx, LinearLayout.LayoutParams.MATCH_PARENT),
+                )
+            }
+            revealWidthPx = actionWidthPx * (itemActions.size + 1)
+            // Without integrations the row looks exactly as before: one red Delete area.
+            background = if (itemActions.isEmpty()) deleteBackground() else null
+        }
+
+        private fun itemActionView(action: ClipboardItemAction): TextView {
+            return TextView(context).apply {
+                text = action.label
+                contentDescription = action.contentDescription
+                gravity = Gravity.CENTER
+                includeFontPadding = false
+                maxLines = 2
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(dp(6), 0, dp(6), 0)
+                setTextColor(PALETTE.text)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                background = itemActionBackground()
+                isClickable = true
+                isFocusable = false
+                setOnClickListener {
+                    boundEntry?.text?.let { text ->
+                        close(animated = true)
+                        action.perform(context, text)
+                    }
+                }
+            }
+        }
+
+        private fun itemActionBackground(): GradientDrawable {
+            return GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(8).toFloat()
+                setColor(PALETTE.function)
+            }
         }
 
         private fun renderPreview(previewUrl: String?, previewState: ClipboardLinkPreviewState) {
