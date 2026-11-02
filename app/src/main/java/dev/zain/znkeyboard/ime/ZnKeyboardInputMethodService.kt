@@ -2000,18 +2000,24 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setSuggestionStrip(emptyList())
             return
         }
-        val hindi = hindiComposer.stripCandidates(HINDI_STRIP_SLOTS)
-        val items: List<SuggestionStripItem?> = if (hindi.isEmpty()) {
+        // Candidates can differ only by invisible characters or Unicode composition; show each look once.
+        val hindi = hindiComposer.stripCandidates(HINDI_STRIP_SLOTS + HINDI_STRIP_EXTRA_CANDIDATES)
+            .distinctBy { (text, _) -> stripDisplayKey(text) }
+            .take(HINDI_STRIP_SLOTS)
+        val items = if (hindi.isEmpty()) {
             snippetSuggestions.take(SUGGESTION_STRIP_SLOTS).map { SuggestionStripItem(it, SuggestionStripItem.Kind.Snippet) }
         } else {
-            List(HINDI_STRIP_SLOTS) { index ->
-                hindi.getOrNull(index)?.let { (text, highlighted) ->
-                    SuggestionStripItem(text, SuggestionStripItem.Kind.Transliteration, highlighted)
-                }
-            } + snippetSuggestions.firstOrNull()?.let { SuggestionStripItem(it, SuggestionStripItem.Kind.Snippet) }
+            hindi.map { (text, highlighted) -> SuggestionStripItem(text, SuggestionStripItem.Kind.Transliteration, highlighted) } +
+                listOfNotNull(snippetSuggestions.firstOrNull()?.let { SuggestionStripItem(it, SuggestionStripItem.Kind.Snippet) })
         }
-        view.setSuggestionStrip(items)
+        view.setSuggestionStrip(items.distinctBy { stripDisplayKey(it.text) })
     }
+
+    /** What a suggestion looks like: compatibility-normalized, without invisible format characters. */
+    private fun stripDisplayKey(text: String): String =
+        java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFKC)
+            .filterNot { Character.getType(it) == Character.FORMAT.toInt() }
+            .trim()
 
     private fun captureRewriteTarget(): AgentEditTarget? {
         val snapshot = captureEditorSnapshot(MAX_REWRITE_SOURCE_CHARS + 1) ?: run {
@@ -2812,6 +2818,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val TYPING_CONTEXT_CHARS = 16
         const val SUGGESTION_STRIP_SLOTS = 3
         const val HINDI_STRIP_SLOTS = 2
+        // Fetched beyond the visible slots so look-alike duplicates can be skipped without leaving a gap.
+        const val HINDI_STRIP_EXTRA_CANDIDATES = 2
         val HINDI_EXCLUDED_TEXT_VARIATIONS = setOf(
             InputType.TYPE_TEXT_VARIATION_PASSWORD,
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,

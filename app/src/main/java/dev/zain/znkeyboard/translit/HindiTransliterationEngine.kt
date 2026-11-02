@@ -137,7 +137,9 @@ class HindiTransliterationEngine(context: Context) {
             if (!urgent && seq != latestRequest) return@execute
             if (token != activeLoadToken) return@execute
             val transliterator = model ?: return@execute
-            val candidates = runCatching { transliterator.candidates(key, MAX_CANDIDATES) }.getOrNull()
+            // Ask for extra so dropping malformed spellings still leaves MAX_CANDIDATES.
+            val candidates = runCatching { transliterator.candidates(key, CANDIDATE_POOL) }.getOrNull()
+                ?.let { all -> all.filter(DevanagariText::isWellFormed).ifEmpty { all }.take(MAX_CANDIDATES) }
                 ?: return@execute
             main.post {
                 if (token != loadToken) return@post
@@ -204,6 +206,7 @@ class HindiTransliterationEngine(context: Context) {
         private const val RERANK_ASSET = "translit/rerank.json"
         private const val PICKS_FILE = "picks.tsv"
         private const val MAX_CANDIDATES = 4
+        private const val CANDIDATE_POOL = 8
         private const val RESULT_CACHE_SIZE = 256
 
         private fun directory(context: Context) = File(context.noBackupFilesDir, "translit")
