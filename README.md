@@ -47,6 +47,16 @@ Type `kaise ho` and get `कैसे हो`, entirely on the device, with [Lek
 - **Only in memory while it's on:** the model loads in the background when you switch Hindi mode on and is unloaded when you switch it off.
 - Limits: it handles one word at a time (`main` and `mein` both give `में`; pick `मैं` from the strip), Hindi only, and gets about two words in three right as its first choice on a hard benchmark.
 
+### 📷 Scan text with the camera
+Add the **Scan text** key to a shortcut row. Tapping it turns the keys into a camera viewfinder; tap the shutter and the text in view is typed into the field.
+- **On the device:** [PP-OCRv6 Small](https://huggingface.co/litert-community/PP-OCRv6-Small-LiteRT) on LiteRT (CPU), about 1–1.5 s per capture. Strong on printed text, numbers and handwriting.
+- **Only in memory while the camera is open:** the camera and model are released as soon as you leave the viewfinder or switch fields.
+- **Line breaks** are kept in multi-line fields and become spaces in single-line ones.
+- **English only:** the recognizer can only emit English letters, digits and common symbols, and drops low-confidence lines, so other scripts don't turn into noise.
+- **Freezes on tap:** the viewfinder freezes the moment you tap (zero-shutter-lag capture), so you can move the phone away while it reads.
+- Limits: no Hindi/Devanagari or other scripts, and reading order across multiple columns can get mixed up.
+- **Camera OCR test** (Settings → Tools) compares PP-OCRv6 on CPU and GPU with Google ML Kit on the same capture, in a separate process.
+
 ### ✍️ AI rewrite assistant ("agent mode")
 - Rewrite, polish, or restructure the text in the current field with one tap, then review the result before it replaces anything.
 - **Use your own provider:** OpenAI by default (`api.openai.com/v1`), or any OpenAI‑compatible endpoint such as **OpenRouter**, with a configurable model (default `gpt-4o-mini`).
@@ -113,6 +123,7 @@ Single‑module Android app (`:app`), package `dev.zain.znkeyboard`.
 | `ime/ZnKeyboardView` | The custom keyboard surface — drawing, touch handling, gestures. |
 | `ime/AgentReviewView` + prompt assets | AI rewrite UI and the OpenAI request/response flow. |
 | `ime/*PanelView` (emoji, GIF, clipboard, snippet) | The expression and productivity panels. |
+| `ime/OcrCameraPanelView` + `ocrlab/ppocr/` | Camera text scanning: CameraX viewfinder panel, and the PP-OCRv6 LiteRT runtime (`PpOcrEngine`) with OpenCV-free box/crop geometry (`TextGeometry`). `ocrlab/OcrLabActivity` is the engine comparison screen. |
 | `SettingsActivity` (Jetpack Compose, Material 3) | Edge-to-edge settings app with a floating title pill and five tabs: Typing, Layout, Tools (AI / GIF), Snippets, and Backup. |
 | `liquidnav/` | Liquid nav bar: `LiquidNavModel` (pure-Kotlin springs and neck physics) and `LiquidNavBar` (Compose layout and AGSL shader). |
 | `ShortcutsScreen` + `ShortcutMacros` | Shortcut row editor, key palette, and macro definitions/dispatch. |
@@ -134,6 +145,9 @@ Requirements:
 ```sh
 # Point Gradle at your SDK
 echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties
+
+# Download the PP-OCRv6 models for Scan text (~77 MB, gitignored, SHA-256 verified)
+tools/ocr/fetch_ppocrv6_models.sh
 
 # Build a debug APK
 ./gradlew :app:assembleDebug
@@ -172,6 +186,7 @@ You are billed directly by your chosen provider for your own usage; ZnKeyboard n
 - GIF search talks to KLIPY only while the GIF panel is open.
 - Adaptive-touch learning stores only aggregate statistics (per-key touch offsets, letter-trigram counts) in no-backup storage (excluded from cloud backup, included only in password-encrypted exports), never in password or incognito fields, and can be reset from Settings → Typing.
 - Hindi transliteration runs entirely on the device. Learned spellings are stored like adaptive-touch data (no-backup storage, encrypted exports only) and are never learned in password or incognito fields.
+- Scan text runs entirely on the device. Captures are never stored; the Camera OCR test screen saves its captures to `Download/ZnOcrLab/` only while its "Save to Downloads" switch is on.
 - Settings and secrets stay on-device; secrets are encrypted at rest. User-created backups are encrypted with a password that is never saved by the app.
 
 ## Contributing

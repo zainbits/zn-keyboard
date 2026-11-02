@@ -59,6 +59,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onComposerSuggestionSelected(text: String)
         fun onTransliterationSelected(text: String)
         fun onHindiModeToggled()
+        fun onOcrPanelRequested()
     }
 
     var callback: Callback? = null
@@ -1371,6 +1372,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             is KeyIntent.AcceptComposerSuggestion -> callback?.onComposerSuggestionSelected(intent.text)
             is KeyIntent.AcceptTransliteration -> callback?.onTransliterationSelected(intent.text)
             KeyIntent.ToggleHindi -> callback?.onHindiModeToggled()
+            KeyIntent.OpenOcr -> callback?.onOcrPanelRequested()
             KeyIntent.None -> Unit
             is KeyIntent.Dispatch -> {
                 notifyLearner(intent.action, sample)
@@ -1717,6 +1719,14 @@ class ZnKeyboardView @JvmOverloads constructor(
                 role = KeyRole.Function,
                 active = shortcutRowState.hindiMode,
                 enabled = enabled && shortcutRowState.hindiAvailable,
+            )
+            "ocr" -> KeySpec(
+                id = id,
+                label = "Scan",
+                intent = KeyIntent.OpenOcr,
+                weight = weight,
+                role = KeyRole.Function,
+                enabled = enabled,
             )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
             "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt, enabled = enabled)
@@ -2253,6 +2263,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data class AcceptComposerSuggestion(val text: String) : KeyIntent()
         data class AcceptTransliteration(val text: String) : KeyIntent()
         data object ToggleHindi : KeyIntent()
+        data object OpenOcr : KeyIntent()
         data object None : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }

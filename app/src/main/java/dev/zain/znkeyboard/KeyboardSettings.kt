@@ -108,6 +108,7 @@ object KeyboardSettings {
         UpperRowKeyOption("rewrite", "Rewrite"),
         UpperRowKeyOption("save_text", "Save snippet"),
         UpperRowKeyOption("hindi", "Hindi अ"),
+        UpperRowKeyOption("ocr", "Scan text"),
     )
 
     val CONTROL_KEY_OPTIONS = listOf(

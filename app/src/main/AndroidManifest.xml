@@ -1,10 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- LiteRT declares these for AI Pack model downloads, which the keyboard does not use. -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"
+        tools:node="remove" />
+
     <!-- Optional Ferry integration (Send to Mac). Granted only when Ferry is signed with this app's key. -->
     <uses-permission android:name="dev.zain.ferry.permission.BRIDGE" />
+
+    <!-- Camera OCR test screen (ocrlab). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false" />
 
     <queries>
         <package android:name="dev.zain.ferry" />
@@ -29,6 +44,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Separate process keeps OCR model memory and native crashes away from the keyboard. -->
+        <activity
+            android:name=".ocrlab.OcrLabActivity"
+            android:exported="false"
+            android:label="Camera OCR test"
+            android:process=":ocrlab"
+            android:screenOrientation="portrait" />
 
         <service
             android:name=".ime.ZnKeyboardInputMethodService"

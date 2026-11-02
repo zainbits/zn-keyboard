@@ -8,6 +8,9 @@ local.properties
 /.kotlin/
 **/build/
 
+# Downloaded model weights (tools/ocr/fetch_ppocrv6_models.sh)
+/app/src/main/assets/ppocrv6/
+
 # Native and profiling output
 /.externalNativeBuild/
 /.cxx/

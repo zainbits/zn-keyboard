@@ -25,6 +25,16 @@ android {
         targetSdk = 36
         versionCode = 13
         versionName = "1.2.0"
+
+        // Personal arm64 phones only; keeps LiteRT and ML Kit native libraries from multiplying APK size.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
+    }
+
+    androidResources {
+        // LiteRT maps models straight from the APK, which requires them to be stored uncompressed.
+        noCompress += "tflite"
     }
 
     signingConfigs {
@@ -72,6 +82,14 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.recyclerview)
     implementation(libs.glide)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.compose)
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.litert)
+    implementation(libs.litert.gpu)
+    implementation(libs.mlkit.text.recognition)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

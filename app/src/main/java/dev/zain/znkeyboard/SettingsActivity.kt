@@ -128,6 +128,8 @@ import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
 import dev.zain.znkeyboard.liquidnav.LiquidNavBar
+import dev.zain.znkeyboard.ocrlab.OcrLabActivity
+import dev.zain.znkeyboard.ocrlab.OcrLabSection
 import dev.zain.znkeyboard.liquidnav.LiquidNavItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -544,6 +546,10 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
                             KeyboardSettings.saveRecentEmojiRows(context, rows)
                         },
                         onCustomEmojiTagsChange = ::updateCustomEmojiTags,
+                    )
+
+                    OcrLabSection(
+                        onOpen = { context.startActivity(Intent(context, OcrLabActivity::class.java)) },
                     )
                 }
 

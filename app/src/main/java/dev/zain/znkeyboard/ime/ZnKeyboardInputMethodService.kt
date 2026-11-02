@@ -51,6 +51,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     SnippetPanelView.Callback,
     SavedTextSearchView.Callback,
     AgentReviewView.Callback,
+    OcrCameraPanelView.Callback,
     HindiComposer.Host {
     private var keyboardView: ZnKeyboardView? = null
     private var inputRoot: LinearLayout? = null
@@ -61,6 +62,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var snippetPanelView: SnippetPanelView? = null
     private var savedTextSearchView: SavedTextSearchView? = null
     private var agentReviewView: AgentReviewView? = null
+    private var ocrPanelView: OcrCameraPanelView? = null
     private var currentEditorInfo: EditorInfo? = null
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
@@ -132,6 +134,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         emojiPanelView = null
         snippetPanelView = null
         agentReviewView = null
+        ocrPanelView?.dispose()
+        ocrPanelView = null
         activeSurface = KeyboardSurface.Keyboard
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
@@ -267,6 +271,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         hindiEngine.shutdown()
         gifSearchView?.dispose()
         gifSearchView = null
+        ocrPanelView?.dispose()
+        ocrPanelView = null
         super.onDestroy()
     }
 
@@ -454,6 +460,42 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onSaveSnippetRequested() {
         saveCurrentInputAsSnippet()
+    }
+
+    override fun onOcrPanelRequested() {
+        hideEmojiSearchView()
+        hideGifSearchView()
+        hideSavedTextSearchView()
+        val keyboardHeight = keyboardView?.height ?: 0
+        val panel = ocrPanelView ?: OcrCameraPanelView(this).also { view ->
+            ocrPanelView = view
+            view.callback = this
+        }
+        panel.setFixedHeight(keyboardHeight)
+        activeSurface = KeyboardSurface.Ocr
+        swapKeyboardSurface(panel)
+        renderSecondRow()
+        panel.start()
+    }
+
+    override fun onOcrTextCaptured(text: String) {
+        val multiLine = ((currentEditorInfo?.inputType ?: 0) and InputType.TYPE_TEXT_FLAG_MULTI_LINE) != 0
+        val value = if (multiLine) text else text.lines().map(String::trim).filter(String::isNotEmpty).joinToString(" ")
+        showKeyboardPanel()
+        handleText(value, ModifierState(ctrl = false, alt = false))
+    }
+
+    override fun onOcrPanelClosed() {
+        showKeyboardPanel()
+    }
+
+    override fun onOcrPermissionRequested() {
+        showKeyboardPanel()
+        startActivity(
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        Toast.makeText(this, "Allow Camera under Permissions, then tap Scan again.", Toast.LENGTH_LONG).show()
     }
 
     override fun onComposerSuggestionSelected(text: String) {
@@ -845,6 +887,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         // Panels insert text on their own; never let that replace a half-typed Hindi word.
         hindiComposer.finish(currentInputConnection)
         renderSuggestionStrip()
+        // The camera and OCR model only live while their panel is on screen.
+        ocrPanelView?.takeIf { it !== surface }?.stop()
         val container = keyboardContainer ?: return
         (surface.parent as? ViewGroup)?.removeView(surface)
         container.removeAllViews()
@@ -2729,6 +2773,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         Snippets,
         SavedTextSearch,
         Review,
+        Ocr,
     }
 
     private class LlmHttpException(
