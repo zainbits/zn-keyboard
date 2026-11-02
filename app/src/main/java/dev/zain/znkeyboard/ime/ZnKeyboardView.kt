@@ -67,6 +67,9 @@ class ZnKeyboardView @JvmOverloads constructor(
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val letterTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 400, false)
     private val labelTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 500, false)
+    private val strongLabelTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 700, false)
+    private val suggestionMeasurePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = strongLabelTypeface }
+    private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = PALETTE.text
         textAlign = Paint.Align.CENTER
@@ -349,6 +352,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         hitTargets.forEach { hit ->
             drawKey(canvas, hit)
         }
+        drawSuggestionDividers(canvas)
         if (keyPreviewEnabled) {
             drawKeyPreviews(canvas)
         }
@@ -812,8 +816,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         val bounds = hit.visualBounds
         val rewriteLoading = key.intent == KeyIntent.AgentRewrite && shortcutRowState.loading
         val pressed = isKeyPressed(key.id)
-        val selected = key.active && !rewriteLoading
-        val toolbar = hit.rowStyle == RowStyle.Toolbar || hit.rowStyle == RowStyle.Suggestion
+        val suggestion = hit.rowStyle == RowStyle.Suggestion
+        // Suggestions have no resting background; the top pick is bold instead of filled.
+        val selected = key.active && !rewriteLoading && !suggestion
+        val emphasized = key.active && suggestion
+        val toolbar = hit.rowStyle == RowStyle.Toolbar || suggestion
         val keyAlpha = if (key.enabled || key.emphasizedWhenDisabled) 255 else DISABLED_KEY_ALPHA
         val radius = keyRadius(bounds, toolbar)
         val isActionKey = key.role == KeyRole.Action && key.id == "enter"
@@ -822,7 +829,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val drawBackground = when {
             pressed || selected || rewriteLoading || isSpace -> true
             // Shortcut rows read as a quiet toolbar: content only, with a pill on press / latch.
-            toolbar -> hit.rowStyle == RowStyle.Suggestion || key.intent == KeyIntent.AgentRewrite
+            toolbar -> key.intent == KeyIntent.AgentRewrite
             key.role == KeyRole.Function -> functionKeyBackgroundsEnabled
             else -> true
         }
@@ -839,6 +846,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val contentColor = when {
             rewriteLoading -> PALETTE.text
             selected -> PALETTE.onSelected
+            emphasized -> PALETTE.text
             isActionKey -> PALETTE.onAction
             key.role == KeyRole.Character -> PALETTE.text
             else -> PALETTE.mutedText
@@ -875,7 +883,11 @@ class ZnKeyboardView @JvmOverloads constructor(
             } else {
                 val role = if (toolbar && key.role == KeyRole.Character && key.label.length > 1) KeyRole.Function else key.role
                 val textSize = fitTextSize(key.label, bounds, role, hit.rowStyle)
-                textPaint.typeface = if (role == KeyRole.Character) letterTypeface else labelTypeface
+                textPaint.typeface = when {
+                    emphasized -> strongLabelTypeface
+                    role == KeyRole.Character -> letterTypeface
+                    else -> labelTypeface
+                }
                 textPaint.textSize = textSize
                 textPaint.color = contentColor
                 textPaint.alpha = contentAlpha
@@ -889,6 +901,23 @@ class ZnKeyboardView @JvmOverloads constructor(
 
         if (key.id == "shift" && shiftState == ShiftState.Locked) {
             drawShiftLockIndicator(canvas, bounds, contentColor)
+        }
+    }
+
+    /** Thin vertical rules between adjacent suggestions. No allocation: runs every frame. */
+    private fun drawSuggestionDividers(canvas: Canvas) {
+        dividerPaint.color = PALETTE.divider
+        dividerPaint.strokeWidth = dp(1f)
+        var previous: KeyHit? = null
+        for (hit in hitTargets) {
+            if (hit.rowStyle != RowStyle.Suggestion || hit.key.intent == KeyIntent.None) continue
+            previous?.let { left ->
+                val x = midpoint(left.visualBounds.right, hit.visualBounds.left)
+                val half = hit.visualBounds.height() * SUGGESTION_DIVIDER_HEIGHT_FRACTION / 2f
+                val centerY = hit.visualBounds.centerY()
+                canvas.drawLine(x, centerY - half, x, centerY + half, dividerPaint)
+            }
+            previous = hit
         }
     }
 
@@ -1613,24 +1642,31 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     /**
-     * Always present, so the keyboard never changes height as suggestions come and go. Slots keep
-     * fixed positions: an empty slot is an invisible, untouchable placeholder.
+     * Always present, so the keyboard never changes height as suggestions come and go. Only real
+     * suggestions are laid out, centered, each as wide as its text needs relative to the others;
+     * with none, an invisible placeholder keeps the row.
      */
     private fun suggestionStripRow(): RowSpec {
-        val keys = (0 until SUGGESTION_STRIP_SLOTS).map { index ->
-            when (val item = suggestionStrip.getOrNull(index)) {
-                null -> KeySpec("strip_$index", "", KeyIntent.None, role = KeyRole.Function, enabled = false)
-                else -> KeySpec(
-                    id = "strip_$index",
-                    label = composerSuggestionDisplayLabel(item.text),
-                    intent = when (item.kind) {
-                        SuggestionStripItem.Kind.Transliteration -> KeyIntent.AcceptTransliteration(item.text)
-                        SuggestionStripItem.Kind.Snippet -> KeyIntent.AcceptComposerSuggestion(item.text)
-                    },
-                    role = KeyRole.Function,
-                    active = item.highlighted,
-                )
-            }
+        val items = suggestionStrip.filterNotNull()
+        if (items.isEmpty()) {
+            val placeholder = KeySpec("strip_empty", "", KeyIntent.None, role = KeyRole.Function, enabled = false)
+            return RowSpec(listOf(placeholder), heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Suggestion)
+        }
+        suggestionMeasurePaint.textSize = sp(ImeDimensions.KEY_LABEL_FUNCTION_TEXT_SIZE_SP)
+        val minWidth = dp(SUGGESTION_MIN_WIDTH_DP)
+        val keys = items.mapIndexed { index, item ->
+            val label = composerSuggestionDisplayLabel(item.text)
+            KeySpec(
+                id = "strip_$index",
+                label = label,
+                intent = when (item.kind) {
+                    SuggestionStripItem.Kind.Transliteration -> KeyIntent.AcceptTransliteration(item.text)
+                    SuggestionStripItem.Kind.Snippet -> KeyIntent.AcceptComposerSuggestion(item.text)
+                },
+                weight = max(suggestionMeasurePaint.measureText(label), minWidth),
+                role = KeyRole.Function,
+                active = item.highlighted,
+            )
         }
         return RowSpec(keys, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Suggestion)
     }
@@ -2281,6 +2317,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val aiLoadingSurface get() = ImeColors.AI_LOADING_SURFACE
         val text get() = ImeColors.TEXT
         val mutedText get() = ImeColors.MUTED_TEXT
+        val divider get() = ImeColors.DIVIDER
     }
 
     data class ShortcutRowState(
@@ -2312,6 +2349,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val PHONE_PAD_SUB_LABEL_ALPHA_FRACTION = 0.78f
         const val MAX_SUGGESTION_LABEL_CHARS = 48
         const val SUGGESTION_STRIP_SLOTS = 3
+        const val SUGGESTION_MIN_WIDTH_DP = 72f
+        const val SUGGESTION_DIVIDER_HEIGHT_FRACTION = 0.5f
         const val HINDI_KEY_LABEL = "अ"
         const val HINDI_SPACE_LABEL = "हिन्दी"
         const val SLIDE_HYSTERESIS_PITCH_FRACTION = 0.55f
