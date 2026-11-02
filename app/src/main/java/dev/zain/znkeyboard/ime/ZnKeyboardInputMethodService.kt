@@ -33,6 +33,7 @@ import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.AgentDefaults
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.integrations.KeyboardIntegrations
+import dev.zain.znkeyboard.translit.HindiTransliterationEngine
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
 import org.json.JSONArray
 import org.json.JSONException
@@ -49,7 +50,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     GifSearchView.Callback,
     SnippetPanelView.Callback,
     SavedTextSearchView.Callback,
-    AgentReviewView.Callback {
+    AgentReviewView.Callback,
+    HindiComposer.Host {
     private var keyboardView: ZnKeyboardView? = null
     private var inputRoot: LinearLayout? = null
     private var keyboardContainer: FrameLayout? = null
@@ -68,12 +70,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var emojiKeySuggestion: String? = null
     private var pendingEmojiSuggestionRefresh: Runnable? = null
     private var snippetCompletionSources: List<String> = emptyList()
-    private var activeComposerSuggestion: String? = null
+    private var snippetSuggestions: List<String> = emptyList()
     private var pendingComposerSuggestionRefresh: Runnable? = null
     private var suggestionDelayMillis = KeyboardSettings.DEFAULT_SUGGESTION_DELAY_MS.toLong()
     private val mainHandler = Handler(Looper.getMainLooper())
     private var snippetChangeListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     private lateinit var typingEngine: AdaptiveTypingEngine
+    private lateinit var hindiEngine: HindiTransliterationEngine
+    private lateinit var hindiComposer: HindiComposer
+    private var hindiModeEnabled = false
     private var appliedThemeSignature: String? = null
     private var autoCapitalizeEnabled = true
     private var doubleSpacePeriodEnabled = true
@@ -105,6 +110,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         typingEngine = AdaptiveTypingEngine(this).also { engine ->
             engine.load(KeyboardSettings.readTypingModelGeneration(this))
         }
+        hindiEngine = HindiTransliterationEngine(this)
+        hindiComposer = HindiComposer(hindiEngine, this)
+        hindiModeEnabled = KeyboardSettings.readHindiModeEnabled(this)
+        if (hindiModeEnabled) hindiEngine.load(::renderSuggestionStrip)
         ClipboardHistoryStore.deleteLegacyRewriteHistory(this)
         ClipboardLinkPreviewRepository.loadPersistedPreviews(this)
         registerClipboardListener()
@@ -134,7 +143,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.callback = this
             view.typingEngine = typingEngine
             view.setEmojiKeySuggestion(emojiKeySuggestion)
-            view.setComposerSuggestion(activeComposerSuggestion)
             view.setPhonePadMode(shouldUsePhonePadMode(currentEditorInfo))
         }
         val emojiSearch = EmojiSearchView(this).also { view ->
@@ -194,12 +202,14 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             applyKeyboardSettings()
             keyboard.setEnterLabel(resolveEnterLabel(currentEditorInfo))
             renderSecondRow()
+            renderSuggestionStrip()
         }
     }
 
     override fun onStartInput(attribute: EditorInfo?, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
         currentEditorInfo = attribute
+        hindiComposer.reset()
         keyboardView?.setPhonePadMode(shouldUsePhonePadMode(attribute))
         resetAgentState(returnToKeyboard = true)
         applyKeyboardSettings()
@@ -215,6 +225,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         typingEngine.resetIfGenerationChanged(KeyboardSettings.readTypingModelGeneration(this))
         typingEngine.personalizationAllowed = isPersonalizationAllowed(info)
+        hindiEngine.learningEnabled = isPersonalizationAllowed(info)
+        hindiEngine.resetPicksIfGenerationChanged()
+        hindiComposer.reset()
         pendingOwnSelectionUpdates = 0
         typingEngine.learner.onContextChanged(currentInputConnection?.getTextBeforeCursor(TYPING_CONTEXT_CHARS, 0))
         keyboardView?.setPhonePadMode(shouldUsePhonePadMode(info))
@@ -230,12 +243,14 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onFinishInputView(finishingInput: Boolean) {
         typingEngine.save()
+        hindiComposer.finish(currentInputConnection)
+        hindiEngine.save()
         keyboardView?.clearLatchedModifiers()
         keyboardView?.resetToLetters()
         cancelEmojiSuggestionRefresh()
         cancelComposerSuggestionRefresh()
         setEmojiKeySuggestion(null)
-        setComposerSuggestion(null)
+        setSnippetSuggestions(emptyList())
         resetAgentState(returnToKeyboard = true)
         super.onFinishInputView(finishingInput)
     }
@@ -249,6 +264,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         snippetChangeListener?.let { KeyboardSettings.unregisterTextSnippetsChangeListener(this, it) }
         snippetChangeListener = null
         typingEngine.shutdown()
+        hindiEngine.shutdown()
         gifSearchView?.dispose()
         gifSearchView = null
         super.onDestroy()
@@ -268,6 +284,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             pendingOwnSelectionUpdates--
         } else if (!isRawKeyEventEditor(currentEditorInfo) && (oldSelStart != newSelStart || oldSelEnd != newSelEnd)) {
             // The user tapped elsewhere in the text, or the app edited it: accept and resync.
+            hindiComposer.finish(currentInputConnection)
             typingEngine.learner.onContextChanged(
                 if (newSelStart == newSelEnd) currentInputConnection?.getTextBeforeCursor(TYPING_CONTEXT_CHARS, 0) else null,
             )
@@ -288,6 +305,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
         if (activeSurface == KeyboardSurface.SavedTextSearch && handleSavedTextSearchKeyboardAction(action, modifiers)) {
             return
+        }
+        if (action is KeyboardAction.KeyCode || action is KeyboardAction.Chord || action is KeyboardAction.Sequence) {
+            hindiComposer.finish(currentInputConnection)
         }
         when (action) {
             KeyboardAction.Backspace -> handleBackspace(modifiers)
@@ -426,6 +446,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     override fun onEmojiKeySuggestionSelected(emoji: String) {
+        hindiComposer.finish(currentInputConnection)
         replaceAdjacentSuggestionText(emoji)
         handleText(emoji, ModifierState(ctrl = false, alt = false))
         persistRecentEmojis(EmojiCatalog.promoteRecentEmoji(emoji, recentEmojis))
@@ -438,10 +459,11 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     override fun onComposerSuggestionSelected(text: String) {
         if (isSensitiveEditor(currentEditorInfo)) return
         val inputConnection = currentInputConnection ?: return
+        hindiComposer.finish(inputConnection)
         val completion = textBeforeCursorForCompletion(text.length)
-            ?.let { findComposerCompletion(it, listOf(text)) }
+            ?.let { findComposerCompletions(it, listOf(text), limit = 1).firstOrNull() }
         if (completion == null) {
-            setComposerSuggestion(null)
+            setSnippetSuggestions(emptyList())
             return
         }
         // Replace the typed prefix too, so the snippet's own casing wins ("He" -> "hello").
@@ -453,7 +475,55 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         } finally {
             inputConnection.endBatchEdit()
         }
-        setComposerSuggestion(null)
+        setSnippetSuggestions(emptyList())
+    }
+
+    override fun onTransliterationSelected(text: String) {
+        val inputConnection = currentInputConnection ?: return
+        cancelActiveAgentForEditorChange()
+        if (!hindiComposer.onCandidateSelected(inputConnection, text)) return
+        lastSpaceCommitAt = 0L
+        typingEngine.learner.onContextChanged(null)
+        scheduleEmojiSuggestionRefresh()
+        scheduleComposerSuggestionRefresh()
+        updateAutoShift()
+    }
+
+    override fun onHindiModeToggled() {
+        hindiComposer.finish(currentInputConnection)
+        setHindiModeEnabled(!hindiModeEnabled)
+        KeyboardSettings.saveHindiModeEnabled(this, hindiModeEnabled)
+    }
+
+    /** The model only stays in memory while Hindi mode is on. */
+    private fun setHindiModeEnabled(enabled: Boolean) {
+        if (hindiModeEnabled == enabled) return
+        hindiModeEnabled = enabled
+        if (enabled) {
+            hindiEngine.load(::renderSuggestionStrip)
+        } else {
+            hindiComposer.reset()
+            hindiEngine.unload()
+        }
+        renderSecondRow()
+        renderSuggestionStrip()
+    }
+
+    override fun composerInputConnection(): InputConnection? = currentInputConnection
+
+    override fun onComposerEdit() = noteOwnEdit()
+
+    override fun onHindiStripChanged() = renderSuggestionStrip()
+
+    private fun isHindiActive(): Boolean =
+        hindiModeEnabled && activeSurface == KeyboardSurface.Keyboard &&
+            isHindiEditor(currentEditorInfo) && hindiEngine.isReady
+
+    /** Plain text fields only: never passwords, URLs, email addresses or raw-key terminals. */
+    private fun isHindiEditor(info: EditorInfo?): Boolean {
+        val inputType = info?.inputType ?: return false
+        if ((inputType and InputType.TYPE_MASK_CLASS) != InputType.TYPE_CLASS_TEXT) return false
+        return (inputType and InputType.TYPE_MASK_VARIATION) !in HINDI_EXCLUDED_TEXT_VARIATIONS
     }
 
     override fun onSnippetSelected(snippet: String) {
@@ -520,6 +590,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun applyKeyboardSettings() {
         val heightScale = KeyboardSettings.readHeightScale(this)
+        setHindiModeEnabled(KeyboardSettings.readHindiModeEnabled(this))
         typingEngine.adaptiveEnabled = KeyboardSettings.readAdaptiveTouchEnabled(this)
         autoCapitalizeEnabled = KeyboardSettings.readAutoCapitalizeEnabled(this)
         doubleSpacePeriodEnabled = KeyboardSettings.readDoubleSpacePeriodEnabled(this)
@@ -771,6 +842,9 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun swapKeyboardSurface(surface: View) {
+        // Panels insert text on their own; never let that replace a half-typed Hindi word.
+        hindiComposer.finish(currentInputConnection)
+        renderSuggestionStrip()
         val container = keyboardContainer ?: return
         (surface.parent as? ViewGroup)?.removeView(surface)
         container.removeAllViews()
@@ -1031,23 +1105,48 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             }
         }
         noteOwnEdit()
-        if (wrapSelectedText(inputConnection, value)) {
-            scheduleEmojiSuggestionRefresh()
-            scheduleComposerSuggestionRefresh()
-            updateAutoShift()
-            return
+        var hindiBatch = false
+        if (isHindiActive() && (hindiComposer.isComposing || inputConnection.getSelectedText(0).isNullOrEmpty())) {
+            if (value.length == 1 && HindiComposer.isAsciiLetter(value[0])) {
+                hindiComposer.onLetter(inputConnection, value)
+                lastSpaceCommitAt = 0L
+                scheduleEmojiSuggestionRefresh()
+                scheduleComposerSuggestionRefresh()
+                updateAutoShift()
+                return
+            }
+            // The word's conversion and the separator after it land as one edit.
+            inputConnection.beginBatchEdit()
+            hindiBatch = true
+            if (hindiComposer.isComposing) {
+                hindiComposer.commitForSeparator(inputConnection, value)
+            } else {
+                hindiComposer.beforeOtherText(inputConnection, value)
+            }
+        } else {
+            hindiComposer.finish(inputConnection)
         }
-        if (value == " " && applyDoubleSpacePeriod(inputConnection)) {
-            scheduleEmojiSuggestionRefresh()
-            scheduleComposerSuggestionRefresh()
-            updateAutoShift()
-            return
-        }
-        if (inputConnection.commitText(value, 1)) {
-            lastSpaceCommitAt = if (value == " ") SystemClock.uptimeMillis() else 0L
-            scheduleEmojiSuggestionRefresh()
-            scheduleComposerSuggestionRefresh()
-            updateAutoShift()
+        try {
+            if (wrapSelectedText(inputConnection, value)) {
+                scheduleEmojiSuggestionRefresh()
+                scheduleComposerSuggestionRefresh()
+                updateAutoShift()
+                return
+            }
+            if (value == " " && applyDoubleSpacePeriod(inputConnection)) {
+                scheduleEmojiSuggestionRefresh()
+                scheduleComposerSuggestionRefresh()
+                updateAutoShift()
+                return
+            }
+            if (inputConnection.commitText(value, 1)) {
+                lastSpaceCommitAt = if (value == " ") SystemClock.uptimeMillis() else 0L
+                scheduleEmojiSuggestionRefresh()
+                scheduleComposerSuggestionRefresh()
+                updateAutoShift()
+            }
+        } finally {
+            if (hindiBatch) inputConnection.endBatchEdit()
         }
     }
 
@@ -1056,7 +1155,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         if (!doubleSpacePeriodEnabled || isRawKeyEventEditor(currentEditorInfo)) return false
         if (SystemClock.uptimeMillis() - lastSpaceCommitAt > DOUBLE_SPACE_PERIOD_WINDOW_MS) return false
         val before = inputConnection.getTextBeforeCursor(3, 0) ?: return false
-        if (before.length < 2 || before[before.length - 1] != ' ' || !before[before.length - 2].isLetterOrDigit()) {
+        if (before.length < 2 || before[before.length - 1] != ' ' || !HindiComposer.isWordChar(before[before.length - 2])) {
             return false
         }
         if (!inputConnection.getSelectedText(0).isNullOrEmpty()) return false
@@ -1108,6 +1207,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             scheduleEmojiSuggestionRefresh()
             return
         }
+        if ((hindiComposer.isComposing || isHindiActive()) && hindiComposer.onBackspace(inputConnection)) {
+            scheduleEmojiSuggestionRefresh()
+            scheduleComposerSuggestionRefresh()
+            updateAutoShift()
+            return
+        }
 
         val selectedText = inputConnection.getSelectedText(0)
         if (!selectedText.isNullOrEmpty()) {
@@ -1126,6 +1231,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun startBackspaceGestureDelete(): Boolean {
         val inputConnection = currentInputConnection ?: return false
+        hindiComposer.finish(inputConnection)
         val info = currentEditorInfo
         if (
             activeSurface != KeyboardSurface.Keyboard ||
@@ -1235,6 +1341,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun startSpaceCursorDrag(extendSelection: Boolean): Boolean {
+        hindiComposer.finish(currentInputConnection)
         val inputConnection = currentInputConnection ?: return false
         if (activeSurface != KeyboardSurface.Keyboard) return false
 
@@ -1434,6 +1541,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private fun handleEnter(modifiers: ModifierState) {
         val inputConnection = currentInputConnection ?: return
         cancelActiveAgentForEditorChange()
+        if (hindiComposer.isComposing && isHindiActive()) {
+            noteOwnEdit()
+            hindiComposer.commitForSeparator(inputConnection, "\n", allowUndo = false)
+        } else {
+            hindiComposer.finish(inputConnection)
+        }
         val info = currentEditorInfo
         val imeOptions = info?.imeOptions ?: 0
         val action = imeOptions and EditorInfo.IME_MASK_ACTION
@@ -1654,6 +1767,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         cancelActiveAgentForEditorChange()
 
         var committed = false
+        hindiComposer.finish(inputConnection)
         inputConnection.beginBatchEdit()
         try {
             inputConnection.finishComposingText()
@@ -1682,6 +1796,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     }
 
     private fun startRewriteFromCurrentEditor() {
+        hindiComposer.finish(currentInputConnection)
         val target = captureRewriteTarget() ?: return
         startLlmRequest(
             target = target,
@@ -1756,7 +1871,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     ) {
         cancelComposerSuggestionRefresh()
         if (isSensitiveEditor(currentEditorInfo) || snippetCompletionSources.isEmpty()) {
-            setComposerSuggestion(null)
+            setSnippetSuggestions(emptyList())
             return
         }
         val refresh = Runnable {
@@ -1778,14 +1893,15 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private fun refreshComposerSuggestion() {
         if (isSensitiveEditor(currentEditorInfo) || snippetCompletionSources.isEmpty()) {
-            setComposerSuggestion(null)
+            setSnippetSuggestions(emptyList())
             return
         }
         val sources = snippetCompletionSources
-        val suggestion = textBeforeCursorForCompletion(sources.maxOf { it.length })
-            ?.let { findComposerCompletion(it, sources) }
-            ?.snippet
-        setComposerSuggestion(suggestion)
+        val suggestions = textBeforeCursorForCompletion(sources.maxOf { it.length })
+            ?.let { findComposerCompletions(it, sources, limit = SUGGESTION_STRIP_SLOTS) }
+            ?.map(ComposerCompletion::snippet)
+            .orEmpty()
+        setSnippetSuggestions(suggestions)
     }
 
     /** Text before a collapsed cursor that isn't mid-word, or null when no completion should show. */
@@ -1799,28 +1915,58 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     /**
      * Tries every word start before the cursor, longest run first, so "hello w" can still finish
-     * "hello world" while a new word after a space gets its own completion.
+     * "hello world" while a new word after a space gets its own completions. Up to [limit] distinct
+     * snippets, longest typed prefix first.
      */
-    private fun findComposerCompletion(before: String, candidates: List<String>): ComposerCompletion? {
-        val longest = candidates.maxOfOrNull { it.length } ?: return null
+    private fun findComposerCompletions(before: String, candidates: List<String>, limit: Int): List<ComposerCompletion> {
+        val longest = candidates.maxOfOrNull { it.length } ?: return emptyList()
+        val found = mutableListOf<ComposerCompletion>()
         // Index 0 may be mid-word when the editor returned a full window of maxChars.
         val firstStart = (before.length - longest + 1).coerceAtLeast(0)
         for (start in firstStart until before.length) {
             if (before[start].isWhitespace()) continue
             if (start > 0 && !before[start - 1].isWhitespace() && before[start - 1] !in COMPOSER_WORD_OPENERS) continue
             val prefixLength = before.length - start
-            val snippet = candidates.firstOrNull { candidate ->
-                candidate.length > prefixLength && candidate.regionMatches(0, before, start, prefixLength, ignoreCase = true)
+            for (candidate in candidates) {
+                if (found.size >= limit) return found
+                if (candidate.length > prefixLength &&
+                    candidate.regionMatches(0, before, start, prefixLength, ignoreCase = true) &&
+                    found.none { it.snippet == candidate }
+                ) {
+                    found += ComposerCompletion(candidate, prefixLength)
+                }
             }
-            if (snippet != null) return ComposerCompletion(snippet, prefixLength)
         }
-        return null
+        return found
     }
 
-    private fun setComposerSuggestion(text: String?) {
-        if (activeComposerSuggestion == text) return
-        activeComposerSuggestion = text
-        keyboardView?.setComposerSuggestion(text)
+    private fun setSnippetSuggestions(snippets: List<String>) {
+        if (snippetSuggestions == snippets) return
+        snippetSuggestions = snippets
+        renderSuggestionStrip()
+    }
+
+    /**
+     * Hindi candidates (best, runner-up) take the left slots and leave one slot for a snippet;
+     * otherwise all slots show snippets. Slots keep their positions; gaps stay empty.
+     */
+    private fun renderSuggestionStrip() {
+        val view = keyboardView ?: return
+        if (activeSurface != KeyboardSurface.Keyboard) {
+            view.setSuggestionStrip(emptyList())
+            return
+        }
+        val hindi = hindiComposer.stripCandidates(HINDI_STRIP_SLOTS)
+        val items: List<SuggestionStripItem?> = if (hindi.isEmpty()) {
+            snippetSuggestions.take(SUGGESTION_STRIP_SLOTS).map { SuggestionStripItem(it, SuggestionStripItem.Kind.Snippet) }
+        } else {
+            List(HINDI_STRIP_SLOTS) { index ->
+                hindi.getOrNull(index)?.let { (text, highlighted) ->
+                    SuggestionStripItem(text, SuggestionStripItem.Kind.Transliteration, highlighted)
+                }
+            } + snippetSuggestions.firstOrNull()?.let { SuggestionStripItem(it, SuggestionStripItem.Kind.Snippet) }
+        }
+        view.setSuggestionStrip(items)
     }
 
     private fun captureRewriteTarget(): AgentEditTarget? {
@@ -2394,6 +2540,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 secondRowVisible = visible,
                 loading = agentLoading,
                 rewriteEnabled = visible && isRewriteAvailable() && providerConfigured,
+                hindiMode = hindiModeEnabled,
+                hindiAvailable = isHindiEditor(currentEditorInfo),
             ),
         )
     }
@@ -2617,6 +2765,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         const val EMOJI_SUGGESTION_CONTEXT_CHARS = 180
         const val COMPOSER_WORD_OPENERS = "([{\"“"
         const val TYPING_CONTEXT_CHARS = 16
+        const val SUGGESTION_STRIP_SLOTS = 3
+        const val HINDI_STRIP_SLOTS = 2
+        val HINDI_EXCLUDED_TEXT_VARIATIONS = setOf(
+            InputType.TYPE_TEXT_VARIATION_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD,
+            InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,
+        )
         const val OWN_EDIT_SETTLE_MS = 1_000L
         const val DOUBLE_SPACE_PERIOD_WINDOW_MS = 700L
         const val REQUEST_TIMEOUT_MS = AgentDefaults.REQUEST_TIMEOUT_MS

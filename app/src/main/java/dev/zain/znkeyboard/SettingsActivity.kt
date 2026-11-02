@@ -369,6 +369,7 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
                     SetupStatusCard()
                     TryTypingField()
                     AdaptiveTouchSection()
+                    HindiTypingSection()
                     TypingFeelSection()
                 }
 

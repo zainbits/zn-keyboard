@@ -38,6 +38,15 @@ ZnKeyboard learns how *your* thumbs actually hit each key and decodes every tap 
 - **See what it learned:** Settings → Typing has a "Try it" field and a per-key touch map showing each key's learned centre and spread.
 - In simulation, letter errors drop from about 8% to about 1.3%. Learning stays on the device, is never backed up, and is skipped in password and incognito fields.
 
+### 🇮🇳 Hindi typing in Latin letters
+Type `kaise ho` and get `कैसे हो`, entirely on the device, with [Lekhani](https://udgamlabs.com/models/lekhani) by Udgam Labs: a 0.88 MB transliteration model with a 200,000-word list.
+- **One switch:** add the `अ` key to a shortcut row (or use Settings → Typing). The spacebar reads `हिन्दी` while Hindi mode is on. It's skipped in password, URL and email fields.
+- **Converts as you finish each word:** the Latin word stays underlined while you type it. Space, punctuation or Enter swaps in the best Devanagari spelling.
+- **Fix a word in one tap:** the suggestion strip shows the best spelling and the runner-up. Tapping one replaces the word, even right after it was converted. Backspace right after a conversion brings the Latin word back.
+- **Learns your picks:** the spelling you last picked for a word comes first next time. Learned picks are stored in no-backup storage and are included in encrypted exports.
+- **Only in memory while it's on:** the model loads in the background when you switch Hindi mode on and is unloaded when you switch it off.
+- Limits: it handles one word at a time (`main` and `mein` both give `में`; pick `मैं` from the strip), Hindi only, and gets about two words in three right as its first choice on a hard benchmark.
+
 ### ✍️ AI rewrite assistant ("agent mode")
 - Rewrite, polish, or restructure the text in the current field with one tap, then review the result before it replaces anything.
 - **Use your own provider:** OpenAI by default (`api.openai.com/v1`), or any OpenAI‑compatible endpoint such as **OpenRouter**, with a configurable model (default `gpt-4o-mini`).
@@ -53,7 +62,8 @@ Turn the keyboard into *your* keyboard. Add and arrange extra shortcut rows from
 - **Every symbol:** all ASCII punctuation plus `€`, `£`, `¥`, `•`.
 - **Panel shortcuts:** jump straight to emoji, GIF, clipboard, or snippets, or **Save snippet** to store the current field in one tap.
 - **Dedicated Shortcuts screen** with a live preview of both rows, a categorized key palette (tap to add, tap again to remove), swappable row order, and a confirmation before a row is reset to defaults.
-- Shortcut rows and the snippet suggestion strip never change the height of the letter keys, so your muscle memory stays put.
+- A suggestion strip is always reserved above the shortcut rows, so the keyboard never jumps when suggestions appear. It shows up to three snippet completions, or in Hindi mode the best spelling, the runner-up and one snippet.
+- Shortcut rows and the suggestion strip never change the height of the letter keys, so your muscle memory stays put.
 
 ### 🏷️ Tag‑based emoji suggestions
 - Assign your **own tags** to any emoji (e.g. tag 🫡 as "ok", "done", "got it").
@@ -106,6 +116,7 @@ Single‑module Android app (`:app`), package `dev.zain.znkeyboard`.
 | `SettingsActivity` (Jetpack Compose, Material 3) | Edge-to-edge settings app with a floating title pill and five tabs: Typing, Layout, Tools (AI / GIF), Snippets, and Backup. |
 | `liquidnav/` | Liquid nav bar: `LiquidNavModel` (pure-Kotlin springs and neck physics) and `LiquidNavBar` (Compose layout and AGSL shader). |
 | `ShortcutsScreen` + `ShortcutMacros` | Shortcut row editor, key palette, and macro definitions/dispatch. |
+| `translit/` | Hindi transliteration: `LekhaniTransliterator` (pure-Kotlin port of the Lekhani runner), `HindiPicks` (learned spellings), and `HindiTransliterationEngine` (asset loading, background thread, load/unload). `ime/HindiComposer` handles composing, conversion and undo. |
 | `typing/` | Adaptive touch decoding (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`) in pure Kotlin, wired up by `AdaptiveTypingEngine`. |
 | `KeyboardSettings` | Single source of truth for persisted settings and encrypted secrets. |
 | `integrations/` | Optional companion-app hooks (`KeyboardIntegrations`), currently Ferry's "Send to Mac". The keyboard works the same without them. |
@@ -160,6 +171,7 @@ You are billed directly by your chosen provider for your own usage; ZnKeyboard n
 - AI requests go straight from your device to the endpoint you configured, using your key.
 - GIF search talks to KLIPY only while the GIF panel is open.
 - Adaptive-touch learning stores only aggregate statistics (per-key touch offsets, letter-trigram counts) in no-backup storage (excluded from cloud backup, included only in password-encrypted exports), never in password or incognito fields, and can be reset from Settings → Typing.
+- Hindi transliteration runs entirely on the device. Learned spellings are stored like adaptive-touch data (no-backup storage, encrypted exports only) and are never learned in password or incognito fields.
 - Settings and secrets stay on-device; secrets are encrypted at rest. User-created backups are encrypted with a password that is never saved by the app.
 
 ## Contributing

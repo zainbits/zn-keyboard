@@ -10,6 +10,7 @@ import dev.zain.znkeyboard.constants.GifDefaults
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.constants.KeyboardDefaults
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
+import dev.zain.znkeyboard.translit.HindiTransliterationEngine
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
 import org.json.JSONArray
 import org.json.JSONException
@@ -71,6 +72,8 @@ object KeyboardSettings {
     private const val KEY_DOUBLE_SPACE_PERIOD_ENABLED = "double_space_period_enabled"
     private const val KEY_KEYBOARD_THEME = "keyboard_theme"
     private const val KEY_TYPING_MODEL_GENERATION = "typing_model_generation"
+    private const val KEY_HINDI_MODE_ENABLED = "hindi_mode_enabled"
+    private const val KEY_HINDI_PICKS_GENERATION = "hindi_picks_generation"
     private const val KEY_RECENT_EMOJIS = "recent_emojis"
     private const val KEY_RECENT_EMOJI_ROWS = "recent_emoji_rows"
     private const val KEY_EMOJI_SKIN_TONE = "emoji_skin_tone"
@@ -104,6 +107,7 @@ object KeyboardSettings {
     val ACTION_KEY_OPTIONS = listOf(
         UpperRowKeyOption("rewrite", "Rewrite"),
         UpperRowKeyOption("save_text", "Save snippet"),
+        UpperRowKeyOption("hindi", "Hindi अ"),
     )
 
     val CONTROL_KEY_OPTIONS = listOf(
@@ -250,6 +254,19 @@ object KeyboardSettings {
     fun bumpTypingModelGeneration(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putInt(KEY_TYPING_MODEL_GENERATION, prefs.getInt(KEY_TYPING_MODEL_GENERATION, 0) + 1).commit()
+    }
+
+    /** Hindi mode: romanised words turn into Devanagari as they are finished. One global switch. */
+    fun readHindiModeEnabled(context: Context) = readFlag(context, KEY_HINDI_MODE_ENABLED, false)
+    fun saveHindiModeEnabled(context: Context, enabled: Boolean) = saveFlag(context, KEY_HINDI_MODE_ENABLED, enabled)
+
+    /** Bumped when settings reset or restore learned Hindi picks; the running keyboard drops its copy. */
+    fun readHindiPicksGeneration(context: Context): Int =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getInt(KEY_HINDI_PICKS_GENERATION, 0)
+
+    fun bumpHindiPicksGeneration(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_HINDI_PICKS_GENERATION, prefs.getInt(KEY_HINDI_PICKS_GENERATION, 0) + 1).commit()
     }
 
     fun readFunctionKeyBackgroundsEnabled(context: Context): Boolean {
@@ -1045,6 +1062,7 @@ object KeyboardSettings {
                             .put("keyPreview", readKeyPreviewEnabled(context))
                             .put("autoCapitalize", readAutoCapitalizeEnabled(context))
                             .put("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
+                            .put("hindiMode", readHindiModeEnabled(context))
                             .put("suggestionDelayMs", readSuggestionDelayMs(context))
                             .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
@@ -1080,7 +1098,8 @@ object KeyboardSettings {
                             .put("activeProfileId", readActiveAgentProfileId(context)),
                     )
                     .put("clipboardHistory", clipboardHistoryJson(ClipboardHistoryStore.read(context)))
-                    .put("learnedTyping", learnedTypingJson(AdaptiveTypingEngine.readLearnedData(context))),
+                    .put("learnedTyping", learnedTypingJson(AdaptiveTypingEngine.readLearnedData(context)))
+                    .put("hindiPicks", hindiPicksJson(HindiTransliterationEngine.readLearnedPicks(context))),
             )
             .put(
                 "secrets",
@@ -1136,6 +1155,7 @@ object KeyboardSettings {
         val keyPreview = keyboard.optBoolean("keyPreview", readKeyPreviewEnabled(context))
         val autoCapitalize = keyboard.optBoolean("autoCapitalize", readAutoCapitalizeEnabled(context))
         val doubleSpacePeriod = keyboard.optBoolean("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
+        val hindiMode = keyboard.optBoolean("hindiMode", readHindiModeEnabled(context))
         val suggestionDelayMs = keyboard.optInt("suggestionDelayMs", readSuggestionDelayMs(context))
         val functionKeyBackgroundsEnabled = keyboard.optBoolean(
             "functionKeyBackgroundsEnabled",
@@ -1177,6 +1197,15 @@ object KeyboardSettings {
                 landscapeTouch = typing.optBase64("landscapeTouch"),
                 personalLetters = typing.optBase64("personalLetters"),
             )
+        }
+
+        val hindiPicks = settings.optJSONObject("hindiPicks")?.let { picks ->
+            buildMap {
+                picks.keys().forEach { latin ->
+                    val picked = picks.optString(latin)
+                    if (picked.isNotBlank()) put(latin, picked)
+                }
+            }
         }
 
         val agentSecrets = secrets?.optJSONObject("agentApiKeys")
@@ -1254,6 +1283,7 @@ object KeyboardSettings {
         saveKeyPreviewEnabled(context, keyPreview)
         saveAutoCapitalizeEnabled(context, autoCapitalize)
         saveDoubleSpacePeriodEnabled(context, doubleSpacePeriod)
+        saveHindiModeEnabled(context, hindiMode)
         saveSuggestionDelayMs(context, suggestionDelayMs)
         saveFunctionKeyBackgroundsEnabled(context, functionKeyBackgroundsEnabled)
         shortcutMacros?.let { saveShortcutMacros(context, it) }
@@ -1283,6 +1313,10 @@ object KeyboardSettings {
         learnedTyping?.let {
             AdaptiveTypingEngine.replaceLearnedData(context, it)
             bumpTypingModelGeneration(context)
+        }
+        hindiPicks?.let {
+            HindiTransliterationEngine.replaceLearnedPicks(context, it)
+            bumpHindiPicksGeneration(context)
         }
         restoredAgentSecrets.forEach { secret ->
             saveAgentApiKey(context, secret.providerType, secret.value)
@@ -1605,6 +1639,10 @@ object KeyboardSettings {
             data.landscapeTouch?.let { put("landscapeTouch", Base64.encodeToString(it, Base64.NO_WRAP)) }
             data.personalLetters?.let { put("personalLetters", Base64.encodeToString(it, Base64.NO_WRAP)) }
         }
+    }
+
+    private fun hindiPicksJson(picks: Map<String, String>): JSONObject {
+        return JSONObject().apply { picks.forEach { (latin, picked) -> put(latin, picked) } }
     }
 
     private fun JSONObject.optBase64(key: String): ByteArray? {

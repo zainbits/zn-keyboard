@@ -57,6 +57,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onAgentRewriteRequested()
         fun onSaveSnippetRequested()
         fun onComposerSuggestionSelected(text: String)
+        fun onTransliterationSelected(text: String)
+        fun onHindiModeToggled()
     }
 
     var callback: Callback? = null
@@ -119,7 +121,7 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var shortcutMacrosByKeyId: Map<String, ShortcutMacro> = emptyMap()
     private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
     private var emojiKeySuggestion: String? = null
-    private var composerSuggestion: String? = null
+    private var suggestionStrip: List<SuggestionStripItem?> = emptyList()
     private var keyHapticsEnabled = true
     private var keyPreviewEnabled = true
     private var autoShiftActive = false
@@ -281,10 +283,11 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    fun setComposerSuggestion(text: String?) {
-        if (composerSuggestion != text) {
-            composerSuggestion = text
-            requestLayout()
+    /** Up to [SUGGESTION_STRIP_SLOTS] items, left to right; null leaves a slot empty. */
+    fun setSuggestionStrip(items: List<SuggestionStripItem?>) {
+        val normalized = items.take(SUGGESTION_STRIP_SLOTS)
+        if (suggestionStrip != normalized) {
+            suggestionStrip = normalized
             refreshHitTargets()
             invalidate()
         }
@@ -804,6 +807,7 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private fun drawKey(canvas: Canvas, hit: KeyHit) {
         val key = hit.key
+        if (key.intent == KeyIntent.None) return
         val bounds = hit.visualBounds
         val rewriteLoading = key.intent == KeyIntent.AgentRewrite && shortcutRowState.loading
         val pressed = isKeyPressed(key.id)
@@ -1365,6 +1369,9 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
             KeyIntent.SaveSnippet -> callback?.onSaveSnippetRequested()
             is KeyIntent.AcceptComposerSuggestion -> callback?.onComposerSuggestionSelected(intent.text)
+            is KeyIntent.AcceptTransliteration -> callback?.onTransliterationSelected(intent.text)
+            KeyIntent.ToggleHindi -> callback?.onHindiModeToggled()
+            KeyIntent.None -> Unit
             is KeyIntent.Dispatch -> {
                 notifyLearner(intent.action, sample)
                 if (shiftState == ShiftState.OneShot && key.consumesOneShotShift) {
@@ -1494,7 +1501,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    private fun layoutRows(): List<RowSpec> = listOfNotNull(composerSuggestionRow()) + rows()
+    private fun layoutRows(): List<RowSpec> = listOf(suggestionStripRow()) + rows()
 
     private fun layoutKeys(totalWidth: Float, totalHeight: Float): List<KeyHit> {
         val rows = layoutRows()
@@ -1603,20 +1610,27 @@ class ZnKeyboardView @JvmOverloads constructor(
         return buttonRows + mainRows
     }
 
-    private fun composerSuggestionRow(): RowSpec? {
-        val suggestion = composerSuggestion ?: return null
-        return RowSpec(
-            keys = listOf(
-                KeySpec(
-                    id = "composer_suggestion",
-                    label = composerSuggestionDisplayLabel(suggestion),
-                    intent = KeyIntent.AcceptComposerSuggestion(suggestion),
+    /**
+     * Always present, so the keyboard never changes height as suggestions come and go. Slots keep
+     * fixed positions: an empty slot is an invisible, untouchable placeholder.
+     */
+    private fun suggestionStripRow(): RowSpec {
+        val keys = (0 until SUGGESTION_STRIP_SLOTS).map { index ->
+            when (val item = suggestionStrip.getOrNull(index)) {
+                null -> KeySpec("strip_$index", "", KeyIntent.None, role = KeyRole.Function, enabled = false)
+                else -> KeySpec(
+                    id = "strip_$index",
+                    label = composerSuggestionDisplayLabel(item.text),
+                    intent = when (item.kind) {
+                        SuggestionStripItem.Kind.Transliteration -> KeyIntent.AcceptTransliteration(item.text)
+                        SuggestionStripItem.Kind.Snippet -> KeyIntent.AcceptComposerSuggestion(item.text)
+                    },
                     role = KeyRole.Function,
-                ),
-            ),
-            heightWeight = ImeLayout.COMPACT_ROW_WEIGHT,
-            style = RowStyle.Suggestion,
-        )
+                    active = item.highlighted,
+                )
+            }
+        }
+        return RowSpec(keys, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Suggestion)
     }
 
     private fun composerSuggestionDisplayLabel(text: String): String {
@@ -1694,6 +1708,15 @@ class ZnKeyboardView @JvmOverloads constructor(
                 weight = weight,
                 role = KeyRole.Function,
                 enabled = enabled,
+            )
+            "hindi" -> KeySpec(
+                id = id,
+                label = HINDI_KEY_LABEL,
+                intent = KeyIntent.ToggleHindi,
+                weight = weight,
+                role = KeyRole.Function,
+                active = shortcutRowState.hindiMode,
+                enabled = enabled && shortcutRowState.hindiAvailable,
             )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
             "alt" -> KeySpec(id, "Alt", KeyIntent.ToggleAlt, weight, KeyRole.Function, alt, enabled = enabled)
@@ -1988,7 +2011,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (layoutMode != LayoutMode.Letters) {
             keys += KeySpec(
                 "space",
-                "space",
+                spaceLabel(),
                 KeyIntent.Dispatch(KeyboardAction.Text(" ")),
                 ImeDimensions.SPACE_KEY_WEIGHT,
                 KeyRole.Function,
@@ -2006,7 +2029,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         } else {
             keys += KeySpec(
                 "space",
-                "space",
+                spaceLabel(),
                 KeyIntent.Dispatch(KeyboardAction.Text(" ")),
                 ImeDimensions.SPACE_KEY_WEIGHT,
                 KeyRole.Function,
@@ -2026,6 +2049,9 @@ class ZnKeyboardView @JvmOverloads constructor(
             heightWeight = ImeLayout.BOTTOM_ROW_WEIGHT,
         )
     }
+
+    private fun spaceLabel(): String =
+        if (shortcutRowState.hindiMode && shortcutRowState.hindiAvailable) HINDI_SPACE_LABEL else "space"
 
     private fun emojiKeySpec(): KeySpec {
         val suggestion = emojiKeySuggestion
@@ -2225,6 +2251,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object AgentRewrite : KeyIntent()
         data object SaveSnippet : KeyIntent()
         data class AcceptComposerSuggestion(val text: String) : KeyIntent()
+        data class AcceptTransliteration(val text: String) : KeyIntent()
+        data object ToggleHindi : KeyIntent()
+        data object None : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
 
@@ -2247,6 +2276,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         val secondRowVisible: Boolean,
         val loading: Boolean = false,
         val rewriteEnabled: Boolean = false,
+        /** Hindi mode is switched on (the toggle key shows as active). */
+        val hindiMode: Boolean = false,
+        /** The current field accepts Hindi typing (not a password, URL, email or terminal field). */
+        val hindiAvailable: Boolean = false,
     )
 
     private companion object {
@@ -2267,6 +2300,9 @@ class ZnKeyboardView @JvmOverloads constructor(
         const val PHONE_PAD_LABEL_GAP_DP = 1f
         const val PHONE_PAD_SUB_LABEL_ALPHA_FRACTION = 0.78f
         const val MAX_SUGGESTION_LABEL_CHARS = 48
+        const val SUGGESTION_STRIP_SLOTS = 3
+        const val HINDI_KEY_LABEL = "अ"
+        const val HINDI_SPACE_LABEL = "हिन्दी"
         const val SLIDE_HYSTERESIS_PITCH_FRACTION = 0.55f
         const val PRESSED_LAYER_OPACITY = 0.2f
         const val PREVIEW_WIDTH_FACTOR = 1.28f
@@ -2317,4 +2353,14 @@ sealed class KeyboardAction {
     data class Sequence(val steps: List<KeyboardAction>) : KeyboardAction()
     data object Backspace : KeyboardAction()
     data object Enter : KeyboardAction()
+}
+
+/** One suggestion-strip slot: a Devanagari candidate for the word being typed, or a snippet completion. */
+data class SuggestionStripItem(
+    val text: String,
+    val kind: Kind,
+    /** What space will commit; drawn as the selected pill. */
+    val highlighted: Boolean = false,
+) {
+    enum class Kind { Transliteration, Snippet }
 }

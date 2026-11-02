@@ -13,12 +13,14 @@
 - After changing `typing/` (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`), run the engine check. It needs a word list that is not in the repo:
   `curl -sSLO https://norvig.com/ngrams/count_1w.txt && tools/typing/verify_engine.sh count_1w.txt` (don't commit `count_1w.txt`).
 - After changing `liquidnav/LiquidNavModel.kt` or `constants/LiquidNavMotion.kt`, run `tools/liquidnav/verify_liquid_nav.sh`. Tune motion visually in `previews/liquid-nav-drop.html`, which mirrors the engine and shader.
+- After changing `translit/LekhaniTransliterator.kt` or the `assets/translit/` model, run `tools/translit/verify_lekhani.sh` (compares with `tools/translit/golden.tsv`; regenerate that with `tools/translit/make_golden.mjs`, which needs the reference `translit.js` from https://huggingface.co/udgamlabs/Lekhani/resolve/main/translit.js — don't commit it).
 - Keyboard behavior is device-facing; say so when a change still needs testing in a real text field.
 
 ## Conventions
 
 - Those four `typing/` files must stay pure Kotlin/JVM (no `android.*` imports): `verify_engine.sh` compiles them without the Android SDK. Android glue belongs in `AdaptiveTypingEngine`.
 - The same applies to `liquidnav/LiquidNavModel.kt` and `constants/LiquidNavMotion.kt`; Compose and AGSL code belongs in `LiquidNavBar.kt`.
+- The same applies to `translit/LekhaniTransliterator.kt`; Android glue belongs in `HindiTransliterationEngine`.
 - Hot paths (`onDraw`, `onTouchEvent`, input dispatch) must not allocate, do I/O, or block.
 - Put dimensions, colors, and defaults in `constants/`; persisted settings and secrets go through `KeyboardSettings`.
 - Companion-app features live in `integrations/` behind `KeyboardIntegrations`. They must be optional: when the companion app is missing, signed with another key, or fails, the keyboard behaves exactly as without it. Never call them from hot paths, and do their IPC off the main thread with unstable provider clients.

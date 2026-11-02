@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import dev.zain.znkeyboard.constants.ImeColors
+import dev.zain.znkeyboard.translit.HindiTransliterationEngine
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
 import dev.zain.znkeyboard.typing.TouchModel
 import kotlinx.coroutines.Dispatchers
@@ -326,6 +327,76 @@ internal fun AdaptiveTouchSection() {
             onClick = { confirmingReset = true },
             enabled = summary.samples > 0,
         ) { Text("Reset learned typing") }
+    }
+}
+
+@Composable
+internal fun HindiTypingSection() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val windowFocused = LocalWindowInfo.current.isWindowFocused
+    var hindiMode by remember { mutableStateOf(KeyboardSettings.readHindiModeEnabled(context)) }
+    var learnedCount by remember { mutableIntStateOf(0) }
+    var refreshTick by remember { mutableIntStateOf(0) }
+    var confirmingReset by remember { mutableStateOf(false) }
+
+    LaunchedEffect(windowFocused, refreshTick) {
+        if (windowFocused) hindiMode = KeyboardSettings.readHindiModeEnabled(context)
+        learnedCount = withContext(Dispatchers.IO) { HindiTransliterationEngine.readLearnedPicks(context).size }
+    }
+
+    if (confirmingReset) {
+        AlertDialog(
+            onDismissRequest = { confirmingReset = false },
+            title = { Text("Reset learned spellings?") },
+            text = { Text("ZnKeyboard forgets the Hindi spellings you picked from the suggestion strip and goes back to the model's own top choices.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmingReset = false
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            KeyboardSettings.bumpHindiPicksGeneration(context)
+                            HindiTransliterationEngine.deleteLearnedPicks(context)
+                        }
+                        refreshTick++
+                    }
+                }) { Text("Reset") }
+            },
+            dismissButton = { TextButton(onClick = { confirmingReset = false }) { Text("Cancel") } },
+        )
+    }
+
+    SettingsSectionCard(verticalSpacing = 16.dp) {
+        SettingsSectionHeader(
+            title = "Hindi typing",
+            iconResId = R.drawable.ic_keyboard_24,
+            trailingText = if (learnedCount > 0) "${formatCount(learnedCount)} learned" else null,
+        )
+        SettingsSwitchRow(
+            title = "Hindi mode",
+            description = "Type Hindi in Latin letters: \"kaise ho\" becomes \"कैसे हो\" as you finish each word. " +
+                "Tap the second suggestion to swap a word, or Backspace right after it to get the Latin back. " +
+                "Add the अ key to a shortcut row to switch from the keyboard. Runs on this device; skipped in " +
+                "password, URL and email fields.",
+            checked = hindiMode,
+            onCheckedChange = { hindiMode = it; KeyboardSettings.saveHindiModeEnabled(context, it) },
+        )
+        Text(
+            text = "When you pick a different spelling for a word, it comes first next time; pick the other one " +
+                "again to switch back. Learned spellings stay on this device (and in your encrypted backups) and " +
+                "are not learned in incognito fields.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(
+            onClick = { confirmingReset = true },
+            enabled = learnedCount > 0,
+        ) { Text("Reset learned spellings") }
+        Text(
+            text = "Transliteration by Lekhani from Udgam Labs (Apache License 2.0); word list CC0.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
