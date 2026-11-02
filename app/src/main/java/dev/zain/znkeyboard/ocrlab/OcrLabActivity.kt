@@ -232,6 +232,7 @@ private fun EngineStatusCard(viewModel: OcrLabViewModel) {
             val status = when (val state = viewModel.engineStates[engine]) {
                 is OcrLabViewModel.EngineState.Ready -> "ready · init ${state.initMs.roundToInt()} ms"
                 is OcrLabViewModel.EngineState.Failed -> "unavailable · ${state.message}"
+                is OcrLabViewModel.EngineState.Downloading -> "downloading model · ${state.percent}%"
                 else -> "loading…"
             }
             Text("${engine.label}: $status", style = MaterialTheme.typography.bodySmall, color = ZnKeyboardColors.Muted)

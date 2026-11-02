@@ -2,7 +2,6 @@
 // Runtime glue adapted from litert-community/PP-OCRv6-Small-LiteRT examples/android/PpocrV6Gpu.kt.
 package dev.zain.znkeyboard.ocrlab.ppocr
 
-import android.content.res.AssetManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Matrix
@@ -12,13 +11,14 @@ import com.google.ai.edge.litert.CompiledModel
 import com.google.ai.edge.litert.Environment
 import com.google.ai.edge.litert.TensorBuffer
 import org.json.JSONArray
+import java.io.File
 import kotlin.math.ceil
 
 /**
  * PP-OCRv6 Small detection + recognition on LiteRT. Create, use, and close on one thread:
  * the GPU path requires its whole lifetime on the same thread.
  */
-class PpOcrEngine(assets: AssetManager, val accelerator: Accelerator) : AutoCloseable {
+class PpOcrEngine(modelDir: File, val accelerator: Accelerator) : AutoCloseable {
     class Line(val text: String, val score: Double?, val compressed: Boolean)
 
     class Result(
@@ -40,8 +40,7 @@ class PpOcrEngine(assets: AssetManager, val accelerator: Accelerator) : AutoClos
     init {
         val start = System.nanoTime()
         try {
-            vocabulary = assets.open("$ASSET_DIR/characters.json").use { stream ->
-                val json = JSONArray(stream.readBytes().toString(Charsets.UTF_8))
+            vocabulary = JSONArray(File(modelDir, VOCABULARY).readText(Charsets.UTF_8)).let { json ->
                 List(json.length()) { json.getString(it) }
             }
             require(vocabulary.size == VOCABULARY_SIZE && vocabulary.first() == "blank" && vocabulary.last() == " ") {
@@ -55,7 +54,7 @@ class PpOcrEngine(assets: AssetManager, val accelerator: Accelerator) : AutoClos
                 }
             }
             for (name in listOf(DET, REC_320, REC_640, REC_960)) {
-                graphs[name] = Graph(CompiledModel.create(assets, "$ASSET_DIR/$name", options, environment))
+                graphs[name] = Graph(CompiledModel.create(File(modelDir, name).path, options, environment))
             }
         } catch (error: Throwable) {
             runCatching { close() }.exceptionOrNull()?.let(error::addSuppressed)
@@ -178,11 +177,11 @@ class PpOcrEngine(assets: AssetManager, val accelerator: Accelerator) : AutoClos
     }
 
     companion object {
-        const val ASSET_DIR = "ppocrv6"
-        private const val DET = "ppocrv6_small_det_640_fp32.tflite"
-        private const val REC_320 = "ppocrv6_small_rec_320_fp32.tflite"
-        private const val REC_640 = "ppocrv6_small_rec_640_fp32.tflite"
-        private const val REC_960 = "ppocrv6_small_rec_960_fp32.tflite"
+        const val DET = "ppocrv6_small_det_640_fp32.tflite"
+        const val REC_320 = "ppocrv6_small_rec_320_fp32.tflite"
+        const val REC_640 = "ppocrv6_small_rec_640_fp32.tflite"
+        const val REC_960 = "ppocrv6_small_rec_960_fp32.tflite"
+        const val VOCABULARY = "characters.json"
         private const val DET_SIDE = 640
         private const val REC_HEIGHT = 48
         private const val MAX_REC_WIDTH = 960
@@ -206,10 +205,6 @@ class PpOcrEngine(assets: AssetManager, val accelerator: Accelerator) : AutoClos
         private fun isEnglishToken(token: String): Boolean =
             token.isNotEmpty() && token.all { it in ' '..'~' || it in ENGLISH_SYMBOLS }
         private val CROP_PAINT = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-
-        fun modelsPresent(assets: AssetManager): Boolean =
-            runCatching { assets.list(ASSET_DIR)?.toSet().orEmpty() }.getOrDefault(emptySet())
-                .containsAll(listOf(DET, REC_320, REC_640, REC_960, "characters.json"))
 
         private fun recName(width: Int) = when (width) {
             320 -> REC_320

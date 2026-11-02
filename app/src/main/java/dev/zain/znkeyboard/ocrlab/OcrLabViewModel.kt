@@ -17,6 +17,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import dev.zain.znkeyboard.ocrlab.ppocr.OcrModelStore
 import dev.zain.znkeyboard.ocrlab.ppocr.PpOcrEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
@@ -38,6 +39,7 @@ class OcrLabViewModel(application: Application) : AndroidViewModel(application) 
 
     sealed interface EngineState {
         data object Loading : EngineState
+        data class Downloading(val percent: Int) : EngineState
         data class Ready(val initMs: Double) : EngineState
         data class Failed(val message: String) : EngineState
     }
@@ -77,18 +79,32 @@ class OcrLabViewModel(application: Application) : AndroidViewModel(application) 
                 EngineState.Ready((System.nanoTime() - start) / 1e6)
             }.getOrElse { EngineState.Failed(it.describe()) }
 
-            if (!PpOcrEngine.modelsPresent(application.assets)) {
-                val missing = EngineState.Failed("Models missing: run tools/ocr/fetch_ppocrv6_models.sh and rebuild")
-                engineStates[Engine.PpCpu] = missing
-                engineStates[Engine.PpGpu] = missing
-                return@launch
+            if (!OcrModelStore.isReady(application)) {
+                val downloaded = withContext(Dispatchers.IO) {
+                    runCatching {
+                        OcrModelStore.download(application) { progress ->
+                            val state = EngineState.Downloading((progress * 100).toInt())
+                            viewModelScope.launch {
+                                engineStates[Engine.PpCpu] = state
+                                engineStates[Engine.PpGpu] = state
+                            }
+                        }
+                    }
+                }
+                downloaded.exceptionOrNull()?.let { error ->
+                    val failed = EngineState.Failed("Model download failed: ${error.describe()}")
+                    engineStates[Engine.PpCpu] = failed
+                    engineStates[Engine.PpGpu] = failed
+                    return@launch
+                }
             }
+            val modelDir = OcrModelStore.directory(application)
             engineStates[Engine.PpCpu] = withContext(cpuDispatcher) {
-                runCatching { PpOcrEngine(application.assets, Accelerator.CPU).also { ppCpu = it } }
+                runCatching { PpOcrEngine(modelDir, Accelerator.CPU).also { ppCpu = it } }
                     .fold({ EngineState.Ready(it.initMs) }, { EngineState.Failed(it.describe()) })
             }
             engineStates[Engine.PpGpu] = withContext(gpuDispatcher) {
-                runCatching { PpOcrEngine(application.assets, Accelerator.GPU).also { ppGpu = it } }
+                runCatching { PpOcrEngine(modelDir, Accelerator.GPU).also { ppGpu = it } }
                     .fold({ EngineState.Ready(it.initMs) }, { EngineState.Failed(it.describe()) })
             }
         }

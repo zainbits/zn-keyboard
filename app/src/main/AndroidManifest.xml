@@ -15,7 +15,7 @@
     <!-- Optional Ferry integration (Send to Mac). Granted only when Ferry is signed with this app's key. -->
     <uses-permission android:name="dev.zain.ferry.permission.BRIDGE" />
 
-    <!-- Camera OCR test screen (ocrlab). -->
+    <!-- Scan text camera panel and the OCR comparison screen (ocrlab). -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature
         android:name="android.hardware.camera"

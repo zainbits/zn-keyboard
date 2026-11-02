@@ -32,10 +32,6 @@ android {
         }
     }
 
-    androidResources {
-        // LiteRT maps models straight from the APK, which requires them to be stored uncompressed.
-        noCompress += "tflite"
-    }
 
     signingConfigs {
         if (releaseSigning != null) {

@@ -28,6 +28,7 @@ import androidx.lifecycle.LifecycleRegistry
 import com.google.ai.edge.litert.Accelerator
 import dev.zain.znkeyboard.R
 import dev.zain.znkeyboard.constants.ImeColors
+import dev.zain.znkeyboard.ocrlab.ppocr.OcrModelStore
 import dev.zain.znkeyboard.ocrlab.ppocr.PpOcrEngine
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -59,6 +60,8 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
     private var busy = false
     private var torchOn = false
     private var fixedHeightPx = 0
+    private var downloading = false
+    private var active = false
 
     private val previewView = PreviewView(context).apply {
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -120,6 +123,19 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         visibility = GONE
     }
 
+    private val downloadButton = TextView(context).apply {
+        text = "Download text scanner · ${(OcrModelStore.totalBytes + 500_000) / 1_000_000} MB"
+        setTextColor(ImeColors.TEXT)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        gravity = Gravity.CENTER
+        isClickable = true
+        isFocusable = false
+        setPadding(context.dp(18), context.dp(12), context.dp(18), context.dp(12))
+        background = ImePressFeedback.roundedBackground(context, ImeColors.FUNCTION, ImeColors.TEXT)
+        setOnClickListener { downloadModels() }
+        visibility = GONE
+    }
+
     init {
         setBackgroundColor(ImeColors.BACKGROUND)
         isClickable = true
@@ -139,6 +155,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             addView(torchButton, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44), Gravity.TOP or Gravity.END).margins(8))
             addView(statusText, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(permissionButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            addView(downloadButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(shutterButton, LayoutParams(context.dp(64), context.dp(64), Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).margins(12))
         }
         addView(
@@ -158,17 +175,25 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
     }
 
     fun start() {
+        active = true
         generation++
         busy = false
         unfreeze()
         showStatus(null)
+        permissionButton.visibility = GONE
+        downloadButton.visibility = GONE
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             permissionButton.visibility = VISIBLE
             shutterButton.visibility = GONE
             torchButton.visibility = GONE
             return
         }
-        permissionButton.visibility = GONE
+        if (!OcrModelStore.isReady(context)) {
+            shutterButton.visibility = GONE
+            torchButton.visibility = GONE
+            if (downloading) showStatus("Downloading text scanner…") else downloadButton.visibility = VISIBLE
+            return
+        }
         shutterButton.visibility = VISIBLE
         torchButton.visibility = VISIBLE
         lifecycleRegistry.currentState = Lifecycle.State.RESUMED
@@ -184,13 +209,39 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         torchOn = false
         updateTorchLabel()
 
-        if (PpOcrEngine.modelsPresent(context.assets)) {
-            worker.execute { ensureEngine() }
-        }
+        worker.execute { ensureEngine() }
+    }
+
+    /** One-time model download; keeps going if the panel closes, and resumes the camera if it is still open. */
+    private fun downloadModels() {
+        if (downloading) return
+        downloading = true
+        downloadButton.visibility = GONE
+        showStatus("Downloading text scanner…")
+        Thread({
+            val result = runCatching {
+                OcrModelStore.download(context) { progress ->
+                    mainHandler.post {
+                        if (active) showStatus("Downloading text scanner… ${(progress * 100).toInt()}%")
+                    }
+                }
+            }.onFailure { Log.w(TAG, "Model download failed", it) }
+            mainHandler.post {
+                downloading = false
+                if (!active) return@post
+                if (result.isSuccess) {
+                    start()
+                } else {
+                    showStatus("Download failed. Check your connection.")
+                    downloadButton.visibility = VISIBLE
+                }
+            }
+        }, "zn-ocr-download").start()
     }
 
     /** Releases the camera and the model; safe to call repeatedly. */
     fun stop() {
+        active = false
         generation++
         busy = false
         unfreeze()
@@ -216,7 +267,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
     }
 
     /** Worker thread only. */
-    private fun ensureEngine(): PpOcrEngine? = engine ?: runCatching { PpOcrEngine(context.assets, Accelerator.CPU) }
+    private fun ensureEngine(): PpOcrEngine? = engine ?: runCatching { PpOcrEngine(OcrModelStore.directory(context), Accelerator.CPU) }
         .onFailure { Log.w(TAG, "PP-OCR init failed", it) }
         .getOrNull()
         .also { engine = it }
@@ -224,10 +275,6 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
     private fun capture() {
         val camera = controller ?: return
         if (busy) return
-        if (!PpOcrEngine.modelsPresent(context.assets)) {
-            showStatus("OCR models are missing from this build")
-            return
-        }
         busy = true
         shutterButton.isEnabled = false
         freeze()

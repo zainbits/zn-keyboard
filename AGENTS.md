@@ -10,7 +10,7 @@
 ## Verify changes
 
 - There are no unit tests; `./gradlew :app:assembleRelease` succeeding is the compile check.
-- Scan text needs the PP-OCRv6 models in `app/src/main/assets/ppocrv6/` (gitignored). Run `tools/ocr/fetch_ppocrv6_models.sh` before building, or the Scan key shows "OCR models are missing".
+- Scan text downloads its PP-OCRv6 model at runtime (`ocrlab/ppocr/OcrModelStore`, pinned revision + SHA-256). Changing the model means updating the revision, hashes and sizes there together.
 - After changing `typing/` (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`), run the engine check. It needs a word list that is not in the repo:
   `curl -sSLO https://norvig.com/ngrams/count_1w.txt && tools/typing/verify_engine.sh count_1w.txt` (don't commit `count_1w.txt`).
 - After changing `liquidnav/LiquidNavModel.kt` or `constants/LiquidNavMotion.kt`, run `tools/liquidnav/verify_liquid_nav.sh`. Tune motion visually in `previews/liquid-nav-drop.html`, which mirrors the engine and shader.
