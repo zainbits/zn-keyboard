@@ -10,6 +10,7 @@ object ImeDimensions {
     const val KEY_GAP_DP = 6
     const val ROW_GAP_DP = 8
     const val KEY_RADIUS_DP = 10
+    const val SUGGESTION_CLOSE_KEY_WIDTH_DP = 40f
 
     const val MIN_BOTTOM_SYSTEM_CONTROL_GAP_DP = 16
     const val BOTTOM_SYSTEM_CONTROL_GAP_MULTIPLIER = 2.0f

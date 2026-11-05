@@ -27,5 +27,5 @@ object KeyboardDefaults {
 
     val DEFAULT_UPPER_ROW_KEY_IDS = listOf("esc", "tab", "ctrl", "alt", "left", "up", "down", "right")
     val DEFAULT_SECOND_ROW_BUTTON_IDS = listOf("rewrite", "tilde", "slash", "pipe", "minus", "underscore")
-    val DEFAULT_KEYBOARD_ROW_ORDER = listOf("second", "upper")
+    val DEFAULT_KEYBOARD_ROW_ORDER = listOf("upper", "second")
 }

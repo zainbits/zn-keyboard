@@ -93,7 +93,7 @@ internal fun ShortcutsSummaryCard(onOpen: () -> Unit) {
             .clickable(onClick = onOpen),
     ) {
         SettingsSectionHeader(
-            title = "Shortcut rows & macros",
+            title = "Shortcut pages & macros",
             iconResId = R.drawable.ic_keyboard_24,
             subtitle = "$keyCount keys · ${macros.size} ${if (macros.size == 1) "macro" else "macros"}",
             trailingContent = {
@@ -240,9 +240,9 @@ internal fun ShortcutsScreen(onBack: () -> Unit) {
         ) {
             SettingsSectionCard(verticalSpacing = 12.dp) {
                 SettingsSectionHeader(
-                    title = "Shortcut rows",
+                    title = "Shortcut pages",
                     iconResId = R.drawable.ic_keyboard_24,
-                    subtitle = "Shown top to bottom, as on the keyboard. Tap a key to move or remove it.",
+                    subtitle = "Both share one row on the keyboard; swipe it sideways to switch. The keyboard remembers the last page. Tap a key to move or remove it.",
                 )
 
                 rowOrder.forEachIndexed { position, rowId ->
@@ -254,7 +254,7 @@ internal fun ShortcutsScreen(onBack: () -> Unit) {
                             },
                             modifier = Modifier.align(Alignment.CenterHorizontally),
                         ) {
-                            Text("⇅  Swap rows")
+                            Text("⇅  Swap pages")
                         }
                     }
                     val otherRowId = if (rowId == UPPER) SECOND else UPPER

@@ -20,6 +20,7 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.animation.DecelerateInterpolator
 import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.MacroStep
 import dev.zain.znkeyboard.ShortcutMacro
@@ -62,6 +63,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onHindiModeToggled()
         fun onOcrPanelRequested()
         fun onVoicePanelRequested()
+        fun onShortcutPageChanged(rowId: String)
     }
 
     var callback: Callback? = null
@@ -138,6 +140,27 @@ class ZnKeyboardView @JvmOverloads constructor(
     private var shortcutRowState = ShortcutRowState(secondRowVisible = true)
     private var emojiKeySuggestion: String? = null
     private var suggestionStrip: List<SuggestionStripItem?> = emptyList()
+    // Suggestions cover the shortcut row while shown. Closing (or picking one) hides them until the
+    // next typed character or a new list. The page underneath is untouched, so it comes back.
+    private var overlaySuggestions: List<SuggestionStripItem> = emptyList()
+    private var dismissedSuggestions: List<SuggestionStripItem?>? = null
+    private var suggestionOverlayShown = false
+
+    // Shortcut rows A and B share one row as horizontally swiped pages. Every page is laid out at the
+    // page-0 position; drawing shifts each by `page * width - shortcutPagerScrollPx`.
+    private var shortcutPage = 0
+    private var shortcutPageCount = 0
+    private var shortcutPageRowIds: List<String> = emptyList()
+    /** Row id of the page the user last swiped to; persisted, and survives a page being hidden. */
+    private var preferredShortcutPageRowId: String? = null
+    private var shortcutPagerScrollPx = 0f
+    private var shortcutPagerDragPointerId = NO_POINTER
+    private var shortcutPagerSettling = false
+    private var shortcutPagerSettleFrom = 0f
+    private var shortcutPagerSettleStartMs = 0L
+    private var shortcutPagerTop = 0f
+    private var shortcutPagerBottom = 0f
+    private val shortcutPagerInterpolator = DecelerateInterpolator(SHORTCUT_PAGER_DECELERATION)
     private var keyHapticsEnabled = true
     private var keyPreviewEnabled = true
     private var autoShiftActive = false
@@ -264,6 +287,14 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
+    fun setShortcutPageRowId(rowId: String?) {
+        if (preferredShortcutPageRowId != rowId) {
+            preferredShortcutPageRowId = rowId
+            refreshHitTargets()
+            invalidate()
+        }
+    }
+
     fun setShortcutMacros(macros: List<ShortcutMacro>) {
         val byKeyId = macros.associateBy(ShortcutMacro::keyId)
         if (shortcutMacrosByKeyId != byKeyId) {
@@ -304,9 +335,30 @@ class ZnKeyboardView @JvmOverloads constructor(
         val normalized = items.take(SUGGESTION_STRIP_SLOTS)
         if (suggestionStrip != normalized) {
             suggestionStrip = normalized
+            overlaySuggestions = normalized.filterNotNull()
+            if (dismissedSuggestions != null && dismissedSuggestions != normalized) dismissedSuggestions = null
+            updateSuggestionOverlay()
             refreshHitTargets()
             invalidate()
         }
+    }
+
+    private fun dismissSuggestionOverlay() {
+        dismissedSuggestions = suggestionStrip
+        updateSuggestionOverlay()
+        invalidate()
+    }
+
+    private fun updateSuggestionOverlay() {
+        suggestionOverlayShown = suggestionStrip.any { it != null } && suggestionStrip != dismissedSuggestions
+    }
+
+    /** Typing refines the match, so a closed suggestion list comes back on the next character. */
+    private fun restoreDismissedSuggestions() {
+        if (dismissedSuggestions == null) return
+        dismissedSuggestions = null
+        updateSuggestionOverlay()
+        invalidate()
     }
 
     fun clearLatchedModifiers() {
@@ -361,14 +413,32 @@ class ZnKeyboardView @JvmOverloads constructor(
             refreshHitTargets()
         }
 
+        updateShortcutPagerSettle()
+        val pageWidth = width.toFloat()
         hitTargets.forEach { hit ->
-            drawKey(canvas, hit)
+            when {
+                hit.page == NO_PAGE -> drawKey(canvas, hit)
+                // Shared shortcut row: suggestions replace the shortcut page outright while shown.
+                hit.page == OVERLAY_PAGE -> if (suggestionOverlayShown) drawKey(canvas, hit)
+                suggestionOverlayShown -> Unit
+                else -> {
+                    val offset = hit.page * pageWidth - shortcutPagerScrollPx
+                    if (abs(offset) < pageWidth) {
+                        val saveCount = canvas.save()
+                        canvas.translate(offset, 0f)
+                        drawKey(canvas, hit)
+                        canvas.restoreToCount(saveCount)
+                    }
+                }
+            }
         }
-        drawSuggestionDividers(canvas)
+        if (suggestionOverlayShown) {
+            drawSuggestionDividers(canvas)
+        }
         if (keyPreviewEnabled) {
             drawKeyPreviews(canvas)
         }
-        if (shortcutRowState.loading) {
+        if (shortcutRowState.loading || shortcutPagerSettling) {
             postInvalidateOnAnimation()
         }
     }
@@ -440,6 +510,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val downY = event.getY(pointerIndex)
         val hit = findHit(downX, downY)
         val touch = ActiveTouch(null, downX = downX, downY = downY)
+        touch.inShortcutPager = !suggestionOverlayShown && shortcutPageCount > 1 &&
+            downY >= shortcutPagerTop && downY < shortcutPagerBottom
         // Resolve the key at touch-down, where the user aimed, not where the finger rolls to on lift.
         val key = resolveDownKey(hit, downX, downY, touch)
         touch.currentKey = key
@@ -477,7 +549,8 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
         }
         key?.takeIf(::isBackspaceKey)?.let { key ->
-            touch.backspaceGesture = BackspaceGestureTouch(
+            // In the shortcut pager a sideways swipe turns the page, so no swipe-to-delete there.
+            if (!touch.inShortcutPager) touch.backspaceGesture = BackspaceGestureTouch(
                 key = key,
                 startX = event.getX(pointerIndex),
                 startY = event.getY(pointerIndex),
@@ -494,6 +567,10 @@ class ZnKeyboardView @JvmOverloads constructor(
             val touch = activeTouches.get(pointerId) ?: continue
             val x = event.getX(pointerIndex)
             val y = event.getY(pointerIndex)
+            if (touch.inShortcutPager && updateShortcutPagerDrag(pointerId, touch, x, y)) {
+                changed = true
+                continue
+            }
             if (updateBackspaceGesture(pointerId, touch, x, y)) {
                 changed = true
                 continue
@@ -527,6 +604,77 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
         }
         return changed
+    }
+
+    /** Turns a sideways swipe that starts on the shortcut row into a page drag. */
+    private fun updateShortcutPagerDrag(pointerId: Int, touch: ActiveTouch, x: Float, y: Float): Boolean {
+        if (!touch.pagerDragging) {
+            if (touch.slid || touch.repeatConsumed || touch.longPressConsumed) return false
+            if (shortcutPagerDragPointerId != NO_POINTER) return false
+            val dx = x - touch.downX
+            val dy = y - touch.downY
+            if (abs(dx) < touchSlopPx || abs(dx) < abs(dy) * SHORTCUT_PAGER_DIRECTION_RATIO) return false
+
+            touch.pagerDragging = true
+            touch.currentKey = null
+            cancelLongPressFor(pointerId)
+            cancelBackspaceRepeatFor(pointerId)
+            shortcutPagerDragPointerId = pointerId
+            updateShortcutPagerSettle()
+            shortcutPagerSettling = false
+            touch.pagerStartX = x
+            touch.pagerStartScroll = shortcutPagerScrollPx
+        }
+
+        val maxScroll = (shortcutPageCount - 1).coerceAtLeast(0) * width.toFloat()
+        val scroll = touch.pagerStartScroll - (x - touch.pagerStartX)
+        shortcutPagerScrollPx = when {
+            scroll < 0f -> scroll * SHORTCUT_PAGER_EDGE_RESISTANCE
+            scroll > maxScroll -> maxScroll + (scroll - maxScroll) * SHORTCUT_PAGER_EDGE_RESISTANCE
+            else -> scroll
+        }
+        return true
+    }
+
+    private fun finishShortcutPagerDrag(touch: ActiveTouch?) {
+        if (touch?.pagerDragging != true) return
+        touch.pagerDragging = false
+        shortcutPagerDragPointerId = NO_POINTER
+        val pageWidth = width.toFloat()
+        val offset = shortcutPagerScrollPx - shortcutPage * pageWidth
+        val threshold = min(pageWidth * SHORTCUT_PAGER_SWITCH_FRACTION, dp(SHORTCUT_PAGER_SWITCH_DP))
+        val target = when {
+            offset > threshold -> shortcutPage + 1
+            offset < -threshold -> shortcutPage - 1
+            else -> shortcutPage
+        }
+        settleShortcutPager(target.coerceIn(0, (shortcutPageCount - 1).coerceAtLeast(0)))
+    }
+
+    private fun settleShortcutPager(page: Int) {
+        if (page != shortcutPage) {
+            if (keyHapticsEnabled) performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            shortcutPageRowIds.getOrNull(page)?.let { rowId ->
+                preferredShortcutPageRowId = rowId
+                // Persist after this touch event; no I/O on the touch path.
+                post { callback?.onShortcutPageChanged(rowId) }
+            }
+        }
+        shortcutPage = page
+        shortcutPagerSettleFrom = shortcutPagerScrollPx
+        shortcutPagerSettleStartMs = SystemClock.uptimeMillis()
+        shortcutPagerSettling = true
+        invalidate()
+    }
+
+    private fun updateShortcutPagerSettle() {
+        if (!shortcutPagerSettling) return
+        val elapsed = (SystemClock.uptimeMillis() - shortcutPagerSettleStartMs).toFloat()
+        val progress = (elapsed / SHORTCUT_PAGER_SETTLE_MS).coerceIn(0f, 1f)
+        val target = shortcutPage * width.toFloat()
+        shortcutPagerScrollPx = shortcutPagerSettleFrom +
+            (target - shortcutPagerSettleFrom) * shortcutPagerInterpolator.getInterpolation(progress)
+        if (progress >= 1f) shortcutPagerSettling = false
     }
 
     private fun updateBackspaceGesture(
@@ -647,6 +795,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             }
             pointerQueue.removeAt(queueIndex)
             activeTouches.remove(nextPointerId)
+            finishShortcutPagerDrag(touch)
             finishBackspaceGesture(touch)
             finishSpaceCursorDrag(touch)
             cancelLongPressFor(nextPointerId)
@@ -665,6 +814,7 @@ class ZnKeyboardView @JvmOverloads constructor(
                 return
             }
         }
+        finishShortcutPagerDrag(activeTouches.get(pointerId))
         activeTouches.remove(pointerId)
         cancelLongPressFor(pointerId)
         cancelBackspaceRepeatFor(pointerId)
@@ -690,6 +840,9 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private fun cancelActiveTouches() {
+        for (index in 0 until activeTouches.size()) {
+            finishShortcutPagerDrag(activeTouches.valueAt(index))
+        }
         cancelPendingLongPress()
         cancelBackspaceRepeat()
         cancelBackspaceGestures()
@@ -1197,8 +1350,14 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIcon.Enter -> drawEnterIcon(canvas)
             KeyIcon.Space -> drawSpaceIcon(canvas)
             KeyIcon.Mic -> drawMicIcon(canvas)
+            KeyIcon.Close -> drawCloseIcon(canvas)
         }
         canvas.restore()
+    }
+
+    private fun drawCloseIcon(canvas: Canvas) {
+        canvas.drawLine(8f, 8f, 16f, 16f, iconPaint)
+        canvas.drawLine(16f, 8f, 8f, 16f, iconPaint)
     }
 
     private fun drawMicIcon(canvas: Canvas) {
@@ -1353,7 +1512,14 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (hitTargets.isEmpty()) {
             refreshHitTargets()
         }
-        return hitTargets.firstOrNull { it.hitBounds.contains(x, y) }
+        return hitTargets.firstOrNull { hit ->
+            val live = when (hit.page) {
+                NO_PAGE -> true
+                OVERLAY_PAGE -> suggestionOverlayShown
+                else -> !suggestionOverlayShown && hit.page == shortcutPage
+            }
+            live && hit.hitBounds.contains(x, y)
+        }
     }
 
     private fun fitTextSize(label: String, bounds: RectF, role: KeyRole, rowStyle: RowStyle = RowStyle.Standard): Float {
@@ -1377,6 +1543,10 @@ class ZnKeyboardView @JvmOverloads constructor(
     }
 
     private fun handleKey(key: KeySpec, sample: TypingLearner.Sample? = null, shiftHeld: Boolean = false) {
+        val typedAction = (key.intent as? KeyIntent.Dispatch)?.action
+        if (typedAction is KeyboardAction.Text || typedAction == KeyboardAction.Backspace) {
+            restoreDismissedSuggestions()
+        }
         when (val intent = key.intent) {
             KeyIntent.Shift -> {
                 // Tap toggles one-shot Shift; a quick double tap locks caps (Gboard / iOS convention).
@@ -1421,8 +1591,15 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIntent.OpenEmojiPanel -> callback?.onEmojiPanelRequested()
             KeyIntent.AgentRewrite -> callback?.onAgentRewriteRequested()
             KeyIntent.SaveSnippet -> callback?.onSaveSnippetRequested()
-            is KeyIntent.AcceptComposerSuggestion -> callback?.onComposerSuggestionSelected(intent.text)
-            is KeyIntent.AcceptTransliteration -> callback?.onTransliterationSelected(intent.text)
+            is KeyIntent.AcceptComposerSuggestion -> {
+                dismissSuggestionOverlay()
+                callback?.onComposerSuggestionSelected(intent.text)
+            }
+            is KeyIntent.AcceptTransliteration -> {
+                dismissSuggestionOverlay()
+                callback?.onTransliterationSelected(intent.text)
+            }
+            KeyIntent.DismissSuggestions -> dismissSuggestionOverlay()
             KeyIntent.ToggleHindi -> callback?.onHindiModeToggled()
             KeyIntent.OpenOcr -> callback?.onOcrPanelRequested()
             KeyIntent.OpenVoice -> callback?.onVoicePanelRequested()
@@ -1556,88 +1733,145 @@ class ZnKeyboardView @JvmOverloads constructor(
         }
     }
 
-    private fun layoutRows(): List<RowSpec> = listOf(suggestionStripRow()) + rows()
+    private fun layoutRows(): List<RowSpec> = rows()
 
     private fun layoutKeys(totalWidth: Float, totalHeight: Float): List<KeyHit> {
         val rows = layoutRows()
-        val horizontalPadding = dp(ImeLayout.HORIZONTAL_PADDING_DP.toFloat())
         val topPadding = dp(ImeLayout.TOP_PADDING_DP.toFloat())
         val bottomPadding = dp(bottomPaddingDp.toFloat()) + bottomSystemControlGapPx
-        val keyGap = dp(ImeLayout.KEY_GAP_DP.toFloat())
         val rowGap = dp(ImeLayout.ROW_GAP_DP.toFloat())
         val rowWeightSum = rows.fold(0f) { total, row -> total + row.heightWeight }
         val usableHeight = totalHeight - topPadding - bottomPadding - rowGap * (rows.size - 1)
         val unitHeight = usableHeight / rowWeightSum
 
-        val visualRows = mutableListOf<List<VisualKey>>()
+        val visualTops = FloatArray(rows.size)
+        val visualBottoms = FloatArray(rows.size)
         var top = topPadding
-        rows.forEach { row ->
-            val rowHeight = row.heightWeight * unitHeight
-            val keys = row.keys
-            val keyWeightSum = keys.fold(0f) { total, key -> total + key.weight }
-            val layoutKeyCount = row.layoutKeyCount ?: keys.size
-            val layoutWeightSum = row.layoutKeyCount?.toFloat() ?: keyWeightSum
-            val usableWidth = totalWidth - horizontalPadding * 2f - keyGap * (layoutKeyCount - 1)
-            val rowWidth = usableWidth * (keyWeightSum / layoutWeightSum) + keyGap * (keys.size - 1)
-            var left = horizontalPadding + (totalWidth - horizontalPadding * 2f - rowWidth) / 2f
-
-            val visualKeys = mutableListOf<VisualKey>()
-            keys.forEach { key ->
-                val keyWidth = usableWidth * (key.weight / layoutWeightSum)
-                val bounds = RectF(left, top, left + keyWidth, top + rowHeight)
-                visualKeys += VisualKey(key, bounds, row.style)
-                left += keyWidth + keyGap
-            }
-            visualRows += visualKeys
-
-            top += rowHeight + rowGap
+        rows.forEachIndexed { index, row ->
+            visualTops[index] = top
+            visualBottoms[index] = top + row.heightWeight * unitHeight
+            top = visualBottoms[index] + rowGap
         }
 
         val keyboardBottom = (totalHeight - bottomSystemControlGapPx).coerceAtLeast(0f)
-        return visualRows.flatMapIndexed { rowIndex, row ->
-            val rowTop = if (rowIndex == 0) {
-                0f
-            } else {
-                val previousRow = visualRows[rowIndex - 1]
-                midpoint(previousRow.first().visualBounds.bottom, row.first().visualBounds.top)
-            }
-            val rowBottom = if (rowIndex == visualRows.lastIndex) {
-                keyboardBottom
-            } else {
-                val nextRow = visualRows[rowIndex + 1]
-                midpoint(row.first().visualBounds.bottom, nextRow.first().visualBounds.top)
-            }
-
-            row.mapIndexed { keyIndex, visualKey ->
-                val hitLeft = if (keyIndex == 0) {
-                    0f
-                } else {
-                    midpoint(row[keyIndex - 1].visualBounds.right, visualKey.visualBounds.left)
+        val hits = mutableListOf<KeyHit>()
+        var pageRowIds: List<String> = emptyList()
+        rows.forEachIndexed { index, row ->
+            val hitTop = if (index == 0) 0f else midpoint(visualBottoms[index - 1], visualTops[index])
+            val hitBottom = if (index == rows.lastIndex) keyboardBottom else midpoint(visualBottoms[index], visualTops[index + 1])
+            val band = RowBand(visualTops[index], visualBottoms[index], hitTop, hitBottom)
+            if (row.isShortcutRow) {
+                // Shortcut pages and the suggestion overlay share this slot; drawing and hit-testing pick one.
+                row.pages.forEachIndexed { page, shortcutPage ->
+                    hits += layoutRowKeys(shortcutPage.keys, row.layoutKeyCount, row.style, band, totalWidth, page)
                 }
-                val hitRight = if (keyIndex == row.lastIndex) {
-                    totalWidth
-                } else {
-                    midpoint(visualKey.visualBounds.right, row[keyIndex + 1].visualBounds.left)
-                }
-
-                KeyHit(
-                    key = visualKey.key,
-                    hitBounds = RectF(hitLeft, rowTop, hitRight, rowBottom),
-                    visualBounds = visualKey.visualBounds,
-                    rowStyle = visualKey.rowStyle,
-                )
+                hits += layoutSuggestionOverlay(row.overlay, band, totalWidth)
+                pageRowIds = row.pages.map { it.rowId }
+                shortcutPagerTop = hitTop
+                shortcutPagerBottom = hitBottom
+            } else {
+                hits += layoutRowKeys(row.keys, row.layoutKeyCount, row.style, band, totalWidth, NO_PAGE)
             }
         }
+        syncShortcutPages(pageRowIds, totalWidth)
+        return hits
+    }
+
+    private fun layoutRowKeys(
+        keys: List<KeySpec>,
+        layoutKeyCountOverride: Int?,
+        style: RowStyle,
+        band: RowBand,
+        totalWidth: Float,
+        page: Int,
+    ): List<KeyHit> {
+        if (keys.isEmpty()) return emptyList()
+        val horizontalPadding = dp(ImeLayout.HORIZONTAL_PADDING_DP.toFloat())
+        val keyGap = dp(ImeLayout.KEY_GAP_DP.toFloat())
+        val keyWeightSum = keys.fold(0f) { total, key -> total + key.weight }
+        val layoutKeyCount = layoutKeyCountOverride ?: keys.size
+        val layoutWeightSum = layoutKeyCountOverride?.toFloat() ?: keyWeightSum
+        val usableWidth = totalWidth - horizontalPadding * 2f - keyGap * (layoutKeyCount - 1)
+        val rowWidth = usableWidth * (keyWeightSum / layoutWeightSum) + keyGap * (keys.size - 1)
+        var left = horizontalPadding + (totalWidth - horizontalPadding * 2f - rowWidth) / 2f
+        val visualKeys = keys.map { key ->
+            val keyWidth = usableWidth * (key.weight / layoutWeightSum)
+            val visual = VisualKey(key, RectF(left, band.visualTop, left + keyWidth, band.visualBottom), style)
+            left += keyWidth + keyGap
+            visual
+        }
+        return hitsForVisualRow(visualKeys, band, totalWidth, page)
+    }
+
+    /** Suggestions share the free width by text length; a fixed-width close key sits at the right edge. */
+    private fun layoutSuggestionOverlay(keys: List<KeySpec>, band: RowBand, totalWidth: Float): List<KeyHit> {
+        if (keys.size < 2) return emptyList()
+        val horizontalPadding = dp(ImeLayout.HORIZONTAL_PADDING_DP.toFloat())
+        val keyGap = dp(ImeLayout.KEY_GAP_DP.toFloat())
+        val closeWidth = dp(ImeDimensions.SUGGESTION_CLOSE_KEY_WIDTH_DP)
+        val suggestions = keys.dropLast(1)
+        val weightSum = suggestions.fold(0f) { total, key -> total + key.weight }
+        val usableWidth = totalWidth - horizontalPadding * 2f - closeWidth - keyGap * suggestions.size
+        var left = horizontalPadding
+        val visualKeys = suggestions.map { key ->
+            val keyWidth = usableWidth * (key.weight / weightSum)
+            val visual = VisualKey(key, RectF(left, band.visualTop, left + keyWidth, band.visualBottom), RowStyle.Suggestion)
+            left += keyWidth + keyGap
+            visual
+        } + VisualKey(
+            keys.last(),
+            RectF(totalWidth - horizontalPadding - closeWidth, band.visualTop, totalWidth - horizontalPadding, band.visualBottom),
+            RowStyle.Toolbar,
+        )
+        return hitsForVisualRow(visualKeys, band, totalWidth, OVERLAY_PAGE)
+    }
+
+    private fun hitsForVisualRow(row: List<VisualKey>, band: RowBand, totalWidth: Float, page: Int): List<KeyHit> {
+        return row.mapIndexed { keyIndex, visualKey ->
+            val hitLeft = if (keyIndex == 0) 0f else midpoint(row[keyIndex - 1].visualBounds.right, visualKey.visualBounds.left)
+            val hitRight = if (keyIndex == row.lastIndex) totalWidth else midpoint(visualKey.visualBounds.right, row[keyIndex + 1].visualBounds.left)
+            KeyHit(
+                key = visualKey.key,
+                hitBounds = RectF(hitLeft, band.hitTop, hitRight, band.hitBottom),
+                visualBounds = visualKey.visualBounds,
+                rowStyle = visualKey.rowStyle,
+                page = page,
+            )
+        }
+    }
+
+    /** Re-selects the remembered page whenever the set of pages changes, unless a swipe is running. */
+    private fun syncShortcutPages(rowIds: List<String>, pageWidth: Float) {
+        shortcutPageRowIds = rowIds
+        shortcutPageCount = rowIds.size
+        if (shortcutPagerDragPointerId != NO_POINTER || shortcutPagerSettling) {
+            shortcutPage = shortcutPage.coerceIn(0, (rowIds.size - 1).coerceAtLeast(0))
+            return
+        }
+        shortcutPage = rowIds.indexOf(preferredShortcutPageRowId).coerceAtLeast(0)
+        shortcutPagerScrollPx = shortcutPage * pageWidth
     }
 
     private fun midpoint(start: Float, end: Float): Float = start + (end - start) / 2f
 
     private fun rows(): List<RowSpec> {
-        val buttonRowSpecs = mapOf(
-            KeyboardSettings.KeyboardRow.Upper.id to terminalRow(),
-            KeyboardSettings.KeyboardRow.Second.id to secondRow(),
+        val pageKeys = mapOf(
+            KeyboardSettings.KeyboardRow.Upper.id to terminalRowKeys(),
+            KeyboardSettings.KeyboardRow.Second.id to secondRowKeys(),
         )
-        val buttonRows = keyboardRowOrder.mapNotNull { rowId -> buttonRowSpecs[rowId] }
+        val pages = keyboardRowOrder.mapNotNull { rowId ->
+            pageKeys[rowId]?.takeIf { it.isNotEmpty() }?.let { ShortcutPage(rowId, it) }
+        }
+        // One slot, always present so the keyboard never changes height: the shortcut rows as swiped
+        // pages, with suggestions drawn over them while there are any.
+        val shortcutRow = RowSpec(
+            keys = emptyList(),
+            heightWeight = ImeLayout.COMPACT_ROW_WEIGHT,
+            style = RowStyle.Toolbar,
+            pages = pages,
+            overlay = suggestionOverlayKeys(),
+            isShortcutRow = true,
+        )
         val mainRows = when (layoutMode) {
             LayoutMode.Letters -> listOf(
                 numberRow(),
@@ -1662,20 +1896,13 @@ class ZnKeyboardView @JvmOverloads constructor(
             )
             LayoutMode.PhonePad -> phonePadRows()
         }
-        return buttonRows + mainRows
+        return listOf(shortcutRow) + mainRows
     }
 
-    /**
-     * Always present, so the keyboard never changes height as suggestions come and go. Only real
-     * suggestions are laid out, centered, each as wide as its text needs relative to the others;
-     * with none, an invisible placeholder keeps the row.
-     */
-    private fun suggestionStripRow(): RowSpec {
-        val items = suggestionStrip.filterNotNull()
-        if (items.isEmpty()) {
-            val placeholder = KeySpec("strip_empty", "", KeyIntent.None, role = KeyRole.Function, enabled = false)
-            return RowSpec(listOf(placeholder), heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Suggestion)
-        }
+    /** Suggestions (each as wide as its text needs relative to the others) plus a close key. */
+    private fun suggestionOverlayKeys(): List<KeySpec> {
+        val items = overlaySuggestions
+        if (items.isEmpty()) return emptyList()
         suggestionMeasurePaint.textSize = sp(ImeDimensions.KEY_LABEL_FUNCTION_TEXT_SIZE_SP)
         val minWidth = dp(SUGGESTION_MIN_WIDTH_DP)
         val keys = items.mapIndexed { index, item ->
@@ -1692,7 +1919,14 @@ class ZnKeyboardView @JvmOverloads constructor(
                 active = item.highlighted,
             )
         }
-        return RowSpec(keys, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Suggestion)
+        val close = KeySpec(
+            id = "strip_close",
+            label = "Close suggestions",
+            intent = KeyIntent.DismissSuggestions,
+            role = KeyRole.Function,
+            icon = KeyIcon.Close,
+        )
+        return keys + close
     }
 
     private fun composerSuggestionDisplayLabel(text: String): String {
@@ -1705,8 +1939,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         return RowSpec(chars("1234567890"), ImeLayout.STANDARD_ROW_WEIGHT, style = RowStyle.Numbers)
     }
 
-    private fun terminalRow(): RowSpec? {
-        val keys = upperRowKeyIds.mapIndexedNotNull { index, keyId ->
+    private fun terminalRowKeys(): List<KeySpec> {
+        return upperRowKeyIds.mapIndexedNotNull { index, keyId ->
             upperRowKeySpec(
                 keyId = keyId,
                 index = index,
@@ -1715,12 +1949,11 @@ class ZnKeyboardView @JvmOverloads constructor(
                 enabled = true,
             )
         }
-        return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Toolbar) }
     }
 
-    private fun secondRow(): RowSpec? {
-        if (!hasVisibleSecondRow()) return null
-        val keys = secondRowButtonIds.mapIndexedNotNull { index, buttonId ->
+    private fun secondRowKeys(): List<KeySpec> {
+        if (!hasVisibleSecondRow()) return emptyList()
+        return secondRowButtonIds.mapIndexedNotNull { index, buttonId ->
             upperRowKeySpec(
                 keyId = buttonId,
                 index = index,
@@ -1729,7 +1962,6 @@ class ZnKeyboardView @JvmOverloads constructor(
                 enabled = true,
             )
         }
-        return keys.takeIf { it.isNotEmpty() }?.let { RowSpec(it, heightWeight = ImeLayout.COMPACT_ROW_WEIGHT, style = RowStyle.Toolbar) }
     }
 
     private fun hasVisibleSecondRow(): Boolean {
@@ -2234,6 +2466,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         Enter,
         Space,
         Mic,
+        Close,
     }
 
     private enum class ArrowDirection {
@@ -2255,6 +2488,23 @@ class ZnKeyboardView @JvmOverloads constructor(
         val heightWeight: Float,
         val layoutKeyCount: Int? = null,
         val style: RowStyle = RowStyle.Standard,
+        /** Swipeable pages sharing this row; empty for ordinary rows. */
+        val pages: List<ShortcutPage> = emptyList(),
+        /** Suggestion keys drawn over the pages while suggestions are shown. */
+        val overlay: List<KeySpec> = emptyList(),
+        val isShortcutRow: Boolean = false,
+    )
+
+    private data class RowBand(
+        val visualTop: Float,
+        val visualBottom: Float,
+        val hitTop: Float,
+        val hitBottom: Float,
+    )
+
+    private data class ShortcutPage(
+        val rowId: String,
+        val keys: List<KeySpec>,
     )
 
     private data class KeySpec(
@@ -2278,6 +2528,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         val hitBounds: RectF,
         val visualBounds: RectF,
         val rowStyle: RowStyle,
+        val page: Int = NO_PAGE,
     )
 
     private data class VisualKey(
@@ -2298,6 +2549,10 @@ class ZnKeyboardView @JvmOverloads constructor(
         var heldAsModifier: Boolean = false,
         var backspaceGesture: BackspaceGestureTouch? = null,
         var spaceCursorDrag: SpaceCursorDragTouch? = null,
+        var inShortcutPager: Boolean = false,
+        var pagerDragging: Boolean = false,
+        var pagerStartX: Float = 0f,
+        var pagerStartScroll: Float = 0f,
     )
 
     private data class BackspaceGestureTouch(
@@ -2335,6 +2590,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data object ToggleHindi : KeyIntent()
         data object OpenOcr : KeyIntent()
         data object OpenVoice : KeyIntent()
+        data object DismissSuggestions : KeyIntent()
         data object None : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
@@ -2369,6 +2625,15 @@ class ZnKeyboardView @JvmOverloads constructor(
 
     private companion object {
         const val DISABLED_KEY_ALPHA = 118
+        const val NO_PAGE = -1
+        const val OVERLAY_PAGE = -2
+        const val NO_POINTER = -1
+        const val SHORTCUT_PAGER_DIRECTION_RATIO = 1.2f
+        const val SHORTCUT_PAGER_EDGE_RESISTANCE = 0.3f
+        const val SHORTCUT_PAGER_SWITCH_FRACTION = 0.25f
+        const val SHORTCUT_PAGER_SWITCH_DP = 56f
+        const val SHORTCUT_PAGER_SETTLE_MS = 220f
+        const val SHORTCUT_PAGER_DECELERATION = 1.6f
         const val DISABLED_CONTENT_ALPHA = 130
         const val LONG_PRESS_HINT_ALPHA = 170
         const val GESTURE_DELETE_ACTIVATION_DP = 10f

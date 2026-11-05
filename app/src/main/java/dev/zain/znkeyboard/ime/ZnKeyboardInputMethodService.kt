@@ -499,6 +499,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
+    override fun onShortcutPageChanged(rowId: String) {
+        KeyboardSettings.saveShortcutPageRowId(this, rowId)
+    }
+
     override fun onVoicePanelRequested() {
         hideEmojiSearchView()
         hideGifSearchView()
@@ -715,6 +719,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             view.setUpperRowKeyIds(KeyboardSettings.readUpperRowKeyIds(this))
             view.setSecondRowButtonIds(KeyboardSettings.readSecondRowButtonIds(this))
             view.setKeyboardRowOrder(KeyboardSettings.readKeyboardRowOrder(this))
+            view.setShortcutPageRowId(KeyboardSettings.readShortcutPageRowId(this))
         }
         emojiPanelView?.let { view ->
             view.setHeightScale(heightScale)

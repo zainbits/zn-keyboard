@@ -62,6 +62,7 @@ object KeyboardSettings {
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
     private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
     private const val KEY_KEYBOARD_ROW_ORDER = "keyboard_row_order"
+    private const val KEY_SHORTCUT_PAGE_ROW = "shortcut_page_row"
     private const val KEY_SHORTCUT_MACROS = "shortcut_macros"
     private const val KEY_SAVED_TEXT_PANEL_TAB = "saved_text_panel_tab"
     private const val KEY_TEXT_SNIPPETS = "text_snippets"
@@ -386,6 +387,21 @@ object KeyboardSettings {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .edit()
             .putString(KEY_SAVED_TEXT_PANEL_TAB, tab.id)
+            .apply()
+    }
+
+    /** Which shortcut row (by [KeyboardRow] id) the keyboard last showed as its shortcut page. */
+    fun readShortcutPageRowId(context: Context): String? {
+        val stored = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_SHORTCUT_PAGE_ROW, null)
+        return stored?.takeIf { it in keyboardRowIds }
+    }
+
+    fun saveShortcutPageRowId(context: Context, rowId: String) {
+        if (rowId !in keyboardRowIds) return
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_SHORTCUT_PAGE_ROW, rowId)
             .apply()
     }
 
@@ -1901,8 +1917,8 @@ object KeyboardSettings {
         val id: String,
         val label: String,
     ) {
-        Upper("upper", "Shortcut row A"),
-        Second("second", "Shortcut row B"),
+        Upper("upper", "Shortcut page A"),
+        Second("second", "Shortcut page B"),
     }
 
     enum class SavedTextPanelTab(
