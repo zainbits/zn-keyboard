@@ -35,6 +35,7 @@ import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.integrations.KeyboardIntegrations
 import dev.zain.znkeyboard.translit.HindiTransliterationEngine
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
+import dev.zain.znkeyboard.voice.BarkEngine
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
@@ -52,6 +53,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     SavedTextSearchView.Callback,
     AgentReviewView.Callback,
     OcrCameraPanelView.Callback,
+    VoicePanelView.Callback,
     HindiComposer.Host {
     private var keyboardView: ZnKeyboardView? = null
     private var inputRoot: LinearLayout? = null
@@ -63,6 +65,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
     private var savedTextSearchView: SavedTextSearchView? = null
     private var agentReviewView: AgentReviewView? = null
     private var ocrPanelView: OcrCameraPanelView? = null
+    private var voicePanelView: VoicePanelView? = null
     private var currentEditorInfo: EditorInfo? = null
     private var recentEmojis: List<String> = emptyList()
     private var recentEmojiRows = EmojiCatalog.DEFAULT_RECENT_ROW_COUNT
@@ -113,6 +116,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             engine.load(KeyboardSettings.readTypingModelGeneration(this))
         }
         hindiEngine = HindiTransliterationEngine(this)
+        BarkEngine.addListener(voiceStateListener)
         hindiComposer = HindiComposer(hindiEngine, this)
         hindiModeEnabled = KeyboardSettings.readHindiModeEnabled(this)
         if (hindiModeEnabled) hindiEngine.load(::renderSuggestionStrip)
@@ -136,6 +140,8 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         agentReviewView = null
         ocrPanelView?.dispose()
         ocrPanelView = null
+        voicePanelView?.dispose()
+        voicePanelView = null
         activeSurface = KeyboardSurface.Keyboard
         recentEmojis = KeyboardSettings.readRecentEmojis(this)
         recentEmojiRows = KeyboardSettings.readRecentEmojiRows(this)
@@ -273,6 +279,10 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         gifSearchView = null
         ocrPanelView?.dispose()
         ocrPanelView = null
+        voicePanelView?.dispose()
+        voicePanelView = null
+        BarkEngine.removeListener(voiceStateListener)
+        BarkEngine.releaseNow()
         super.onDestroy()
     }
 
@@ -487,6 +497,42 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     override fun onOcrPanelClosed() {
         showKeyboardPanel()
+    }
+
+    override fun onVoicePanelRequested() {
+        hideEmojiSearchView()
+        hideGifSearchView()
+        hideSavedTextSearchView()
+        val keyboardHeight = keyboardView?.height ?: 0
+        val panel = voicePanelView ?: VoicePanelView(this).also { view ->
+            voicePanelView = view
+            view.callback = this
+        }
+        panel.setFixedHeight(keyboardHeight)
+        activeSurface = KeyboardSurface.Voice
+        swapKeyboardSurface(panel)
+        renderSecondRow()
+        panel.start()
+    }
+
+    override fun onVoiceTextCaptured(text: String) {
+        showKeyboardPanel()
+        val before = currentInputConnection?.getTextBeforeCursor(1, 0)
+        val needsSpace = !before.isNullOrEmpty() && !before.last().isWhitespace() && text.first().isLetterOrDigit()
+        handleText(if (needsSpace) " $text" else text, ModifierState(ctrl = false, alt = false))
+    }
+
+    override fun onVoicePanelClosed() {
+        showKeyboardPanel()
+    }
+
+    override fun onVoicePermissionRequested() {
+        showKeyboardPanel()
+        startActivity(
+            Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        Toast.makeText(this, "Allow Microphone under Permissions, then tap Voice again.", Toast.LENGTH_LONG).show()
     }
 
     override fun onOcrPermissionRequested() {
@@ -889,6 +935,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         renderSuggestionStrip()
         // The camera and OCR model only live while their panel is on screen.
         ocrPanelView?.takeIf { it !== surface }?.stop()
+        voicePanelView?.takeIf { it !== surface }?.stop()
         val container = keyboardContainer ?: return
         (surface.parent as? ViewGroup)?.removeView(surface)
         container.removeAllViews()
@@ -2185,10 +2232,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 StructuredOutputMode.StandardJsonSchema,
                 StructuredOutputMode.JsonObject,
             )
-            KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp -> listOf(
-                StructuredOutputMode.NanbeigeLlamaCppJsonSchema,
-                StructuredOutputMode.JsonObject,
-            )
             KeyboardSettings.AgentProviderType.OpenAiCompatible -> listOf(
                 StructuredOutputMode.StandardJsonSchema,
                 StructuredOutputMode.JsonObject,
@@ -2248,7 +2291,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             .put("response_format", structuredResponseFormatFor(outputMode))
             .applyOpenRouterProviderPreferences(providerSettings, outputMode)
             .applyReasoningSettings(providerSettings)
-            .applyLlamaCppCompatibility(providerSettings, outputMode)
 
         return try {
             connection.outputStream.writer(Charsets.UTF_8).use { writer ->
@@ -2389,12 +2431,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
             )
             .put("required", JSONArray().put(STRUCTURED_OUTPUT_TEXT_FIELD))
 
-        if (outputMode == StructuredOutputMode.NanbeigeLlamaCppJsonSchema) {
-            return JSONObject()
-                .put("type", "json_schema")
-                .put("schema", schema)
-        }
-
         return JSONObject()
             .put("type", "json_schema")
             .put(
@@ -2449,7 +2485,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
         return when (providerSettings.providerType) {
             KeyboardSettings.AgentProviderType.OpenRouter -> applyOpenRouterReasoningSettings(providerSettings)
-            KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp,
             KeyboardSettings.AgentProviderType.OpenAiCompatible -> applyOpenAiCompatibleReasoningSettings(providerSettings)
         }
     }
@@ -2467,22 +2502,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         }
 
         return put("reasoning", reasoning)
-    }
-
-    private fun JSONObject.applyLlamaCppCompatibility(
-        providerSettings: KeyboardSettings.AgentProviderSettings,
-        outputMode: StructuredOutputMode,
-    ): JSONObject {
-        if (
-            outputMode == StructuredOutputMode.NanbeigeLlamaCppJsonSchema &&
-            providerSettings.reasoningMode == KeyboardSettings.AgentReasoningMode.Off
-        ) {
-            put(
-                "chat_template_kwargs",
-                JSONObject().put("enable_thinking", false),
-            )
-        }
-        return this
     }
 
     private fun JSONObject.applyOpenAiCompatibleReasoningSettings(
@@ -2592,9 +2611,12 @@ class ZnKeyboardInputMethodService : InputMethodService(),
                 rewriteEnabled = visible && isRewriteAvailable() && providerConfigured,
                 hindiMode = hindiModeEnabled,
                 hindiAvailable = isHindiEditor(currentEditorInfo),
+                voiceWarm = BarkEngine.isWarm,
             ),
         )
     }
+
+    private val voiceStateListener: () -> Unit = { renderSecondRow() }
 
     private fun isRewriteAvailable(): Boolean {
         return KeyboardSettings.readAgentModeEnabled(this) && !isSensitiveEditor(currentEditorInfo)
@@ -2780,6 +2802,7 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         SavedTextSearch,
         Review,
         Ocr,
+        Voice,
     }
 
     private class LlmHttpException(
@@ -2802,7 +2825,6 @@ class ZnKeyboardInputMethodService : InputMethodService(),
 
     private enum class StructuredOutputMode {
         StandardJsonSchema,
-        NanbeigeLlamaCppJsonSchema,
         JsonObject,
     }
 

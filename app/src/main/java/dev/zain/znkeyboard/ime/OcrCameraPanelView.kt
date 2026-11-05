@@ -11,6 +11,7 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.util.Size
 import android.util.TypedValue
 import android.view.Gravity
 import android.widget.FrameLayout
@@ -18,6 +19,9 @@ import android.widget.TextView
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.view.CameraController
 import androidx.camera.view.LifecycleCameraController
 import androidx.camera.view.PreviewView
@@ -26,18 +30,26 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import com.google.ai.edge.litert.Accelerator
+import android.widget.LinearLayout
+import dev.zain.znkeyboard.KeyboardSettings
+import dev.zain.znkeyboard.KeyboardSettings.ScanEngine
 import dev.zain.znkeyboard.R
+import dev.zain.znkeyboard.ai.AiModelClient
+import dev.zain.znkeyboard.ai.AiModelClient.isReady
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.ocrlab.ppocr.OcrModelStore
 import dev.zain.znkeyboard.ocrlab.ppocr.PpOcrEngine
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
- * Camera viewfinder that replaces the keys. Capture reads exactly what the viewfinder shows with
- * PP-OCRv6 on the CPU and hands the text back; the camera and model live only while it is shown.
+ * Camera viewfinder that replaces the keys. Capture reads exactly what the viewfinder shows, either
+ * with PP-OCRv6 on the CPU or with the saved AI model chosen for Scan text, and hands the text back.
+ * The camera and on-device model live only while it is shown.
  */
 class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwner {
     interface Callback {
@@ -62,6 +74,9 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
     private var fixedHeightPx = 0
     private var downloading = false
     private var active = false
+    private var engineMode = ScanEngine.Device
+    private var aiModel: KeyboardSettings.AgentProfile? = null
+    private var fallbackToDevice = true
 
     private val previewView = PreviewView(context).apply {
         implementationMode = PreviewView.ImplementationMode.COMPATIBLE
@@ -110,6 +125,17 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         background = pill(Color.argb(150, 0, 0, 0))
         setOnClickListener { toggleTorch() }
     }
+    private val deviceEngineButton = engineSegment("On device") { setEngine(ScanEngine.Device) }
+    private val aiEngineButton = engineSegment("AI") { setEngine(ScanEngine.Ai) }
+    private val engineToggle = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        background = pill(Color.argb(150, 0, 0, 0))
+        setPadding(context.dp(3), context.dp(3), context.dp(3), context.dp(3))
+        addView(deviceEngineButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
+        addView(aiEngineButton, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.MATCH_PARENT))
+        visibility = GONE
+    }
+
     private val permissionButton = TextView(context).apply {
         text = "Allow camera access"
         setTextColor(ImeColors.TEXT)
@@ -153,6 +179,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             addView(frozenFrame, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(closeButton, LayoutParams(context.dp(44), context.dp(44), Gravity.TOP or Gravity.START).margins(8))
             addView(torchButton, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44), Gravity.TOP or Gravity.END).margins(8))
+            addView(engineToggle, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(40), Gravity.TOP or Gravity.CENTER_HORIZONTAL).margins(10))
             addView(statusText, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(permissionButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(downloadButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
@@ -182,13 +209,18 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         showStatus(null)
         permissionButton.visibility = GONE
         downloadButton.visibility = GONE
+        aiModel = KeyboardSettings.readScanProfile(context)?.takeIf { it.isReady() && it.imageInput != false }
+        engineMode = if (aiModel != null) KeyboardSettings.readScanEngine(context) else ScanEngine.Device
+        fallbackToDevice = KeyboardSettings.readScanFallback(context)
+        updateEngineToggle()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             permissionButton.visibility = VISIBLE
             shutterButton.visibility = GONE
             torchButton.visibility = GONE
+            engineToggle.visibility = GONE
             return
         }
-        if (!OcrModelStore.isReady(context)) {
+        if (engineMode == ScanEngine.Device && !OcrModelStore.isReady(context)) {
             shutterButton.visibility = GONE
             torchButton.visibility = GONE
             if (downloading) showStatus("Downloading text scanner…") else downloadButton.visibility = VISIBLE
@@ -202,6 +234,16 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             // Takes the frame already buffered at the tap (falls back to minimum latency where
             // unsupported), so moving the phone right after tapping doesn't blur the capture.
             created.imageCaptureMode = ImageCapture.CAPTURE_MODE_ZERO_SHUTTER_LAG
+            // ~3 MP is enough: the viewfinder crop of a 2048x1536 still is ~1536 px wide, about the
+            // 1568 px AI models take, and fine for PP-OCR. Full sensor stills only cost time and memory.
+            created.imageCaptureResolutionSelector = ResolutionSelector.Builder()
+                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                .setResolutionStrategy(
+                    ResolutionStrategy(CAPTURE_SIZE, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
+                )
+                .build()
+            created.isPinchToZoomEnabled = true
+            created.isTapToFocusEnabled = true
             controller = created
         }
         camera.bindToLifecycle(this)
@@ -209,7 +251,39 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         torchOn = false
         updateTorchLabel()
 
-        worker.execute { ensureEngine() }
+        if (OcrModelStore.isReady(context)) worker.execute { ensureEngine() }
+    }
+
+    private fun setEngine(engine: ScanEngine) {
+        if (busy || engine == engineMode) return
+        KeyboardSettings.saveScanEngine(context, engine)
+        // Re-runs the setup: on-device mode may still need its model downloaded.
+        stop()
+        start()
+    }
+
+    private fun updateEngineToggle() {
+        val model = aiModel
+        engineToggle.visibility = if (model == null) GONE else VISIBLE
+        aiEngineButton.text = model?.name ?: "AI"
+        listOf(deviceEngineButton to ScanEngine.Device, aiEngineButton to ScanEngine.Ai).forEach { (button, engine) ->
+            val selected = engine == engineMode
+            button.setTextColor(if (selected) Color.BLACK else Color.WHITE)
+            button.background = if (selected) pill(Color.WHITE) else null
+        }
+    }
+
+    private fun engineSegment(label: String, onClick: () -> Unit) = TextView(context).apply {
+        text = label
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        gravity = Gravity.CENTER
+        maxLines = 1
+        ellipsize = android.text.TextUtils.TruncateAt.END
+        maxWidth = context.dp(140)
+        isClickable = true
+        isFocusable = false
+        setPadding(context.dp(12), 0, context.dp(12), 0)
+        setOnClickListener { onClick() }
     }
 
     /** One-time model download; keeps going if the panel closes, and resumes the camera if it is still open. */
@@ -286,11 +360,15 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             }
 
             override fun onCaptureSuccess(image: ImageProxy) {
+                val model = aiModel.takeIf { engineMode == ScanEngine.Ai }
                 val text = runCatching {
                     val square = image.use { visibleSquare(it) }
-                    val ocr = ensureEngine() ?: error("OCR model unavailable")
-                    ocr.recognize(square).also { square.recycle() }.text.trim()
-                }.onFailure { Log.w(TAG, "OCR failed", it) }
+                    try {
+                        if (model != null) readWithAi(token, model, square) else readOnDevice(square)
+                    } finally {
+                        square.recycle()
+                    }
+                }.onFailure { Log.w(TAG, "Scan failed", it) }
                 mainHandler.post { finishCapture(token, text) }
             }
 
@@ -300,6 +378,27 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             }
         })
     }
+
+    /** Worker thread only. */
+    private fun readOnDevice(square: Bitmap): String {
+        val ocr = ensureEngine() ?: error("OCR model unavailable")
+        return ocr.recognize(square).text.trim()
+    }
+
+    /** Worker thread only. Falls back to PP-OCRv6 when allowed and the AI request fails. */
+    private fun readWithAi(token: Int, model: KeyboardSettings.AgentProfile, square: Bitmap): String {
+        mainHandler.post { if (token == generation) showStatus("Reading with ${model.name}…") }
+        return try {
+            AiModelClient.readTextFromImage(model.toProviderSettings(), jpegForAi(square))
+        } catch (error: Exception) {
+            Log.w(TAG, "AI scan failed", error)
+            if (!fallbackToDevice || !OcrModelStore.isReady(context)) throw AiScanException(model.name, error)
+            mainHandler.post { if (token == generation) showStatus("${model.name} failed. Reading on this phone…") }
+            readOnDevice(square)
+        }
+    }
+
+    private class AiScanException(val modelName: String, cause: Throwable) : Exception(cause)
 
     private fun finishCapture(token: Int, result: Result<String>) {
         if (token != generation) return
@@ -315,9 +414,11 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
                     callback?.onOcrTextCaptured(text)
                 }
             },
-            onFailure = {
+            onFailure = { error ->
                 unfreeze()
-                showStatus("Couldn't read that. Try again.")
+                showStatus(
+                    if (error is AiScanException) "Couldn't reach ${error.modelName}. Try again." else "Couldn't read that. Try again.",
+                )
             },
         )
     }
@@ -377,11 +478,14 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             if (bitmap.width == image.width && bitmap.height == image.height &&
                 (crop.width() != image.width || crop.height() != image.height)
             ) {
-                bitmap = Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height())
+                bitmap = replace(bitmap, Bitmap.createBitmap(bitmap, crop.left, crop.top, crop.width(), crop.height()))
             }
             val rotation = image.imageInfo.rotationDegrees
             if (rotation != 0) {
-                bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+                bitmap = replace(
+                    bitmap,
+                    Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(rotation.toFloat()) }, true),
+                )
             }
             val longest = max(bitmap.width, bitmap.height)
             val scale = if (longest > MAX_SIDE) MAX_SIDE.toFloat() / longest else 1f
@@ -399,6 +503,30 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             return square
         }
 
+        /** Frees [old] right away instead of waiting for GC; each full-size copy is several MB. */
+        private fun replace(old: Bitmap, new: Bitmap): Bitmap {
+            if (new !== old) old.recycle()
+            return new
+        }
+
+        val CAPTURE_SIZE = Size(2048, 1536)
         const val MAX_SIDE = 2400
+        const val AI_MAX_SIDE = 1568
+        const val AI_JPEG_QUALITY = 85
+
+        /** The capture downscaled for an AI model: long side 1568 px, JPEG. */
+        fun jpegForAi(square: Bitmap): ByteArray {
+            val scale = min(1f, AI_MAX_SIDE.toFloat() / max(square.width, square.height))
+            val scaled = if (scale < 1f) {
+                Bitmap.createScaledBitmap(square, (square.width * scale).roundToInt(), (square.height * scale).roundToInt(), true)
+            } else {
+                square
+            }
+            return ByteArrayOutputStream().use { out ->
+                scaled.compress(Bitmap.CompressFormat.JPEG, AI_JPEG_QUALITY, out)
+                if (scaled !== square) scaled.recycle()
+                out.toByteArray()
+            }
+        }
     }
 }

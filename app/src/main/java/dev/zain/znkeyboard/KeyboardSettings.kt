@@ -87,6 +87,10 @@ object KeyboardSettings {
     private const val KEY_AGENT_REASONING_TEXT_ENABLED = "agent_reasoning_text_enabled"
     private const val KEY_AGENT_PROFILES = "agent_profiles"
     private const val KEY_ACTIVE_AGENT_PROFILE_ID = "active_agent_profile_id"
+    private const val KEY_AI_MODELS_MIGRATED = "ai_models_migrated"
+    private const val KEY_SCAN_ENGINE = "scan_engine"
+    private const val KEY_SCAN_PROFILE_ID = "scan_profile_id"
+    private const val KEY_SCAN_FALLBACK = "scan_fallback"
     private const val KEY_AGENT_API_KEY_LEGACY = "agent_api_key"
     private const val KEY_AGENT_API_KEY_CIPHERTEXT = "agent_api_key_ciphertext"
     private const val KEY_AGENT_API_KEY_IV = "agent_api_key_iv"
@@ -109,6 +113,7 @@ object KeyboardSettings {
         UpperRowKeyOption("save_text", "Save snippet"),
         UpperRowKeyOption("hindi", "Hindi अ"),
         UpperRowKeyOption("ocr", "Scan text"),
+        UpperRowKeyOption("voice", "Voice typing"),
     )
 
     val CONTROL_KEY_OPTIONS = listOf(
@@ -612,7 +617,7 @@ object KeyboardSettings {
     fun readAgentProviderType(context: Context): AgentProviderType {
         val stored = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_AGENT_PROVIDER_TYPE, null)
-        return AgentProviderType.entries.firstOrNull { it.id == stored } ?: AgentProviderType.OpenAiCompatible
+        return AgentProviderType.fromId(stored) ?: AgentProviderType.OpenAiCompatible
     }
 
     fun saveAgentProviderType(context: Context, providerType: AgentProviderType) {
@@ -787,7 +792,6 @@ object KeyboardSettings {
             providerType = providerType,
             baseUrl = when (providerType) {
                 AgentProviderType.OpenRouter -> OPENROUTER_API_BASE_URL
-                AgentProviderType.NanbeigeLlamaCpp,
                 AgentProviderType.OpenAiCompatible -> readAgentApiBaseUrl(context)
             },
             model = readAgentModel(context),
@@ -810,9 +814,7 @@ object KeyboardSettings {
                     val id = item.optString("id").trim()
                     val name = normalizeAgentProfileName(item.optString("name"))
                     if (!isValidAgentProfileId(id) || name.isBlank()) continue
-                    val providerType = AgentProviderType.entries.firstOrNull {
-                        it.id == item.optString("providerType")
-                    } ?: continue
+                    val providerType = AgentProviderType.fromId(item.optString("providerType")) ?: continue
                     val reasoningMode = AgentReasoningMode.entries.firstOrNull {
                         it.id == item.optString("reasoningMode")
                     } ?: AgentReasoningMode.Off
@@ -828,6 +830,7 @@ object KeyboardSettings {
                             reasoningTextEnabled = item.optBoolean("reasoningTextEnabled", false),
                             apiKey = readAgentProfileApiKey(context, id),
                             apiKeyLocked = readAgentProfileApiKeyLocked(context, id),
+                            imageInput = item.optImageInput(),
                         ),
                     )
                 }
@@ -892,15 +895,125 @@ object KeyboardSettings {
         return profile
     }
 
+    /** Deletes a saved model; Rewrite and Scan text move to another model if they used it. */
     fun deleteAgentProfile(context: Context, profileId: String) {
         val profiles = readAgentProfiles(context)
         if (profiles.none { it.id == profileId }) return
         val wasActive = readActiveAgentProfileId(context) == profileId
-        saveAgentProfiles(context, profiles.filterNot { it.id == profileId })
+        val wasScan = readScanProfileId(context) == profileId
+        val remaining = profiles.filterNot { it.id == profileId }
+        saveAgentProfiles(context, remaining)
         clearAgentProfileSecret(context, profileId)
         if (wasActive) {
-            saveActiveAgentProfileId(context, "")
+            remaining.firstOrNull()?.let { activateAgentProfile(context, it.id) }
+                ?: saveActiveAgentProfileId(context, "")
         }
+        if (wasScan) {
+            saveScanProfileId(context, (remaining.firstOrNull { it.imageInput != false } ?: remaining.firstOrNull())?.id.orEmpty())
+        }
+    }
+
+    /**
+     * Saved AI models are the source of truth for Rewrite and Scan text. On first use, the older
+     * "current settings" become a saved model (unless a saved profile already matches them).
+     */
+    fun readAiModels(context: Context): List<AgentProfile> {
+        migrateAiModelsIfNeeded(context)
+        return readAgentProfiles(context)
+    }
+
+    /** Inserts (blank id) or updates a saved model. Returns null if the name clashes or the list is full. */
+    fun saveAiModel(context: Context, model: AgentProfile): AgentProfile? {
+        val profiles = readAgentProfiles(context)
+        val isNew = model.id.isBlank() || profiles.none { it.id == model.id }
+        val name = normalizeAgentProfileName(model.name.ifBlank { model.model.substringAfterLast('/') })
+        if (name.isBlank()) return null
+        if (profiles.any { it.id != model.id && it.name.equals(name, ignoreCase = true) }) return null
+        if (isNew && profiles.size >= MAX_AGENT_PROFILES) return null
+        val saved = model.copy(
+            id = if (isNew) UUID.randomUUID().toString() else model.id,
+            name = name,
+            baseUrl = if (model.providerType == AgentProviderType.OpenRouter) "" else model.baseUrl.trim(),
+            model = model.model.trim(),
+        )
+        saveAgentProfiles(context, if (isNew) profiles + saved else profiles.map { if (it.id == saved.id) saved else it })
+        if (readActiveAgentProfileId(context) == saved.id || readAgentProfiles(context).size == 1) {
+            activateAgentProfile(context, saved.id)
+        }
+        return saved
+    }
+
+    fun normalizedUniqueModelName(context: Context, base: String, excludingId: String = ""): String {
+        val names = readAgentProfiles(context).filter { it.id != excludingId }.map { it.name.lowercase() }.toSet()
+        val root = normalizeAgentProfileName(base).ifBlank { "Model" }
+        if (root.lowercase() !in names) return root
+        for (n in 2..99) {
+            val candidate = normalizeAgentProfileName("$root $n")
+            if (candidate.lowercase() !in names) return candidate
+        }
+        return root
+    }
+
+    private fun migrateAiModelsIfNeeded(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        if (prefs.getBoolean(KEY_AI_MODELS_MIGRATED, false)) return
+        val current = readAgentProviderSettings(context)
+        val profiles = readAgentProfiles(context)
+        if (current.model.isNotBlank()) {
+            val match = profiles.firstOrNull {
+                it.providerType == current.providerType &&
+                    it.model == current.model &&
+                    it.apiKey == current.apiKey &&
+                    (current.providerType == AgentProviderType.OpenRouter || it.baseUrl.trimEnd('/') == current.baseUrl.trimEnd('/'))
+            }
+            when {
+                match != null -> saveActiveAgentProfileId(context, match.id)
+                profiles.size < MAX_AGENT_PROFILES -> {
+                    val created = agentProfileFromCurrent(
+                        context,
+                        id = UUID.randomUUID().toString(),
+                        name = normalizedUniqueModelName(context, current.model.substringAfterLast('/')),
+                    )
+                    saveAgentProfiles(context, profiles + created)
+                    saveActiveAgentProfileId(context, created.id)
+                }
+            }
+        } else if (readActiveAgentProfileId(context).isBlank()) {
+            profiles.firstOrNull()?.let { activateAgentProfile(context, it.id) }
+        }
+        prefs.edit().putBoolean(KEY_AI_MODELS_MIGRATED, true).apply()
+    }
+
+    fun readScanEngine(context: Context): ScanEngine {
+        val id = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_SCAN_ENGINE, null)
+        return ScanEngine.entries.firstOrNull { it.id == id } ?: ScanEngine.Device
+    }
+
+    fun saveScanEngine(context: Context, engine: ScanEngine) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_SCAN_ENGINE, engine.id).apply()
+    }
+
+    /** The saved model Scan text uses in AI mode, or "" when none is set or it was deleted. */
+    fun readScanProfileId(context: Context): String {
+        val id = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_SCAN_PROFILE_ID, "").orEmpty()
+        return id.takeIf { wanted -> readAgentProfiles(context).any { it.id == wanted } }.orEmpty()
+    }
+
+    fun saveScanProfileId(context: Context, profileId: String) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_SCAN_PROFILE_ID, profileId).apply()
+    }
+
+    fun readScanFallback(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_SCAN_FALLBACK, true)
+
+    fun saveScanFallback(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_SCAN_FALLBACK, enabled).apply()
+    }
+
+    /** Scan text's AI model as a saved profile, or null when none is chosen. */
+    fun readScanProfile(context: Context): AgentProfile? {
+        val id = readScanProfileId(context)
+        return readAgentProfiles(context).firstOrNull { it.id == id }
     }
 
     fun normalizeAgentProfileName(name: String): String {
@@ -1098,6 +1211,13 @@ object KeyboardSettings {
                             .put("profiles", agentProfilesJson(readAgentProfiles(context)))
                             .put("activeProfileId", readActiveAgentProfileId(context)),
                     )
+                    .put(
+                        "scan",
+                        JSONObject()
+                            .put("engine", readScanEngine(context).id)
+                            .put("profileId", readScanProfileId(context))
+                            .put("fallback", readScanFallback(context)),
+                    )
                     .put("clipboardHistory", clipboardHistoryJson(ClipboardHistoryStore.read(context)))
                     .put("learnedTyping", learnedTypingJson(AdaptiveTypingEngine.readLearnedData(context)))
                     .put("hindiPicks", hindiPicksJson(HindiTransliterationEngine.readLearnedPicks(context))),
@@ -1229,9 +1349,7 @@ object KeyboardSettings {
                     val id = item.optString("id").trim()
                     val name = normalizeAgentProfileName(item.optString("name"))
                     if (!isValidAgentProfileId(id) || name.isBlank()) continue
-                    val profileProviderType = AgentProviderType.entries.firstOrNull {
-                        it.id == item.optString("providerType")
-                    } ?: continue
+                    val profileProviderType = AgentProviderType.fromId(item.optString("providerType")) ?: continue
                     val profileReasoningMode = AgentReasoningMode.entries.firstOrNull {
                         it.id == item.optString("reasoningMode")
                     } ?: AgentReasoningMode.Off
@@ -1248,6 +1366,7 @@ object KeyboardSettings {
                             reasoningTextEnabled = item.optBoolean("reasoningTextEnabled", false),
                             apiKey = profileSecret?.optString("value").orEmpty(),
                             apiKeyLocked = profileSecret?.optBoolean("locked", false) ?: false,
+                            imageInput = item.optImageInput(),
                         ),
                     )
                 }
@@ -1326,6 +1445,13 @@ object KeyboardSettings {
         restoredAgentProfiles?.let { profiles ->
             replaceAgentProfiles(context, profiles, restoredActiveProfileId)
         }
+        settings.optJSONObject("scan")?.let { scan ->
+            ScanEngine.entries.firstOrNull { it.id == scan.optString("engine") }?.let { saveScanEngine(context, it) }
+            saveScanProfileId(context, scan.optString("profileId").trim())
+            saveScanFallback(context, scan.optBoolean("fallback", true))
+        }
+        // Restored current settings may not match a saved model yet; fold them in on next read.
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_AI_MODELS_MIGRATED, false).apply()
         restoredGifAppKey?.let { appKey ->
             saveGifAppKey(context, appKey)
             restoredGifAppKeyLocked?.let { locked -> saveGifAppKeyLocked(context, locked) }
@@ -1569,7 +1695,8 @@ object KeyboardSettings {
                         .put("model", profile.model)
                         .put("openRouterProviderSlug", profile.openRouterProviderSlug)
                         .put("reasoningMode", profile.reasoningMode.id)
-                        .put("reasoningTextEnabled", profile.reasoningTextEnabled),
+                        .put("reasoningTextEnabled", profile.reasoningTextEnabled)
+                        .apply { profile.imageInput?.let { put("imageInput", it) } },
                 )
             }
         }
@@ -1587,6 +1714,8 @@ object KeyboardSettings {
             }
         }
     }
+
+    private fun JSONObject.optImageInput(): Boolean? = if (has("imageInput")) optBoolean("imageInput") else null
 
     private fun stringArrayJson(values: List<String>): JSONArray {
         return JSONArray().apply {
@@ -1790,8 +1919,16 @@ object KeyboardSettings {
         val label: String,
     ) {
         OpenRouter("openrouter", "OpenRouter"),
-        NanbeigeLlamaCpp("nanbeige_llama_cpp", "Nanbeige llama.cpp"),
         OpenAiCompatible("openai_compatible", "OpenAI compatible"),
+        ;
+
+        companion object {
+            /** Also maps the removed Nanbeige llama.cpp type to OpenAI compatible, so old settings survive. */
+            fun fromId(id: String?): AgentProviderType? = when (id) {
+                "nanbeige_llama_cpp" -> OpenAiCompatible
+                else -> entries.firstOrNull { it.id == id }
+            }
+        }
     }
 
     enum class AgentReasoningMode(
@@ -1868,7 +2005,24 @@ object KeyboardSettings {
         val reasoningTextEnabled: Boolean,
         val apiKey: String,
         val apiKeyLocked: Boolean,
-    )
+        /** Whether the model accepted an image in Test connection; null until tested. */
+        val imageInput: Boolean? = null,
+    ) {
+        fun toProviderSettings(): AgentProviderSettings = AgentProviderSettings(
+            providerType = providerType,
+            baseUrl = if (providerType == AgentProviderType.OpenRouter) OPENROUTER_API_BASE_URL else baseUrl,
+            model = model,
+            apiKey = apiKey,
+            openRouterProviderSlug = openRouterProviderSlug,
+            reasoningMode = reasoningMode,
+            reasoningTextEnabled = reasoningTextEnabled,
+        )
+    }
+
+    enum class ScanEngine(val id: String) {
+        Device("device"),
+        Ai("ai"),
+    }
 
     data class GifProviderSettings(
         val baseUrl: String,

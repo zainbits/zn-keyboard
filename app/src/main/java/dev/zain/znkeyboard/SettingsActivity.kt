@@ -90,6 +90,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -129,7 +130,7 @@ import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
 import dev.zain.znkeyboard.liquidnav.LiquidNavBar
 import dev.zain.znkeyboard.ocrlab.OcrLabActivity
-import dev.zain.znkeyboard.ocrlab.OcrLabSection
+import dev.zain.znkeyboard.voice.VoiceTypingSection
 import dev.zain.znkeyboard.liquidnav.LiquidNavItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -150,23 +151,26 @@ class SettingsActivity : ComponentActivity() {
         setContent {
             ZnKeyboardTheme {
                 val stateHolder = rememberSaveableStateHolder()
-                var shortcutsOpen by rememberSaveable { mutableStateOf(false) }
+                var openScreen by rememberSaveable { mutableStateOf("main") }
                 AnimatedContent(
-                    targetState = shortcutsOpen,
+                    targetState = openScreen,
                     transitionSpec = {
-                        if (targetState) {
+                        if (targetState != "main") {
                             (slideInHorizontally { it } + fadeIn()) togetherWith (slideOutHorizontally { -it / 4 } + fadeOut())
                         } else {
                             (slideInHorizontally { -it / 4 } + fadeIn()) togetherWith (slideOutHorizontally { it } + fadeOut())
                         }
                     },
                     label = "settings-screen",
-                ) { open ->
-                    if (open) {
-                        ShortcutsScreen(onBack = { shortcutsOpen = false })
-                    } else {
-                        stateHolder.SaveableStateProvider("settings") {
-                            SettingsScreen(onOpenShortcuts = { shortcutsOpen = true })
+                ) { screen ->
+                    when (screen) {
+                        "shortcuts" -> ShortcutsScreen(onBack = { openScreen = "main" })
+                        "ai_models" -> AiModelsScreen(onBack = { openScreen = "main" })
+                        else -> stateHolder.SaveableStateProvider("settings") {
+                            SettingsScreen(
+                                onOpenShortcuts = { openScreen = "shortcuts" },
+                                onOpenAiModels = { openScreen = "ai_models" },
+                            )
                         }
                     }
                 }
@@ -177,7 +181,7 @@ class SettingsActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
+private fun SettingsScreen(onOpenShortcuts: () -> Unit, onOpenAiModels: () -> Unit) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
@@ -191,17 +195,7 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
     var gifApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readGifApiBaseUrl(context)) }
     var gifAppKey by remember { mutableStateOf(KeyboardSettings.readGifAppKey(context)) }
     var gifAppKeyLocked by remember { mutableStateOf(KeyboardSettings.readGifAppKeyLocked(context)) }
-    var agentModeEnabled by remember { mutableStateOf(KeyboardSettings.readAgentModeEnabled(context)) }
-    var agentProviderType by remember { mutableStateOf(KeyboardSettings.readAgentProviderType(context)) }
-    var agentApiBaseUrl by remember { mutableStateOf(KeyboardSettings.readAgentApiBaseUrl(context)) }
-    var agentModel by remember { mutableStateOf(KeyboardSettings.readAgentModel(context)) }
-    var openRouterProviderSlug by remember { mutableStateOf(KeyboardSettings.readOpenRouterProviderSlug(context)) }
-    var agentReasoningMode by remember { mutableStateOf(KeyboardSettings.readAgentReasoningMode(context)) }
-    var agentReasoningTextEnabled by remember { mutableStateOf(KeyboardSettings.readAgentReasoningTextEnabled(context)) }
-    var agentApiKey by remember { mutableStateOf(KeyboardSettings.readAgentApiKey(context, agentProviderType)) }
-    var agentApiKeyLocked by remember { mutableStateOf(KeyboardSettings.readAgentApiKeyLocked(context, agentProviderType)) }
-    var agentProfiles by remember { mutableStateOf(KeyboardSettings.readAgentProfiles(context)) }
-    var activeAgentProfileId by remember { mutableStateOf(KeyboardSettings.readActiveAgentProfileId(context)) }
+    var aiRefreshKey by remember { mutableIntStateOf(0) }
     var textSnippets by remember { mutableStateOf(KeyboardSettings.readTextSnippets(context)) }
     var clipboardHistoryCount by remember { mutableStateOf(ClipboardHistoryStore.read(context).size) }
     var backupPasswordDialogMode by remember { mutableStateOf<BackupPasswordDialogMode?>(null) }
@@ -214,7 +208,6 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
     val scope = rememberCoroutineScope()
 
     fun refreshSettingsFromStorage() {
-        val nextProviderType = KeyboardSettings.readAgentProviderType(context)
         heightScale = KeyboardSettings.readHeightScale(context)
         bottomPaddingDp = KeyboardSettings.readBottomPaddingDp(context)
         functionKeyBackgroundsEnabled = KeyboardSettings.readFunctionKeyBackgroundsEnabled(context)
@@ -224,17 +217,7 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
         gifApiBaseUrl = KeyboardSettings.readGifApiBaseUrl(context)
         gifAppKey = KeyboardSettings.readGifAppKey(context)
         gifAppKeyLocked = KeyboardSettings.readGifAppKeyLocked(context)
-        agentModeEnabled = KeyboardSettings.readAgentModeEnabled(context)
-        agentProviderType = nextProviderType
-        agentApiBaseUrl = KeyboardSettings.readAgentApiBaseUrl(context)
-        agentModel = KeyboardSettings.readAgentModel(context)
-        openRouterProviderSlug = KeyboardSettings.readOpenRouterProviderSlug(context)
-        agentReasoningMode = KeyboardSettings.readAgentReasoningMode(context)
-        agentReasoningTextEnabled = KeyboardSettings.readAgentReasoningTextEnabled(context)
-        agentApiKey = KeyboardSettings.readAgentApiKey(context, nextProviderType)
-        agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, nextProviderType)
-        agentProfiles = KeyboardSettings.readAgentProfiles(context)
-        activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
+        aiRefreshKey++
         textSnippets = KeyboardSettings.readTextSnippets(context)
         clipboardHistoryCount = ClipboardHistoryStore.read(context).size
     }
@@ -436,79 +419,10 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
                 }
 
                 SettingsDestination.Tools -> {
-                    AgentModeSection(
-                        agentModeEnabled = agentModeEnabled,
-                        agentProviderType = agentProviderType,
-                        agentApiBaseUrl = agentApiBaseUrl,
-                        agentModel = agentModel,
-                        openRouterProviderSlug = openRouterProviderSlug,
-                        agentReasoningMode = agentReasoningMode,
-                        agentReasoningTextEnabled = agentReasoningTextEnabled,
-                        agentApiKey = agentApiKey,
-                        agentApiKeyLocked = agentApiKeyLocked,
-                        agentProfiles = agentProfiles,
-                        activeAgentProfileId = activeAgentProfileId,
-                        onAgentModeEnabledChange = {
-                            agentModeEnabled = it
-                            KeyboardSettings.saveAgentModeEnabled(context, it)
-                        },
-                        onAgentProviderTypeChange = {
-                            agentProviderType = it
-                            KeyboardSettings.saveAgentProviderType(context, it)
-                            agentApiKey = KeyboardSettings.readAgentApiKey(context, it)
-                            agentApiKeyLocked = KeyboardSettings.readAgentApiKeyLocked(context, it)
-                        },
-                        onAgentApiBaseUrlChange = {
-                            agentApiBaseUrl = it
-                            KeyboardSettings.saveAgentApiBaseUrl(context, it)
-                        },
-                        onAgentModelChange = {
-                            agentModel = it
-                            KeyboardSettings.saveAgentModel(context, it)
-                        },
-                        onOpenRouterProviderSlugChange = {
-                            openRouterProviderSlug = it
-                            KeyboardSettings.saveOpenRouterProviderSlug(context, it)
-                        },
-                        onAgentReasoningModeChange = {
-                            agentReasoningMode = it
-                            KeyboardSettings.saveAgentReasoningMode(context, it)
-                        },
-                        onAgentReasoningTextEnabledChange = {
-                            agentReasoningTextEnabled = it
-                            KeyboardSettings.saveAgentReasoningTextEnabled(context, it)
-                        },
-                        onAgentApiKeyChange = {
-                            agentApiKey = it
-                            KeyboardSettings.saveAgentApiKey(context, agentProviderType, it)
-                            if (it.isBlank() && agentApiKeyLocked) {
-                                agentApiKeyLocked = false
-                            }
-                        },
-                        onAgentApiKeyLockedChange = {
-                            agentApiKeyLocked = it
-                            KeyboardSettings.saveAgentApiKeyLocked(context, agentProviderType, it)
-                        },
-                        onCreateAgentProfile = { name ->
-                            val created = KeyboardSettings.createAgentProfile(context, name)
-                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
-                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
-                            created != null
-                        },
-                        onUpdateAgentProfile = {
-                            KeyboardSettings.updateAgentProfileFromCurrent(context, activeAgentProfileId)
-                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
-                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
-                        },
-                        onActivateAgentProfile = { profileId ->
-                            KeyboardSettings.activateAgentProfile(context, profileId)
-                            refreshSettingsFromStorage()
-                        },
-                        onDeleteAgentProfile = { profileId ->
-                            KeyboardSettings.deleteAgentProfile(context, profileId)
-                            agentProfiles = KeyboardSettings.readAgentProfiles(context)
-                            activeAgentProfileId = KeyboardSettings.readActiveAgentProfileId(context)
-                        },
+                    AiToolsSections(
+                        refreshKey = aiRefreshKey,
+                        onOpenAiModels = onOpenAiModels,
+                        onOpenOcrLab = { context.startActivity(Intent(context, OcrLabActivity::class.java)) },
                     )
 
                     GifSearchSection(
@@ -548,9 +462,7 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit) {
                         onCustomEmojiTagsChange = ::updateCustomEmojiTags,
                     )
 
-                    OcrLabSection(
-                        onOpen = { context.startActivity(Intent(context, OcrLabActivity::class.java)) },
-                    )
+                    VoiceTypingSection()
                 }
 
                 SettingsDestination.Saved -> {
@@ -1720,329 +1632,7 @@ private fun CustomEmojiTagRow(
 }
 
 @Composable
-private fun AgentModeSection(
-    agentModeEnabled: Boolean,
-    agentProviderType: KeyboardSettings.AgentProviderType,
-    agentApiBaseUrl: String,
-    agentModel: String,
-    openRouterProviderSlug: String,
-    agentReasoningMode: KeyboardSettings.AgentReasoningMode,
-    agentReasoningTextEnabled: Boolean,
-    agentApiKey: String,
-    agentApiKeyLocked: Boolean,
-    agentProfiles: List<KeyboardSettings.AgentProfile>,
-    activeAgentProfileId: String,
-    onAgentModeEnabledChange: (Boolean) -> Unit,
-    onAgentProviderTypeChange: (KeyboardSettings.AgentProviderType) -> Unit,
-    onAgentApiBaseUrlChange: (String) -> Unit,
-    onAgentModelChange: (String) -> Unit,
-    onOpenRouterProviderSlugChange: (String) -> Unit,
-    onAgentReasoningModeChange: (KeyboardSettings.AgentReasoningMode) -> Unit,
-    onAgentReasoningTextEnabledChange: (Boolean) -> Unit,
-    onAgentApiKeyChange: (String) -> Unit,
-    onAgentApiKeyLockedChange: (Boolean) -> Unit,
-    onCreateAgentProfile: (String) -> Boolean,
-    onUpdateAgentProfile: () -> Unit,
-    onActivateAgentProfile: (String) -> Unit,
-    onDeleteAgentProfile: (String) -> Unit,
-) {
-    SettingsSectionCard {
-        SettingsSectionHeader(
-            title = "Rewrite",
-            subtitle = "Controls the Rewrite button in the tools row.",
-            trailingContent = {
-                Switch(
-                    checked = agentModeEnabled,
-                    onCheckedChange = onAgentModeEnabledChange,
-                )
-            },
-        )
-
-        Text(
-            text = "Text is sent directly from this keyboard to your configured provider. Rewrite is disabled in password fields.",
-            color = ZnKeyboardColors.Muted,
-            style = MaterialTheme.typography.bodySmall,
-        )
-
-        AgentProfiles(
-            profiles = agentProfiles,
-            activeProfileId = activeAgentProfileId,
-            onCreateProfile = onCreateAgentProfile,
-            onUpdateProfile = onUpdateAgentProfile,
-            onActivateProfile = onActivateAgentProfile,
-            onDeleteProfile = onDeleteAgentProfile,
-        )
-
-        ProviderTypeSelector(
-            providerType = agentProviderType,
-            onProviderTypeChange = onAgentProviderTypeChange,
-        )
-
-        if (agentProviderType != KeyboardSettings.AgentProviderType.OpenRouter) {
-            OutlinedTextField(
-                value = agentApiBaseUrl,
-                onValueChange = onAgentApiBaseUrlChange,
-                label = { Text("API base URL") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (agentProviderType == KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp) {
-                Text(
-                    text = "For the Nanbeige llama.cpp fork. Uses its compatible structured-output request format.",
-                    color = ZnKeyboardColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        } else {
-            Text(
-                text = "OpenRouter endpoint is managed automatically. Pick a model first, then optionally pin a provider for that model.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-
-        ModelSelectorField(
-            providerType = agentProviderType,
-            apiBaseUrl = agentApiBaseUrl,
-            apiKey = agentApiKey,
-            value = agentModel,
-            onValueChange = onAgentModelChange,
-        )
-
-        if (agentProviderType == KeyboardSettings.AgentProviderType.OpenRouter) {
-            OpenRouterProviderSelector(
-                modelId = agentModel,
-                apiKey = agentApiKey,
-                value = openRouterProviderSlug,
-                onValueChange = onOpenRouterProviderSlugChange,
-            )
-        }
-
-        ReasoningControls(
-            providerType = agentProviderType,
-            reasoningMode = agentReasoningMode,
-            reasoningTextEnabled = agentReasoningTextEnabled,
-            onReasoningModeChange = onAgentReasoningModeChange,
-            onReasoningTextEnabledChange = onAgentReasoningTextEnabledChange,
-        )
-
-        LockableSecretOutlinedTextField(
-            value = agentApiKey,
-            onValueChange = onAgentApiKeyChange,
-            label = "API key",
-            locked = agentApiKeyLocked,
-            onLockedChange = onAgentApiKeyLockedChange,
-            emptySupportingText = "Enter your provider's API key.",
-            lockContentDescription = "Lock API key",
-            unlockContentDescription = "Unlock API key",
-        )
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AgentProfiles(
-    profiles: List<KeyboardSettings.AgentProfile>,
-    activeProfileId: String,
-    onCreateProfile: (String) -> Boolean,
-    onUpdateProfile: () -> Unit,
-    onActivateProfile: (String) -> Unit,
-    onDeleteProfile: (String) -> Unit,
-) {
-    var showingCreateDialog by remember { mutableStateOf(false) }
-    var pendingDeleteProfileId by remember { mutableStateOf<String?>(null) }
-    val activeProfile = profiles.firstOrNull { it.id == activeProfileId }
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "Profiles",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = "${profiles.size}/${KeyboardSettings.MAX_AGENT_PROFILES}",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-
-        if (profiles.isEmpty()) {
-            Text(
-                text = "Save this configuration to switch providers and models with one tap.",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.bodySmall,
-            )
-        } else {
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                profiles.forEach { profile ->
-                    InputChip(
-                        selected = profile.id == activeProfileId,
-                        onClick = { onActivateProfile(profile.id) },
-                        label = {
-                            Text(
-                                text = profile.name,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                    )
-                }
-            }
-        }
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Button(
-                onClick = { showingCreateDialog = true },
-                enabled = profiles.size < KeyboardSettings.MAX_AGENT_PROFILES,
-            ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_add_24),
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text("Save new")
-            }
-
-            OutlinedButton(
-                onClick = onUpdateProfile,
-                enabled = activeProfile != null,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = ZnKeyboardColors.OnSurface),
-            ) {
-                Text("Update")
-            }
-
-            TextButton(
-                onClick = { pendingDeleteProfileId = activeProfile?.id },
-                enabled = activeProfile != null,
-            ) {
-                Text(
-                    text = "Delete",
-                    color = if (activeProfile != null) {
-                        ZnKeyboardColors.DeleteContent
-                    } else {
-                        ZnKeyboardColors.Muted
-                    },
-                )
-            }
-        }
-
-        activeProfile?.let { profile ->
-            Text(
-                text = "${profile.providerType.label} · ${profile.model}",
-                color = ZnKeyboardColors.Muted,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-
-    if (showingCreateDialog) {
-        var name by remember { mutableStateOf("") }
-        var saveFailed by remember { mutableStateOf(false) }
-        val normalizedName = KeyboardSettings.normalizeAgentProfileName(name)
-        val duplicateName = profiles.any { it.name.equals(normalizedName, ignoreCase = true) }
-        val canSave = normalizedName.isNotBlank() && !duplicateName
-
-        AlertDialog(
-            onDismissRequest = { showingCreateDialog = false },
-            title = { Text("Save LLM profile") },
-            text = {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = {
-                        name = it.take(KeyboardSettings.MAX_AGENT_PROFILE_NAME_CHARS)
-                        saveFailed = false
-                    },
-                    label = { Text("Profile name") },
-                    supportingText = {
-                        val message = when {
-                            duplicateName -> "A profile with this name already exists."
-                            saveFailed -> "Could not save this profile."
-                            else -> "Examples: Nanbeige, OpenRouter, Work"
-                        }
-                        Text(message)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(
-                        onDone = {
-                            if (canSave) {
-                                if (onCreateProfile(normalizedName)) {
-                                    showingCreateDialog = false
-                                } else {
-                                    saveFailed = true
-                                }
-                            }
-                        },
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            dismissButton = {
-                TextButton(onClick = { showingCreateDialog = false }) {
-                    Text("Cancel")
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (onCreateProfile(normalizedName)) {
-                            showingCreateDialog = false
-                        } else {
-                            saveFailed = true
-                        }
-                    },
-                    enabled = canSave,
-                ) {
-                    Text("Save")
-                }
-            },
-        )
-    }
-
-    pendingDeleteProfileId?.let { profileId ->
-        val profile = profiles.firstOrNull { it.id == profileId }
-        if (profile != null) {
-            AlertDialog(
-                onDismissRequest = { pendingDeleteProfileId = null },
-                title = { Text("Delete ${profile.name}?") },
-                text = { Text("This removes the saved profile and its stored API key.") },
-                dismissButton = {
-                    TextButton(onClick = { pendingDeleteProfileId = null }) {
-                        Text("Cancel")
-                    }
-                },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            pendingDeleteProfileId = null
-                            onDeleteProfile(profile.id)
-                        },
-                    ) {
-                        Text("Delete", color = ZnKeyboardColors.DeleteContent)
-                    }
-                },
-            )
-        }
-    }
-}
-
-@Composable
-private fun OpenRouterProviderSelector(
+internal fun OpenRouterProviderSelector(
     modelId: String,
     apiKey: String,
     value: String,
@@ -2144,7 +1734,7 @@ private fun OpenRouterProviderSelector(
 }
 
 @Composable
-private fun ModelSelectorField(
+internal fun ModelSelectorField(
     providerType: KeyboardSettings.AgentProviderType,
     apiBaseUrl: String,
     apiKey: String,
@@ -2158,7 +1748,6 @@ private fun ModelSelectorField(
     var debouncedQuery by remember { mutableStateOf(value) }
     val effectiveBaseUrl = when (providerType) {
         KeyboardSettings.AgentProviderType.OpenRouter -> KeyboardSettings.OPENROUTER_API_BASE_URL
-        KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp,
         KeyboardSettings.AgentProviderType.OpenAiCompatible -> apiBaseUrl
     }
 
@@ -2364,7 +1953,7 @@ private fun PickerListRow(
 }
 
 @Composable
-private fun ProviderTypeSelector(
+internal fun ProviderTypeSelector(
     providerType: KeyboardSettings.AgentProviderType,
     onProviderTypeChange: (KeyboardSettings.AgentProviderType) -> Unit,
 ) {
@@ -2397,7 +1986,7 @@ private fun ProviderTypeSelector(
 }
 
 @Composable
-private fun ReasoningControls(
+internal fun ReasoningControls(
     providerType: KeyboardSettings.AgentProviderType,
     reasoningMode: KeyboardSettings.AgentReasoningMode,
     reasoningTextEnabled: Boolean,
@@ -2409,8 +1998,6 @@ private fun ReasoningControls(
     val providerHint = when (providerType) {
         KeyboardSettings.AgentProviderType.OpenRouter ->
             "OpenRouter supports the normalized reasoning object and can include or exclude returned reasoning text."
-        KeyboardSettings.AgentProviderType.NanbeigeLlamaCpp ->
-            "Nanbeige llama.cpp uses its fork-specific request format. Off disables template thinking for fast rewrites."
         KeyboardSettings.AgentProviderType.OpenAiCompatible ->
             "OpenAI-compatible servers vary. Effort values are sent manually as reasoning_effort only when selected."
     }

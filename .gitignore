@@ -34,3 +34,6 @@ secrets.properties
 Thumbs.db
 
 /codex-oss-application.md
+
+# Bark voice typing: copied by tools/bark/setup.sh, too large for git
+/app/src/main/assets/bark/

@@ -372,7 +372,7 @@ internal fun ShortcutsScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun BackIconButton(onBack: () -> Unit) {
+internal fun BackIconButton(onBack: () -> Unit) {
     IconButton(onClick = onBack) {
         Icon(
             painter = painterResource(R.drawable.ic_chevron_left_24),

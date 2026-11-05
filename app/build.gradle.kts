@@ -65,9 +65,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    // Stored uncompressed so the ~630 MB Bark model isn't inflated through a zip stream at load.
+    androidResources {
+        noCompress += "onnx"
+    }
 }
 
 dependencies {
+    implementation(libs.onnxruntime.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

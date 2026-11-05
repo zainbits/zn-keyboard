@@ -1,0 +1,990 @@
+<title>Zn Keyboard AI Models</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,600;8..144,700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a working phone (Material You, as the app renders it) beside a narrow review rail; stacks on phones. */
+:root {
+  /* page chrome */
+  --bg: #e7ebf0;
+  --fg: #1b2128;
+  --muted: #56606b;
+  --rule: #c9d0d8;
+  --rail: #f3f5f8;
+  --bezel: #1d2126;
+  /* Material You sample palette (wallpaper seed: slate blue) */
+  --m-surface: #f7f9fd;
+  --m-c: #eceef3;
+  --m-c-high: #e5e8ee;
+  --m-c-highest: #dfe2e8;
+  --m-on: #191c20;
+  --m-on-var: #43474e;
+  --m-outline: #73777f;
+  --m-outline-var: #c3c6cf;
+  --m-primary: #2f628c;
+  --m-on-primary: #ffffff;
+  --m-primary-c: #cfe5ff;
+  --m-on-primary-c: #0b4a73;
+  --m-tertiary-c: #f1dbff;
+  --m-on-tertiary-c: #573e6e;
+  --m-error: #ba1a1a;
+  --m-error-c: #ffdad6;
+  --m-on-error-c: #93000a;
+  --m-ok-c: #c8ecd3;
+  --m-on-ok-c: #0f5130;
+  --m-warn-c: #ffe0b3;
+  --m-on-warn-c: #6a3f00;
+  --m-scrim: rgba(12, 16, 22, 0.42);
+  --cam-a: #2b3138;
+  --cam-b: #151a1f;
+  --paper: #f4f1e9;
+  --ink: #3a3a3a;
+
+  --f-ui: "Roboto Flex", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1013; --fg: #e3e6ea; --muted: #9aa3ad; --rule: #2a3037; --rail: #151a1f; --bezel: #000000;
+    --m-surface: #111418; --m-c: #1d2024; --m-c-high: #272a2f; --m-c-highest: #32353a;
+    --m-on: #e1e2e8; --m-on-var: #c3c6cf; --m-outline: #8d9199; --m-outline-var: #43474e;
+    --m-primary: #9ccbfb; --m-on-primary: #003354; --m-primary-c: #0f4a73; --m-on-primary-c: #cfe5ff;
+    --m-tertiary-c: #573e6e; --m-on-tertiary-c: #f2daff;
+    --m-error: #ffb4ab; --m-error-c: #93000a; --m-on-error-c: #ffdad6;
+    --m-ok-c: #12462a; --m-on-ok-c: #b4f1c8; --m-warn-c: #5a3800; --m-on-warn-c: #ffddb0;
+    --m-scrim: rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1013; --fg: #e3e6ea; --muted: #9aa3ad; --rule: #2a3037; --rail: #151a1f; --bezel: #000000;
+  --m-surface: #111418; --m-c: #1d2024; --m-c-high: #272a2f; --m-c-highest: #32353a;
+  --m-on: #e1e2e8; --m-on-var: #c3c6cf; --m-outline: #8d9199; --m-outline-var: #43474e;
+  --m-primary: #9ccbfb; --m-on-primary: #003354; --m-primary-c: #0f4a73; --m-on-primary-c: #cfe5ff;
+  --m-tertiary-c: #573e6e; --m-on-tertiary-c: #f2daff;
+  --m-error: #ffb4ab; --m-error-c: #93000a; --m-on-error-c: #ffdad6;
+  --m-ok-c: #12462a; --m-on-ok-c: #b4f1c8; --m-warn-c: #5a3800; --m-on-warn-c: #ffddb0;
+  --m-scrim: rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--f-ui);
+  font-size: 15px;
+  line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 40px;
+}
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--m-primary); outline-offset: 2px; }
+
+.wrap { max-width: 1040px; margin: 0 auto; display: flex; gap: 32px; align-items: flex-start; justify-content: center; flex-wrap: wrap; }
+
+/* ---------- review rail ---------- */
+.rail { flex: 1 1 340px; max-width: 520px; min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+.rail h1 { font-size: 26px; line-height: 1.15; font-weight: 650; margin: 0; text-wrap: balance; letter-spacing: -0.01em; }
+.rail .lede { color: var(--muted); margin: 6px 0 0; max-width: 60ch; }
+.eyebrow { font-family: var(--f-mono); font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.seg-page { display: flex; gap: 0; border: 1px solid var(--rule); border-radius: 999px; padding: 3px; background: var(--rail); flex-wrap: wrap; }
+.seg-page button { flex: 1 1 auto; border: 0; background: transparent; padding: 8px 14px; border-radius: 999px; cursor: pointer; font-weight: 550; font-size: 14px; color: var(--muted); }
+.seg-page button[aria-pressed="true"] { background: var(--m-primary-c); color: var(--m-on-primary-c); }
+.jumps { display: flex; flex-wrap: wrap; gap: 8px; }
+.jumps button { border: 1px solid var(--rule); background: var(--rail); border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13.5px; }
+.jumps button[aria-current="true"] { border-color: var(--m-primary); color: var(--m-primary); font-weight: 600; }
+.notes { background: var(--rail); border: 1px solid var(--rule); border-radius: 12px; padding: 16px 18px; }
+.notes h2 { font-size: 15px; margin: 0 0 8px; font-weight: 650; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.notes li { max-width: 62ch; }
+.notes code, .rail code { font-family: var(--f-mono); font-size: 12.5px; }
+.theme-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; color: var(--muted); font-size: 13.5px; }
+
+/* ---------- phone ---------- */
+.device { flex: 0 0 auto; width: 380px; max-width: 100%; }
+.phone {
+  position: relative; width: 100%; height: 780px; max-height: calc(100vh - 40px); min-height: 620px;
+  border: 10px solid var(--bezel); border-radius: 44px; overflow: hidden;
+  background: var(--m-surface); color: var(--m-on);
+  font-size: 14px;
+}
+.statusbar { position: absolute; inset: 0 0 auto; height: 30px; display: flex; justify-content: space-between; align-items: center; padding: 0 22px; font-size: 12.5px; font-weight: 600; z-index: 6; background: var(--m-surface); font-variant-numeric: tabular-nums; }
+.statusbar .dots { display: flex; gap: 5px; align-items: center; }
+.statusbar .dots i { width: 14px; height: 9px; border-radius: 2px; background: var(--m-on); opacity: .85; display: block; }
+.statusbar .dots i:first-child { width: 9px; border-radius: 50%; }
+.scroll { position: absolute; inset: 30px 0 0; overflow-y: auto; padding: 72px 12px 104px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; }
+.titlebar { position: absolute; top: 38px; left: 12px; right: 12px; display: flex; gap: 8px; align-items: center; z-index: 5; pointer-events: none; }
+.titlebar > * { pointer-events: auto; }
+.pill { height: 48px; display: inline-flex; align-items: center; padding: 0 20px; border-radius: 999px; background: var(--m-c-high); border: 1px solid var(--m-outline-var); font-size: 21px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.iconbtn { width: 48px; height: 48px; border-radius: 50%; border: 1px solid var(--m-outline-var); background: var(--m-c-high); display: grid; place-items: center; cursor: pointer; flex: 0 0 auto; }
+.iconbtn svg { width: 22px; height: 22px; fill: var(--m-on); }
+
+.nav { position: absolute; left: 12px; right: 12px; bottom: 8px; height: 64px; border-radius: 32px; background: var(--m-c-high); border: 1px solid var(--m-outline-var); display: flex; justify-content: space-around; align-items: center; z-index: 5; padding: 0 6px; }
+.nav button { border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 2px; font-size: 11px; color: var(--m-on-var); width: 64px; padding: 6px 0; border-radius: 22px; cursor: default; }
+.nav button svg { width: 22px; height: 22px; fill: currentColor; }
+.nav button.on { background: var(--m-primary-c); color: var(--m-on-primary-c); font-weight: 600; }
+
+/* cards & rows */
+.card { background: var(--m-c); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.card.tap { cursor: pointer; }
+.card.tap:hover { background: var(--m-c-high); }
+.head { display: flex; align-items: center; gap: 10px; }
+.head .ic { width: 24px; height: 24px; fill: var(--m-primary); flex: 0 0 auto; }
+.head .t { flex: 1; min-width: 0; }
+.head h3 { margin: 0; font-size: 18px; font-weight: 550; line-height: 1.25; }
+.head .sub { color: var(--m-on-var); font-size: 13px; margin-top: 2px; }
+.head .chev { width: 22px; height: 22px; fill: var(--m-on-var); flex: 0 0 auto; transition: transform .18s; }
+.muted { color: var(--m-on-var); font-size: 13px; margin: 0; }
+.switch { width: 52px; height: 32px; border-radius: 16px; background: var(--m-c-highest); border: 2px solid var(--m-outline); position: relative; cursor: pointer; flex: 0 0 auto; padding: 0; }
+.switch::after { content: ""; position: absolute; top: 6px; left: 6px; width: 16px; height: 16px; border-radius: 50%; background: var(--m-outline); transition: all .15s; }
+.switch[aria-checked="true"] { background: var(--m-primary); border-color: var(--m-primary); }
+.switch[aria-checked="true"]::after { left: 22px; top: 2px; width: 24px; height: 24px; background: var(--m-on-primary); }
+
+.launch { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 1px solid var(--m-outline); background: transparent; border-radius: 999px; padding: 9px 18px; cursor: pointer; min-height: 56px; }
+.launch:hover { background: color-mix(in srgb, var(--m-primary) 6%, transparent); }
+.launch .lv { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.launch .lbl { font-size: 11.5px; color: var(--m-on-var); }
+.launch .val { font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.launch .meta { font-size: 12px; color: var(--m-on-var); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.launch .act { color: var(--m-primary); font-weight: 600; font-size: 14px; flex: 0 0 auto; }
+
+.seg { display: flex; border: 1px solid var(--m-outline); border-radius: 999px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: transparent; padding: 10px 6px; cursor: pointer; font-weight: 550; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; }
+.seg button + button { border-left: 1px solid var(--m-outline); }
+.seg button[aria-pressed="true"] { background: var(--m-primary-c); color: var(--m-on-primary-c); }
+.seg button svg { width: 17px; height: 17px; fill: currentColor; flex: 0 0 auto; }
+
+.chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 8px; white-space: nowrap; }
+.chip svg { width: 13px; height: 13px; fill: currentColor; }
+.chip.ok { background: var(--m-ok-c); color: var(--m-on-ok-c); }
+.chip.warn { background: var(--m-warn-c); color: var(--m-on-warn-c); }
+.chip.err { background: var(--m-error-c); color: var(--m-on-error-c); }
+.chip.use { background: var(--m-primary-c); color: var(--m-on-primary-c); }
+.chip.ai { background: var(--m-tertiary-c); color: var(--m-on-tertiary-c); }
+.chip.plain { background: var(--m-c-highest); color: var(--m-on-var); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.btn { border: 0; border-radius: 999px; padding: 10px 20px; font-weight: 600; font-size: 14px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn svg { width: 18px; height: 18px; fill: currentColor; }
+.btn.filled { background: var(--m-primary); color: var(--m-on-primary); }
+.btn.filled:disabled { background: var(--m-c-highest); color: var(--m-outline); cursor: default; }
+.btn.outlined { background: transparent; border: 1px solid var(--m-outline); color: var(--m-on); }
+.btn.text { background: transparent; color: var(--m-primary); padding: 10px 12px; }
+.btn.danger { color: var(--m-error); }
+.btn.tonal { background: var(--m-primary-c); color: var(--m-on-primary-c); }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+.note { display: flex; gap: 10px; align-items: flex-start; border-radius: 10px; padding: 10px 12px; font-size: 13px; }
+.note svg { width: 18px; height: 18px; fill: currentColor; flex: 0 0 auto; margin-top: 1px; }
+.note.info { background: var(--m-tertiary-c); color: var(--m-on-tertiary-c); }
+.note.warn { background: var(--m-warn-c); color: var(--m-on-warn-c); }
+
+.srow { display: flex; align-items: center; gap: 12px; }
+.srow .t { flex: 1; min-width: 0; }
+.srow .t b { display: block; font-weight: 600; font-size: 14.5px; }
+.srow .t span { color: var(--m-on-var); font-size: 13px; }
+
+/* fields */
+.field { position: relative; border: 1px solid var(--m-outline); border-radius: 6px; padding: 18px 14px 8px; display: flex; align-items: center; gap: 8px; }
+.field:focus-within { border-color: var(--m-primary); box-shadow: inset 0 0 0 1px var(--m-primary); }
+.field label { position: absolute; top: -8px; left: 10px; padding: 0 4px; font-size: 12px; color: var(--m-on-var); background: var(--fieldbg, var(--m-c)); }
+.field:focus-within label { color: var(--m-primary); }
+.field input { border: 0; outline: 0; background: transparent; color: var(--m-on); font: inherit; font-size: 15.5px; flex: 1; min-width: 0; padding: 0; }
+.field input.mono { font-family: var(--f-mono); font-size: 13.5px; }
+.field .tail { width: 22px; height: 22px; fill: var(--m-on-var); cursor: pointer; flex: 0 0 auto; }
+.field .tail.on { fill: var(--m-primary); }
+.help { font-size: 12px; color: var(--m-on-var); margin: -8px 4px 0; }
+.help.err { color: var(--m-error); }
+
+/* model list screen */
+.mcard { background: var(--m-c); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; border: 0; text-align: left; width: 100%; }
+.mcard:hover { background: var(--m-c-high); }
+.mcard .top { display: flex; align-items: center; gap: 12px; }
+.avatar { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-weight: 700; font-size: 15px; flex: 0 0 auto; background: var(--m-primary-c); color: var(--m-on-primary-c); }
+.avatar.t { background: var(--m-tertiary-c); color: var(--m-on-tertiary-c); }
+.avatar.n { background: var(--m-c-highest); color: var(--m-on-var); }
+.mcard .nm { font-size: 16px; font-weight: 600; }
+.mcard .mm { font-size: 12.5px; color: var(--m-on-var); font-family: var(--f-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcard .t { flex: 1; min-width: 0; }
+.count { display: flex; justify-content: space-between; align-items: baseline; padding: 0 4px; }
+.count b { font-size: 14px; }
+.count span { font-size: 12.5px; color: var(--m-on-var); font-variant-numeric: tabular-nums; }
+
+/* editor */
+.section-label { font-size: 13px; font-weight: 650; color: var(--m-primary); margin: 4px 4px -4px; letter-spacing: .01em; }
+.savebar { position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 16px 16px; background: var(--m-surface); border-top: 1px solid var(--m-outline-var); display: flex; gap: 10px; align-items: center; z-index: 5; }
+.savebar .grow { flex: 1; font-size: 12.5px; color: var(--m-on-var); min-width: 0; }
+.confirm { background: var(--m-error-c); color: var(--m-on-error-c); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; font-size: 13.5px; }
+.confirm .row-btns .btn.text { color: var(--m-on-error-c); }
+.result { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.result .line { display: flex; align-items: center; gap: 8px; }
+.result svg { width: 16px; height: 16px; fill: currentColor; flex: 0 0 auto; }
+.spin { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--m-outline-var); border-top-color: var(--m-primary); animation: spin .8s linear infinite; flex: 0 0 auto; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* accordion (variant B) */
+.acc { border-top: 1px solid var(--m-outline-var); }
+.acc:first-of-type { border-top: 0; }
+.acc-h { display: flex; align-items: center; gap: 12px; width: 100%; background: transparent; border: 0; text-align: left; padding: 12px 0; cursor: pointer; }
+.acc-h .t { flex: 1; min-width: 0; }
+.acc-h b { display: block; font-size: 15px; }
+.acc-h span { font-size: 12.5px; color: var(--m-on-var); font-family: var(--f-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.acc-h svg { width: 22px; height: 22px; fill: var(--m-on-var); transition: transform .18s; flex: 0 0 auto; }
+.open > .acc-h svg, .open > .head .chev { transform: rotate(180deg); }
+.acc-b { display: flex; flex-direction: column; gap: 14px; padding: 2px 0 16px; }
+.savedchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.savedchips button { border: 1px solid var(--m-outline); background: transparent; border-radius: 8px; padding: 5px 10px; font-size: 13px; cursor: pointer; }
+.savedchips button[aria-pressed="true"] { background: var(--m-primary-c); border-color: transparent; color: var(--m-on-primary-c); font-weight: 600; }
+
+/* bottom sheet */
+.scrim { position: absolute; inset: 0; background: var(--m-scrim); z-index: 8; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: 78%; background: var(--m-c); border-radius: 28px 28px 0 0; z-index: 9; display: flex; flex-direction: column; padding: 10px 0 12px; }
+.sheet .grab { width: 32px; height: 4px; border-radius: 2px; background: var(--m-outline); opacity: .5; margin: 0 auto 10px; }
+.sheet h4 { margin: 0; padding: 4px 22px 4px; font-size: 18px; font-weight: 550; }
+.sheet .sh-sub { padding: 0 22px 10px; font-size: 13px; color: var(--m-on-var); }
+.sheet .list { overflow-y: auto; padding: 0 10px; display: flex; flex-direction: column; }
+.opt { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 0; background: transparent; text-align: left; cursor: pointer; width: 100%; }
+.opt:hover { background: var(--m-c-high); }
+.opt[aria-disabled="true"] { opacity: .55; }
+.opt .radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--m-on-var); flex: 0 0 auto; position: relative; }
+.opt[aria-checked="true"] .radio { border-color: var(--m-primary); }
+.opt[aria-checked="true"] .radio::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--m-primary); }
+.opt .t { flex: 1; min-width: 0; }
+.opt .t b { display: block; font-weight: 600; font-size: 15px; }
+.opt .t span { display: block; font-size: 12.5px; color: var(--m-on-var); font-family: var(--f-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sheet .foot { padding: 8px 18px 0; display: flex; justify-content: flex-end; }
+.searchbox { margin: 0 16px 8px; display: flex; align-items: center; gap: 8px; background: var(--m-c-highest); border-radius: 999px; padding: 10px 16px; }
+.searchbox svg { width: 20px; height: 20px; fill: var(--m-on-var); }
+.searchbox input { border: 0; outline: 0; background: transparent; font: inherit; color: var(--m-on); flex: 1; min-width: 0; }
+
+/* keyboard scan panel */
+.app-mock { position: absolute; inset: 30px 0 auto; height: 290px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.app-mock .bubble { align-self: flex-start; background: var(--m-c-high); border-radius: 16px 16px 16px 4px; padding: 8px 12px; max-width: 80%; font-size: 13.5px; }
+.app-mock .bubble.me { align-self: flex-end; background: var(--m-primary-c); color: var(--m-on-primary-c); border-radius: 16px 16px 4px 16px; }
+.app-mock .input { margin-top: auto; border: 1px solid var(--m-outline-var); border-radius: 22px; padding: 10px 14px; color: var(--m-on-var); font-size: 14px; min-height: 42px; }
+.app-mock .input.filled { color: var(--m-on); white-space: pre-line; }
+.kb { position: absolute; left: 0; right: 0; bottom: 0; top: 320px; background: var(--m-c); border-radius: 18px 18px 0 0; display: flex; flex-direction: column; }
+.kb-tools { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.kb-tools .x { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--m-c-high); border: 0; cursor: pointer; }
+.kb-tools .x svg { width: 18px; height: 18px; fill: var(--m-on); }
+.kb-tools .lbl { font-weight: 600; flex: 1; }
+.cam { position: relative; margin: 0 10px; flex: 1; border-radius: 16px; overflow: hidden; background: radial-gradient(120% 90% at 50% 40%, var(--cam-a), var(--cam-b)); display: grid; place-items: center; }
+.receipt { width: 54%; background: var(--paper); color: var(--ink); border-radius: 3px; padding: 10px 12px; font-family: var(--f-mono); font-size: 9.5px; line-height: 1.5; transform: rotate(-4deg); box-shadow: 0 6px 20px rgba(0,0,0,.4); }
+.receipt b { display: block; text-align: center; font-size: 10.5px; margin-bottom: 4px; }
+.receipt .r { display: flex; justify-content: space-between; }
+.engine-pill { position: absolute; top: 10px; left: 10px; display: flex; background: rgba(0,0,0,.55); border-radius: 999px; padding: 3px; gap: 2px; }
+.engine-pill button { border: 0; background: transparent; color: #fff; font-size: 12px; font-weight: 600; padding: 6px 11px; border-radius: 999px; cursor: pointer; display: inline-flex; gap: 5px; align-items: center; }
+.engine-pill button svg { width: 14px; height: 14px; fill: #fff; }
+.engine-pill button[aria-pressed="true"] { background: #fff; color: #111; }
+.engine-pill button[aria-pressed="true"] svg { fill: #111; }
+.cam-status { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.6); color: #fff; font-size: 12px; padding: 5px 12px; border-radius: 999px; white-space: nowrap; }
+.shutter-row { display: flex; justify-content: center; padding: 12px 0 18px; }
+.shutter { width: 64px; height: 64px; border-radius: 50%; border: 4px solid var(--m-on); background: transparent; display: grid; place-items: center; cursor: pointer; }
+.shutter::after { content: ""; width: 48px; height: 48px; border-radius: 50%; background: var(--m-on); }
+
+.menu-pop { position: absolute; top: 92px; right: 14px; z-index: 7; background: var(--m-c-high); border-radius: 12px; padding: 6px 0; min-width: 176px; box-shadow: 0 6px 24px rgba(0,0,0,.22); }
+.menu-pop button { display: flex; gap: 12px; align-items: center; width: 100%; border: 0; background: transparent; padding: 11px 16px; font-size: 15px; cursor: pointer; text-align: left; }
+.menu-pop button:hover { background: var(--m-c-highest); }
+.menu-pop button svg { width: 20px; height: 20px; fill: var(--m-on-var); }
+.menu-pop .danger, .menu-pop .danger svg { color: var(--m-error); fill: var(--m-error); }
+.choice { display: flex; gap: 14px; align-items: flex-start; width: 100%; text-align: left; border: 1px solid var(--m-outline-var); background: var(--m-c); border-radius: 16px; padding: 16px; cursor: pointer; }
+.choice:hover { border-color: var(--m-primary); }
+.choice svg { width: 26px; height: 26px; fill: var(--m-primary); flex: 0 0 auto; margin-top: 2px; }
+.choice b { display: block; font-size: 16px; font-weight: 600; }
+.choice span { display: block; font-size: 13px; color: var(--m-on-var); margin-top: 2px; }
+.steps { font-size: 12.5px; color: var(--m-on-var); padding: 0 4px; font-variant-numeric: tabular-nums; }
+.dialog { position: absolute; left: 24px; right: 24px; top: 50%; transform: translateY(-50%); z-index: 9; background: var(--m-c-high); border-radius: 28px; padding: 24px; display: flex; flex-direction: column; gap: 14px; }
+.dialog h4 { margin: 0; font-size: 22px; font-weight: 500; }
+.dialog p { margin: 0; color: var(--m-on-var); font-size: 14px; }
+.dialog .row-btns { justify-content: flex-end; }
+.usefor { display: flex; flex-direction: column; gap: 10px; }
+.emptyhint { margin: 10px 16px; padding: 14px; border-radius: 12px; background: var(--m-c-highest); font-size: 13.5px; color: var(--m-on-var); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+@media (max-width: 440px) { .phone { height: 720px; border-width: 7px; border-radius: 36px; } .rail h1 { font-size: 22px; } }
+</style>
+
+<div class="wrap">
+  <div class="device">
+    <div class="phone" id="phone" aria-label="Phone mockup"></div>
+  </div>
+
+  <aside class="rail">
+    <div>
+      <p class="eyebrow">Zn Keyboard · settings mockup</p>
+      <h1>AI models for Rewrite and Scan</h1>
+      <p class="lede">Scan text gets a second engine that reads photos with an AI model. Both features pick a saved AI model, so a key is entered once. Tap anything in the phone; it works.</p>
+    </div>
+
+    <div>
+      <p class="eyebrow">Layout</p>
+      <div class="seg-page" role="group" aria-label="Layout variant">
+        <button id="vA" data-variant="A" aria-pressed="true">A · Own screen (recommended)</button>
+        <button id="vB" data-variant="B" aria-pressed="false">B · Collapsible on Tools</button>
+      </div>
+    </div>
+
+    <div>
+      <p class="eyebrow">Jump to</p>
+      <div class="jumps" id="jumps"></div>
+    </div>
+
+    <div class="notes" id="notes"></div>
+
+    <div class="notes">
+      <h2>Decide before I build</h2>
+      <ul>
+        <li><b>Layout:</b> A or B.</li>
+        <li><b>Engine switch in the keyboard:</b> keep the On device / AI toggle on the scan panel (see “Keyboard scan panel”), or only in settings?</li>
+        <li><b>Fallback:</b> when the AI request fails, read the same photo on the phone (default on)?</li>
+        <li><b>Saving:</b> the editor saves when you tap Save. Today, field edits apply right away and profiles are snapshots.</li>
+      </ul>
+    </div>
+
+    <div class="theme-row">
+      <span>Preview theme</span>
+      <div class="seg-page" role="group" aria-label="Theme" style="flex:0 0 auto">
+        <button data-theme-set="light" aria-pressed="false">Light</button>
+        <button data-theme-set="dark" aria-pressed="false">Dark</button>
+        <button data-theme-set="system" aria-pressed="true">System</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const I = {
+  back: "M15.41 7.41 14 6l-6 6 6 6 1.41-1.41L10.83 12z",
+  right: "M8.59 16.59 10 18l6-6-6-6-1.41 1.41L13.17 12z",
+  add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z",
+  check: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
+  lock: "M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z",
+  unlock: "M12 17c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm6-9h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6h1.9c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm0 12H6V10h12v10z",
+  camera: "M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM9 2 7.17 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2h-3.17L15 2H9zm3 15c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z",
+  ai: "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z",
+  phone: "M17 1.01 7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14z",
+  search: "M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z",
+  more: "M16.59 8.59 12 13.17 7.41 8.59 6 10l6 6 6-6z",
+  bolt: "M7 2v11h3v9l7-12h-4l4-8z",
+  info: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z",
+  warn: "M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z",
+  close: "M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z",
+  rewrite: "M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z",
+  image: "M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z",
+  touch: "M9 11.24V7.5a2.5 2.5 0 0 1 5 0v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z",
+  keyboard: "M20 5H4c-1.1 0-1.99.9-1.99 2L2 17c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z",
+  tune: "M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8v-2h-8v-2h-2v6h2zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z",
+  save: "M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z",
+  download: "M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z",
+  dots: "M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z",
+  copy: "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z",
+  cloud: "M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z",
+  server: "M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z",
+};
+const svg = (n, cls = "") => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${I[n]}"/></svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const PROVIDERS = { openrouter: "OpenRouter", openai: "OpenAI compatible", nanbeige: "Nanbeige llama.cpp" };
+const REASONING = { off: "Off", auto: "Provider default", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "X-high" };
+
+// Example data, not the user's real setup.
+const S = {
+  variant: "A",
+  screen: "tools",
+  editId: null,
+  draft: null,
+  dirty: false,
+  confirmDelete: false,
+  test: null,
+  sheet: null,
+  rewrite: { enabled: true, profile: "p1" },
+  scan: { engine: "ai", profile: "p2", fallback: true, modelReady: true },
+  bOpen: { group: true, rewrite: false, scan: true },
+  bScanDraft: null,
+  menu: false,
+  discardAsk: false,
+  newStep: null,
+  kbStatus: null,
+  kbText: "",
+  profiles: [
+    { id: "p1", name: "Fast rewrite", provider: "openrouter", url: "", model: "openai/gpt-4o-mini", key: "sk-or-v1-8f2c…", locked: true, reasoning: "off", images: false },
+    { id: "p2", name: "Vision reader", provider: "openrouter", url: "", model: "google/gemini-3.8-flash", key: "sk-or-v1-8f2c…", locked: true, reasoning: "off", images: true },
+    { id: "p3", name: "Home Mac", provider: "openai", url: "http://192.168.0.135:10100/v1", model: "gpt-6-luna", key: "gw-••••", locked: true, reasoning: "low", images: null },
+    { id: "p4", name: "Local llama", provider: "nanbeige", url: "http://192.168.0.20:8080/v1", model: "nanbeige-4.1-3b", key: "", locked: false, reasoning: "off", images: false },
+  ],
+};
+const P = id => S.profiles.find(p => p.id === id);
+const host = p => p.provider === "openrouter" ? "openrouter.ai" : (p.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "") || "no URL");
+const initials = n => n.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+const usedBy = id => [S.rewrite.profile === id && "Rewrite", S.scan.profile === id && "Scan"].filter(Boolean);
+const imgChip = p => p.images === true ? `<span class="chip ai">${svg("image")}Reads images</span>`
+  : p.images === false ? `<span class="chip plain">Text only</span>`
+  : `<span class="chip warn">Images not checked</span>`;
+const keyChip = p => p.key ? `<span class="chip ok">${svg("check")}Key saved</span>` : `<span class="chip err">No API key</span>`;
+
+/* ---------- shell ---------- */
+function shell({ title, back = false, body, nav = true, extra = "", menu = false }) {
+  return `
+    <div class="statusbar"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
+    <div class="titlebar">
+      ${back ? `<button class="iconbtn" data-a="back" aria-label="Back">${svg("back")}</button>` : ""}
+      <div class="pill">${esc(title)}</div>
+      ${menu ? `<button class="iconbtn" style="margin-left:auto" data-a="menu" aria-label="More options" aria-expanded="${S.menu}">${svg("dots")}</button>` : ""}
+    </div>
+    ${menu && S.menu ? `<div class="menu-pop" role="menu">
+      <button role="menuitem" data-a="dup">${svg("copy")}Duplicate</button>
+      <button role="menuitem" class="danger" data-a="del">${svg("delete")}Delete</button>
+    </div>` : ""}
+    <div class="scroll" id="scroll" style="${nav ? "" : "padding-bottom:96px"}">${body}</div>
+    ${nav ? navBar() : ""}
+    ${extra}
+    ${sheetHtml()}`;
+}
+function navBar() {
+  const items = [["touch", "Typing"], ["keyboard", "Layout"], ["tune", "Tools"], ["save", "Snippets"], ["download", "Backup"]];
+  return `<nav class="nav" aria-label="Settings sections">${items.map(([ic, l]) => `<button class="${l === "Tools" ? "on" : ""}" tabindex="-1">${svg(ic)}<span>${l}</span></button>`).join("")}</nav>`;
+}
+
+/* ---------- Tools tab ---------- */
+function rewriteCard() {
+  const p = P(S.rewrite.profile);
+  return `
+  <section class="card">
+    <div class="head">
+      ${svg("rewrite", "ic")}
+      <div class="t"><h3>Rewrite</h3><div class="sub">The Rewrite button in the tools row.</div></div>
+      <button class="switch" role="switch" aria-label="Rewrite" aria-checked="${S.rewrite.enabled}" data-a="toggle-rewrite"></button>
+    </div>
+    ${S.variant === "A" ? `
+    <button class="launch" data-a="pick" data-feature="rewrite">
+      <span class="lv"><span class="lbl">AI model</span><span class="val">${esc(p.name)}</span><span class="meta">${esc(p.model)} · ${esc(host(p))}</span></span>
+      <span class="act">Change</span>
+    </button>` : `
+    <div class="srow"><div class="t"><span>Uses the Rewrite connection under AI connections.</span></div></div>`}
+    <p class="muted">Text goes straight from the keyboard to the model's server. Rewrite is off in password fields.</p>
+  </section>`;
+}
+function scanCard() {
+  const ai = S.scan.engine === "ai";
+  const p = P(S.scan.profile);
+  const deviceBlock = `
+    <div class="srow">
+      <div class="t"><b>PP-OCRv6 Small</b><span>${S.scan.modelReady ? "77 MB on this phone" : "Downloads 77 MB the first time you scan"}</span></div>
+      ${S.scan.modelReady ? `<span class="chip ok">${svg("check")}Ready</span>` : `<span class="chip plain">Not downloaded</span>`}
+    </div>
+    <p class="muted">Nothing you scan leaves the phone.</p>
+    <div class="row-btns">
+      <button class="btn outlined" data-a="noop">${svg("camera")}Compare OCR engines</button>
+      ${S.scan.modelReady ? `<button class="btn text danger" data-a="del-ocr">Delete model</button>` : ""}
+    </div>`;
+  const aiBlockA = `
+    <button class="launch" data-a="pick" data-feature="scan">
+      <span class="lv"><span class="lbl">AI model</span><span class="val">${esc(p.name)}</span><span class="meta">${esc(p.model)} · ${esc(host(p))}</span></span>
+      <span class="act">Change</span>
+    </button>
+    ${p.images === false ? `<div class="note warn">${svg("warn")}<span>${esc(p.name)} is text only and can't read photos. Pick a model marked “Reads images”.</span></div>` : ""}
+    ${p.images === null ? `<div class="note warn">${svg("warn")}<span>We haven't checked whether ${esc(p.model)} reads images. Open it in AI models and tap Test connection.</span></div>` : ""}
+    <div class="note info">${svg("info")}<span>Photos are sent to <b>${esc(host(p))}</b>. They're resized to 1568 px on the long side first.</span></div>`;
+  const aiBlockB = `
+    <div class="note info">${svg("info")}<span>Uses the Scan connection under AI connections. Photos are sent to <b>${esc(host(S.bScanDraft || p))}</b>.</span></div>`;
+  return `
+  <section class="card">
+    <div class="head">${svg("camera", "ic")}<div class="t"><h3>Scan text</h3><div class="sub">Add the Scan text key to a shortcut row.</div></div></div>
+    <div class="seg" role="group" aria-label="Scan engine">
+      <button aria-pressed="${!ai}" data-a="engine" data-v="device">${svg("phone")}On device</button>
+      <button aria-pressed="${ai}" data-a="engine" data-v="ai">${svg("ai")}AI model</button>
+    </div>
+    ${ai ? (S.variant === "A" ? aiBlockA : aiBlockB) : deviceBlock}
+    ${ai ? `
+    <div class="srow">
+      <div class="t"><b>Fall back to on device</b><span>If the request fails or you're offline, read the photo with PP-OCRv6.</span></div>
+      <button class="switch" role="switch" aria-label="Fall back to on device" aria-checked="${S.scan.fallback}" data-a="toggle-fallback"></button>
+    </div>` : ""}
+  </section>`;
+}
+function modelsSummaryCard() {
+  const n = S.profiles.length;
+  const missing = S.profiles.filter(p => !p.key && p.provider !== "nanbeige").length;
+  return `
+  <section class="card tap" data-a="go" data-to="models" role="button" tabindex="0">
+    <div class="head">
+      ${svg("ai", "ic")}
+      <div class="t"><h3>AI models</h3><div class="sub">${n} saved · Rewrite: ${esc(P(S.rewrite.profile).name)} · Scan: ${esc(P(S.scan.profile).name)}</div></div>
+      ${svg("right", "chev")}
+    </div>
+    ${missing ? `<span class="chip err" style="align-self:flex-start">${missing} need an API key</span>` : ""}
+  </section>`;
+}
+function toolsA() {
+  return shell({ title: "Tools", body: rewriteCard() + scanCard() + modelsSummaryCard() + gifStub() });
+}
+function gifStub() {
+  return `<section class="card"><div class="head">${svg("image", "ic")}<div class="t"><h3>GIF search</h3><div class="sub">Unchanged in this mockup.</div></div></div></section>`;
+}
+
+/* ---------- Variant B: collapsible group on Tools ---------- */
+function toolsB() {
+  const g = S.bOpen.group;
+  const rp = P(S.rewrite.profile), sp = S.bScanDraft || P(S.scan.profile);
+  const accItem = (key, label, p) => `
+    <div class="acc ${S.bOpen[key] ? "open" : ""}">
+      <button class="acc-h" data-a="acc" data-k="${key}" aria-expanded="${S.bOpen[key]}">
+        <span class="t"><b>${label}</b><span>${esc(p.name)} · ${esc(p.model)}</span></span>${svg("more")}
+      </button>
+      ${S.bOpen[key] ? `<div class="acc-b">${inlineForm(key, p)}</div>` : ""}
+    </div>`;
+  const group = `
+  <section class="card ${g ? "open" : ""}">
+    <div class="head" data-a="acc" data-k="group" role="button" tabindex="0" style="cursor:pointer" aria-expanded="${g}">
+      ${svg("ai", "ic")}
+      <div class="t"><h3>AI connections</h3><div class="sub">Rewrite: ${esc(rp.name)} · Scan: ${esc(sp.name)}</div></div>
+      ${svg("more", "chev")}
+    </div>
+    ${g ? `<div>${accItem("rewrite", "Rewrite", rp)}${accItem("scan", "Scan text", sp)}</div>` : ""}
+  </section>`;
+  return shell({ title: "Tools", body: rewriteCard() + scanCard() + group + gifStub() });
+}
+function inlineForm(feature, p) {
+  const sel = feature === "rewrite" ? S.rewrite.profile : S.scan.profile;
+  return `
+    <div>
+      <div class="count" style="padding:0 0 6px"><b>Saved setups</b><span>${S.profiles.length}/8</span></div>
+      <div class="savedchips">${S.profiles.map(x => `<button aria-pressed="${x.id === sel}" data-a="b-use" data-f="${feature}" data-id="${x.id}">${esc(x.name)}</button>`).join("")}</div>
+    </div>
+    ${fields(p, `b-${feature}`)}
+    ${feature === "scan" ? imgChip(p) : ""}
+    <div class="row-btns">
+      <button class="btn tonal" data-a="noop">${svg("bolt")}Test</button>
+      <button class="btn outlined" data-a="noop">Save as new setup</button>
+      <button class="btn text danger" data-a="noop">${svg("delete")}Delete setup</button>
+    </div>`;
+}
+
+/* ---------- shared form fields ---------- */
+function fields(p, idp) {
+  const isOR = p.provider === "openrouter";
+  return `
+    <button class="launch" data-a="provider" data-idp="${idp}">
+      <span class="lv"><span class="lbl">Provider</span><span class="val">${PROVIDERS[p.provider]}</span></span><span class="act">Change</span>
+    </button>
+    ${isOR ? `<p class="help" style="margin-top:-6px">OpenRouter's address is filled in for you.</p>` : `
+    <div class="field"><label for="${idp}-url">Server URL</label><input id="${idp}-url" class="mono" data-f="url" value="${esc(p.url)}" placeholder="https://host/v1" inputmode="url"></div>`}
+    <div class="field"><label for="${idp}-key">API key</label>
+      <input id="${idp}-key" class="mono" data-f="key" value="${esc(p.key)}" placeholder="${p.provider === "nanbeige" ? "Optional for local servers" : "Paste your key"}" ${p.locked ? "readonly" : ""} type="${p.locked ? "password" : "text"}">
+      <span data-a="lock" role="button" tabindex="0" aria-label="${p.locked ? "Unlock API key" : "Lock API key"}">${svg(p.locked ? "lock" : "unlock", "tail " + (p.locked ? "on" : ""))}</span>
+    </div>
+    <p class="help">${p.locked ? "Locked so it can't be edited by accident. Stored encrypted on this phone." : "Stored encrypted on this phone."}</p>
+    <button class="launch" data-a="models-list" data-idp="${idp}">
+      <span class="lv"><span class="lbl">Model</span><span class="val">${esc(p.model || "Choose a model")}</span><span class="meta">${isOR ? "Loaded from OpenRouter" : "Loaded from the server's /models"}</span></span><span class="act">Change</span>
+    </button>
+    ${isOR ? `<button class="launch" data-a="noop"><span class="lv"><span class="lbl">OpenRouter provider</span><span class="val">Any provider</span></span><span class="act">Change</span></button>` : ""}
+    <button class="launch" data-a="reasoning" data-idp="${idp}">
+      <span class="lv"><span class="lbl">Reasoning</span><span class="val">${REASONING[p.reasoning]}</span></span><span class="act">Change</span>
+    </button>`;
+}
+
+/* ---------- Variant A: AI models list ---------- */
+function modelsScreen() {
+  const cards = S.profiles.map(p => {
+    const u = usedBy(p.id);
+    const av = p.provider === "openrouter" ? "" : p.provider === "openai" ? "t" : "n";
+    return `
+    <button class="mcard" data-a="edit" data-id="${p.id}">
+      <span class="top">
+        <span class="avatar ${av}">${initials(p.name)}</span>
+        <span class="t"><span class="nm">${esc(p.name)}</span><span class="mm" style="display:block">${esc(p.model)} · ${esc(host(p))}</span></span>
+        ${svg("right", "chev")}
+      </span>
+      <span class="chips">
+        ${u.map(x => `<span class="chip use">${x}</span>`).join("")}
+        ${p.provider === "nanbeige" && !p.key ? `<span class="chip plain">No key (local)</span>` : keyChip(p)}
+        ${imgChip(p)}
+      </span>
+    </button>`;
+  }).join("");
+  return shell({
+    title: "AI models", back: true, nav: false,
+    body: `
+      <div class="count"><b>Saved models</b><span>${S.profiles.length} of 8</span></div>
+      ${cards}
+      <button class="btn filled" data-a="new" style="align-self:flex-start;margin-top:4px">${svg("add")}Add model</button>
+      <p class="muted" style="padding:0 4px">A saved model is a server, its API key and a model name. Rewrite and Scan text each use one. Keys never leave this phone except in requests to that server.</p>`,
+  });
+}
+
+/* ---------- Variant A: editor ---------- */
+const suggestedName = d => (d.model || "").split("/").pop() || "";
+function saveInfo() {
+  const d = S.draft;
+  const name = d.name.trim() || suggestedName(d);
+  const clash = S.profiles.some(p => p.id !== S.editId && p.name.trim().toLowerCase() === name.toLowerCase());
+  if (!d.model) return { ok: false, hint: d.provider !== "openrouter" && !d.url ? "Add the server URL, then choose a model." : "Choose a model to save." };
+  if (clash) return { ok: false, hint: "Pick a different name." };
+  if (!S.dirty) return { ok: false, hint: S.editId ? "All changes saved" : "" };
+  return { ok: true, hint: "Unsaved changes" };
+}
+function providerStep() {
+  const opt = (k, ic, title, sub) => `<button class="choice" data-a="new-provider" data-v="${k}">${svg(ic)}<span><b>${title}</b><span>${sub}</span></span></button>`;
+  return shell({
+    title: "New AI model", back: true, nav: false,
+    body: `
+      <div class="steps">Step 1 of 2 · Where does the model run?</div>
+      ${opt("openrouter", "cloud", "OpenRouter", "One API key for hundreds of models. The address is filled in for you.")}
+      ${opt("openai", "server", "Any OpenAI-compatible server", "OpenAI, your own gateway, LM Studio, vLLM. You'll paste its URL.")}
+      ${opt("nanbeige", "phone", "Nanbeige llama.cpp", "The llama.cpp fork on your network. Usually no key.")}
+      <p class="muted" style="padding:0 4px">You can change this later.</p>`,
+  });
+}
+function editorScreen() {
+  if (!S.editId && S.newStep === "provider") return providerStep();
+  const d = S.draft;
+  const isNew = !S.editId;
+  const t = S.test;
+  const info = saveInfo();
+  const nameClash = info.hint === "Pick a different name.";
+  let testHtml = "";
+  if (t === "running") testHtml = `<div class="result"><div class="line"><span class="spin"></span>Sending a test request and a small image…</div></div>`;
+  else if (t === "nokey") testHtml = `<div class="result" style="color:var(--m-error)"><div class="line">${svg("warn")}Add an API key first.</div></div>`;
+  else if (t && t.ok) testHtml = `<div class="result">
+      <div class="line" style="color:var(--m-on-ok-c)">${svg("check")}Connected · reply in ${t.ms} ms</div>
+      <div class="line">${d.images ? svg("image") + "Reads images, so Scan text can use it" : svg("warn") + "Text only. Scan text can't use this model"}</div></div>`;
+  const useRow = (key, label) => {
+    const locked = !isNew && (key === "rewrite" ? S.rewrite.profile : S.scan.profile) === S.editId;
+    const blocked = key === "scan" && d.images === false;
+    const on = locked || d.assign[key];
+    const sub = locked ? `${label} uses this model. To switch, pick another one on the Tools tab.`
+      : blocked ? "Text only, so Scan text can't use it."
+      : `${label} uses ${esc(P(key === "rewrite" ? S.rewrite.profile : S.scan.profile).name)} now.`;
+    return `<div class="srow"><div class="t"><b>Use for ${label}</b><span>${sub}</span></div>
+      <button class="switch" role="switch" aria-label="Use for ${label}" aria-checked="${on}" data-a="assign" data-k="${key}" ${locked || blocked ? 'disabled style="opacity:.45;cursor:default"' : ""}></button></div>`;
+  };
+  const u = isNew ? [] : usedBy(S.editId);
+  const delDialog = S.confirmDelete ? `<div class="scrim" data-a="del-no"></div><div class="dialog" role="alertdialog" aria-modal="true">
+      <h4>Delete ${esc(d.name)}?</h4>
+      <p>${u.length ? `${u.join(" and ")} will switch to ${esc(firstOther(S.editId).name)}. ` : ""}${d.key ? "Its stored API key is removed too." : "This can't be undone."}</p>
+      <div class="row-btns"><button class="btn text" data-a="del-no">Cancel</button><button class="btn text danger" data-a="del-yes">Delete</button></div></div>` : "";
+  const discardDialog = S.discardAsk ? `<div class="scrim" data-a="keep"></div><div class="dialog" role="alertdialog" aria-modal="true">
+      <h4>Discard changes?</h4><p>Your edits to ${esc(d.name || "this model")} haven't been saved.</p>
+      <div class="row-btns"><button class="btn text" data-a="keep">Keep editing</button><button class="btn text danger" data-a="discard">Discard</button></div></div>` : "";
+  return shell({
+    title: isNew ? "New AI model" : d.name || "AI model", back: true, nav: false, menu: !isNew,
+    body: `
+      ${isNew ? `<div class="steps">Step 2 of 2 · Connect and choose a model</div>` : ""}
+      <div class="section-label">Connection</div>
+      <div style="display:flex;flex-direction:column;gap:14px;--fieldbg:var(--m-surface)">${fields(d, "ed")}</div>
+      <div class="row-btns"><button class="btn tonal" data-a="test">${svg("bolt")}Test connection</button></div>
+      ${testHtml}
+      <div class="section-label">Name</div>
+      <div class="field" style="--fieldbg:var(--m-surface)"><label for="ed-name">Name (optional)</label><input id="ed-name" data-f="name" value="${esc(d.name)}" placeholder="${esc(suggestedName(d) || "e.g. Fast rewrite")}"></div>
+      ${nameClash ? `<p class="help err">You already have a model with this name.</p>` : `<p class="help">Left empty, it's called ${esc(suggestedName(d) || "after the model")}.</p>`}
+      <div class="section-label">Use it for</div>
+      <div class="usefor">${useRow("rewrite", "Rewrite")}${useRow("scan", "Scan text")}</div>
+      ${!isNew ? `<div><button class="btn text danger" data-a="del" style="padding-left:4px">${svg("delete")}Delete this model</button></div>` : ""}`,
+    extra: `<div class="savebar"><span class="grow" id="savehint">${esc(info.hint)}</span><button class="btn filled" data-a="save" ${info.ok ? "" : "disabled"}>Save</button></div>${delDialog}${discardDialog}`,
+  });
+}
+const firstOther = id => S.profiles.find(p => p.id !== id && (p.images || true));
+
+/* ---------- keyboard scan panel ---------- */
+function kbScreen() {
+  const ai = S.scan.engine === "ai";
+  const p = P(S.scan.profile);
+  const st = S.kbStatus;
+  return `
+    <div class="statusbar"><span>9:41</span><span class="dots"><i></i><i></i><i></i></span></div>
+    <div class="app-mock">
+      <div class="bubble">Can you send me what the dinner came to?</div>
+      <div class="bubble me">Sure, one sec</div>
+      <div class="input ${S.kbText ? "filled" : ""}">${S.kbText ? esc(S.kbText) : "Message"}</div>
+    </div>
+    <div class="kb">
+      <div class="kb-tools">
+        <button class="x" data-a="kb-close" aria-label="Close scan">${svg("close")}</button>
+        <span class="lbl">Scan text</span>
+      </div>
+      <div class="cam">
+        <div class="receipt"><b>CAFE MADRAS</b>
+          <div class="r"><span>2 Masala dosa</span><span>360.00</span></div>
+          <div class="r"><span>1 Filter coffee</span><span>90.00</span></div>
+          <div class="r"><span>1 Idli vada</span><span>140.00</span></div>
+          <div class="r"><span>GST 5%</span><span>29.50</span></div>
+          <div class="r" style="font-weight:700"><span>TOTAL</span><span>619.50</span></div>
+        </div>
+        <div class="engine-pill" role="group" aria-label="Scan engine">
+          <button aria-pressed="${!ai}" data-a="engine" data-v="device">${svg("phone")}On device</button>
+          <button aria-pressed="${ai}" data-a="engine" data-v="ai">${svg("ai")}${esc(p.name)}</button>
+        </div>
+        ${st ? `<div class="cam-status">${esc(st)}</div>` : ""}
+      </div>
+      <div class="shutter-row"><button class="shutter" data-a="shoot" aria-label="Scan"></button></div>
+    </div>`;
+}
+
+/* ---------- sheets ---------- */
+function sheetHtml() {
+  const sh = S.sheet;
+  if (!sh) return "";
+  let inner = "";
+  if (sh.type === "pick") {
+    const cur = sh.feature === "rewrite" ? S.rewrite.profile : S.scan.profile;
+    inner = `<h4>${sh.feature === "rewrite" ? "AI model for Rewrite" : "AI model for Scan text"}</h4>
+      <div class="sh-sub">${sh.feature === "scan" ? "Scan text needs a model that reads images." : "Any saved model works."}</div>
+      <div class="list">${S.profiles.map(p => {
+        const blocked = sh.feature === "scan" && p.images === false;
+        return `<button class="opt" role="radio" aria-checked="${p.id === cur}" ${blocked ? 'aria-disabled="true"' : ""} data-a="pick-set" data-id="${p.id}">
+          <span class="radio"></span>
+          <span class="t"><b>${esc(p.name)}</b><span>${esc(p.model)} · ${esc(host(p))}</span></span>
+          ${sh.feature === "scan" ? imgChip(p) : (!p.key && p.provider !== "nanbeige" ? `<span class="chip err">No key</span>` : "")}
+        </button>`;
+      }).join("")}</div>
+      <div class="foot"><button class="btn text" data-a="go-models">${svg("tune")}Manage AI models</button></div>`;
+  } else if (sh.type === "provider") {
+    const cur = target(sh.idp).provider;
+    inner = `<h4>Provider</h4><div class="sh-sub">How the keyboard talks to the server.</div><div class="list">${Object.entries(PROVIDERS).map(([k, v]) => `
+      <button class="opt" role="radio" aria-checked="${k === cur}" data-a="provider-set" data-v="${k}"><span class="radio"></span><span class="t"><b>${v}</b><span>${k === "openrouter" ? "openrouter.ai, one key for many models" : k === "openai" ? "Any /v1/chat/completions server" : "Local llama.cpp fork with its own request format"}</span></span></button>`).join("")}</div>`;
+  } else if (sh.type === "reasoning") {
+    const cur = target(sh.idp).reasoning;
+    const desc = { off: "Fastest. Good for rewrites and scans.", auto: "Let the provider decide.", minimal: "Small budget.", low: "Light, modest latency.", medium: "Balanced.", high: "Slower, more tokens.", xhigh: "Maximum, where supported." };
+    inner = `<h4>Reasoning</h4><div class="sh-sub">Servers differ, so this stays manual.</div><div class="list">${Object.entries(REASONING).map(([k, v]) => `
+      <button class="opt" role="radio" aria-checked="${k === cur}" data-a="reasoning-set" data-v="${k}"><span class="radio"></span><span class="t"><b>${v}</b><span style="font-family:var(--f-ui)">${desc[k]}</span></span></button>`).join("")}</div>`;
+  } else if (sh.type === "models-list") {
+    const tp = target(sh.idp);
+    const list = tp.provider === "openrouter"
+      ? [["openai/gpt-4o-mini", false], ["google/gemini-3.8-flash", true], ["anthropic/claude-haiku-5-5", true], ["qwen/qwen3-vl-8b-instruct", true], ["meta-llama/llama-4-scout", true], ["mistralai/mistral-small-4", false]]
+      : [["gpt-6-luna", null], ["gpt-6-sol", null], ["claude-haiku-5-5", null]];
+    const needsKey = !tp.key && tp.provider !== "nanbeige";
+    const needsUrl = tp.provider !== "openrouter" && !tp.url;
+    if (needsKey || needsUrl) {
+      inner = `<h4>Model</h4><div class="emptyhint">${needsUrl ? "Add the server URL first. The list of models comes from that server." : "Add the API key first. The list of models loads with it."}</div>
+        <div class="foot"><button class="btn text" data-a="sheet-close">OK</button></div>`;
+      return `<div class="scrim" data-a="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
+    }
+    inner = `<h4>Model</h4><div class="sh-sub">${tp.provider === "openrouter" ? "From OpenRouter. Image support comes from its model list." : "From " + esc(host(tp)) + "/models. Test connection checks image support."}</div>
+      <div class="searchbox">${svg("search")}<input id="model-search" placeholder="Search models" aria-label="Search models"></div>
+      <div class="list">${list.map(([m, img]) => `
+        <button class="opt" role="radio" aria-checked="${m === tp.model}" data-a="model-set" data-v="${m}" data-img="${img}"><span class="radio"></span><span class="t"><b style="font-family:var(--f-mono);font-size:13.5px">${m}</b></span>${img === true ? `<span class="chip ai">${svg("image")}Images</span>` : img === false ? `<span class="chip plain">Text</span>` : ""}</button>`).join("")}</div>`;
+  }
+  return `<div class="scrim" data-a="sheet-close"></div><div class="sheet" role="dialog" aria-modal="true"><div class="grab"></div>${inner}</div>`;
+}
+// which object a field/sheet edits: the editor draft (A) or the selected profile (B inline)
+function target(idp) {
+  if (idp === "ed") return S.draft;
+  if (idp === "b-rewrite") return P(S.rewrite.profile);
+  if (idp === "b-scan") return S.bScanDraft || P(S.scan.profile);
+  return S.draft;
+}
+
+/* ---------- render ---------- */
+const phone = document.getElementById("phone");
+function render(keepScroll = true) {
+  const sc = document.getElementById("scroll");
+  const top = keepScroll && sc ? sc.scrollTop : 0;
+  let html;
+  if (S.screen === "kb") html = kbScreen();
+  else if (S.variant === "B") html = toolsB();
+  else if (S.screen === "models") html = modelsScreen();
+  else if (S.screen === "edit") html = editorScreen();
+  else html = toolsA();
+  phone.innerHTML = html;
+  const nsc = document.getElementById("scroll");
+  if (nsc) nsc.scrollTop = top;
+  renderRail();
+}
+
+const JUMPS = {
+  A: [["tools", "Tools tab"], ["pick-scan", "Pick model for Scan"], ["models", "AI models"], ["edit", "Edit a model"], ["delete", "Delete a model"], ["new", "Add a model"], ["kb", "Keyboard scan panel"]],
+  B: [["tools", "Tools, expanded"], ["collapsed", "Tools, collapsed"], ["kb", "Keyboard scan panel"]],
+};
+const NOTES = {
+  A: `<h2>What changes in A</h2><ul>
+    <li><b>AI models</b> gets its own screen, opened from a card on Tools, the same way Shortcut rows work today.</li>
+    <li>Each saved model holds the server, API key, model and reasoning. Rewrite and Scan text each pick one, so the same key can serve both.</li>
+    <li>This replaces Save new / Update / Delete chips over always-live fields. You edit one model at a time and tap Save; leaving with unsaved edits asks first.</li>
+    <li><b>Adding</b> is two steps: pick where the model runs, then connect and choose the model. The name is optional and defaults to the model's name. “Use it for” switches assign it to Rewrite or Scan text on save.</li>
+    <li><b>Delete</b> and <b>Duplicate</b> live in the ⋮ menu of the editor, with Delete also at the bottom. Deleting a model that's in use names the model that takes over.</li>
+    <li><b>Test connection</b> sends a short request plus a tiny image, so Scan text knows if the model reads photos. OpenRouter models are labelled from its model list.</li>
+    <li>Your current settings and saved profiles become saved models when you update the app. Rewrite keeps using the active one.</li></ul>`,
+  B: `<h2>What changes in B</h2><ul>
+    <li>Everything stays on the Tools tab. One collapsible <b>AI connections</b> card holds a Rewrite and a Scan text section, each collapsible.</li>
+    <li>Each section is today's form, tidied: saved setups as chips, then provider, URL, key, model and reasoning.</li>
+    <li>Less navigation, but Tools gets long when both are open, and a key shared by both is entered or saved twice.</li></ul>`,
+};
+function renderRail() {
+  document.getElementById("vA").setAttribute("aria-pressed", S.variant === "A");
+  document.getElementById("vB").setAttribute("aria-pressed", S.variant === "B");
+  const cur = S.screen === "kb" ? "kb" : S.variant === "B" ? (S.bOpen.group ? "tools" : "collapsed") : S.sheet?.type === "pick" && S.sheet.feature === "scan" ? "pick-scan" : S.screen === "edit" ? (S.editId ? (S.confirmDelete ? "delete" : "edit") : "new") : S.screen;
+  document.getElementById("jumps").innerHTML = JUMPS[S.variant].map(([k, l]) => `<button data-j="${k}" aria-current="${k === cur}">${l}</button>`).join("");
+  document.getElementById("notes").innerHTML = NOTES[S.variant];
+}
+
+function openEditor(id) {
+  S.editId = id;
+  S.draft = id ? { ...P(id) } : { id: null, name: "", provider: "openai", url: "", model: "", key: "", locked: false, reasoning: "off", images: null };
+  S.draft.assign = { rewrite: false, scan: false };
+  S.dirty = false; S.confirmDelete = false; S.test = null; S.sheet = null; S.menu = false; S.discardAsk = false;
+  S.newStep = id ? null : "provider";
+  S.screen = "edit";
+  render(false);
+}
+function markDirty() { S.dirty = true; }
+
+/* ---------- events ---------- */
+phone.addEventListener("click", e => {
+  const el = e.target.closest("[data-a]");
+  if (!el) return;
+  const a = el.dataset.a;
+  switch (a) {
+    case "toggle-rewrite": S.rewrite.enabled = !S.rewrite.enabled; break;
+    case "toggle-fallback": S.scan.fallback = !S.scan.fallback; break;
+    case "engine": S.scan.engine = el.dataset.v; S.kbStatus = null; break;
+    case "del-ocr": S.scan.modelReady = false; break;
+    case "go": S.screen = el.dataset.to; S.sheet = null; render(false); return;
+    case "go-models": S.sheet = null; S.screen = "models"; render(false); return;
+    case "back":
+      if (S.screen === "edit" && S.dirty) { S.discardAsk = true; S.menu = false; break; }
+      if (S.screen === "edit" && !S.editId && S.newStep === "form") { S.newStep = "provider"; break; }
+      if (S.screen === "edit") { S.screen = "models"; S.draft = null; }
+      else S.screen = "tools";
+      S.sheet = null; render(false); return;
+    case "pick": S.sheet = { type: "pick", feature: el.dataset.feature }; break;
+    case "pick-set": {
+      if (el.getAttribute("aria-disabled") === "true") return;
+      if (S.sheet.feature === "rewrite") S.rewrite.profile = el.dataset.id; else S.scan.profile = el.dataset.id;
+      S.sheet = null; break;
+    }
+    case "sheet-close": S.sheet = null; break;
+    case "edit": openEditor(el.dataset.id); return;
+    case "new": openEditor(null); return;
+    case "provider": S.sheet = { type: "provider", idp: el.dataset.idp }; break;
+    case "provider-set": { const t = target(S.sheet.idp); t.provider = el.dataset.v; if (t.provider === "openrouter") t.url = ""; if (S.sheet.idp === "ed") markDirty(); S.sheet = null; break; }
+    case "reasoning": S.sheet = { type: "reasoning", idp: el.dataset.idp }; break;
+    case "reasoning-set": { target(S.sheet.idp).reasoning = el.dataset.v; if (S.sheet.idp === "ed") markDirty(); S.sheet = null; break; }
+    case "models-list": S.sheet = { type: "models-list", idp: el.dataset.idp }; break;
+    case "model-set": { const t = target(S.sheet.idp); t.model = el.dataset.v; const im = el.dataset.img; t.images = im === "true" ? true : im === "false" ? false : null; if (S.sheet.idp === "ed") { markDirty(); S.test = null; } S.sheet = null; break; }
+    case "lock": {
+      const fld = el.closest(".field").querySelector("input");
+      const idp = fld.id.replace(/-key$/, "");
+      const t = target(idp); t.locked = !t.locked; if (idp === "ed") markDirty(); break;
+    }
+    case "test": {
+      const d = S.draft;
+      if (!d.key && d.provider !== "nanbeige") { S.test = "nokey"; break; }
+      S.test = "running"; render();
+      setTimeout(() => {
+        if (S.screen !== "edit") return;
+        if (d.images === null) { d.images = true; markDirty(); }
+        S.test = { ok: true, ms: 280 + Math.round(Math.random() * 300) };
+        render();
+      }, 1100);
+      return;
+    }
+    case "save": {
+      const d = S.draft;
+      if (!d.name.trim()) d.name = suggestedName(d);
+      const { assign, ...rest } = d;
+      if (S.editId) Object.assign(P(S.editId), rest);
+      else { rest.id = "p" + (Date.now() % 100000); S.profiles.push({ ...rest }); S.editId = rest.id; d.id = rest.id; S.newStep = null; }
+      if (assign.rewrite) S.rewrite.profile = S.editId;
+      if (assign.scan && d.images !== false) S.scan.profile = S.editId;
+      d.assign = { rewrite: false, scan: false };
+      S.dirty = false; break;
+    }
+    case "new-provider": S.draft.provider = el.dataset.v; if (S.draft.provider === "openrouter") S.draft.url = ""; S.newStep = "form"; break;
+    case "assign": if (el.disabled) return; S.draft.assign[el.dataset.k] = !S.draft.assign[el.dataset.k]; markDirty(); break;
+    case "menu": S.menu = !S.menu; break;
+    case "dup": {
+      const src = S.draft; S.menu = false;
+      openEditor(null);
+      Object.assign(S.draft, { ...src, id: null, name: src.name + " copy", assign: { rewrite: false, scan: false } });
+      S.newStep = "form"; S.dirty = true; render(false); return;
+    }
+    case "keep": S.discardAsk = false; break;
+    case "discard": S.discardAsk = false; S.dirty = false; S.screen = "models"; S.draft = null; render(false); return;
+    case "del": S.confirmDelete = true; S.menu = false; break;
+    case "del-no": S.confirmDelete = false; break;
+    case "del-yes": {
+      const id = S.editId, other = firstOther(id);
+      if (S.rewrite.profile === id) S.rewrite.profile = other.id;
+      if (S.scan.profile === id) S.scan.profile = S.profiles.find(p => p.id !== id && p.images)?.id || other.id;
+      S.profiles = S.profiles.filter(p => p.id !== id);
+      S.screen = "models"; S.draft = null; render(false); return;
+    }
+    case "acc": S.bOpen[el.dataset.k] = !S.bOpen[el.dataset.k]; break;
+    case "b-use": {
+      if (el.dataset.f === "rewrite") S.rewrite.profile = el.dataset.id;
+      else { S.scan.profile = el.dataset.id; S.bScanDraft = null; }
+      break;
+    }
+    case "shoot": {
+      if (S.kbStatus && S.kbStatus.startsWith("Reading")) return;
+      const p = P(S.scan.profile);
+      S.kbStatus = S.scan.engine === "ai" ? `Reading with ${p.name}…` : "Reading on this phone…";
+      render();
+      setTimeout(() => {
+        S.kbStatus = "Inserted 5 lines";
+        S.kbText = "2 Masala dosa  360.00\n1 Filter coffee  90.00\n1 Idli vada  140.00\nGST 5%  29.50\nTOTAL  619.50";
+        render();
+      }, S.scan.engine === "ai" ? 1400 : 700);
+      return;
+    }
+    case "kb-close": S.screen = "tools"; S.kbStatus = null; S.kbText = ""; render(false); return;
+    case "noop": return;
+  }
+  render();
+});
+phone.addEventListener("keydown", e => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.matches('[role="button"][data-a]')) { e.preventDefault(); e.target.click(); }
+});
+phone.addEventListener("input", e => {
+  const f = e.target.dataset.f;
+  if (!f) return;
+  const inEditor = e.target.id.startsWith("ed-");
+  const idp = e.target.id.replace(/-(url|key|name)$/, "");
+  const t = inEditor ? S.draft : target(idp);
+  t[f] = e.target.value;
+  if (inEditor) {
+    const wasDirty = S.dirty; markDirty(); S.test = null;
+    // update save bar without re-rendering the focused input
+    const bar = phone.querySelector(".savebar");
+    if (bar) {
+      const info = saveInfo();
+      bar.querySelector(".grow").textContent = info.hint;
+      bar.querySelector('[data-a="save"]').disabled = !info.ok;
+      if (f === "name" && S.editId) phone.querySelector(".pill").textContent = S.draft.name || suggestedName(S.draft);
+    }
+    if (!wasDirty) {}
+  }
+});
+
+document.querySelector(".rail").addEventListener("click", e => {
+  const v = e.target.closest("[data-variant]");
+  if (v) { S.variant = v.dataset.variant; S.screen = "tools"; S.sheet = null; render(false); return; }
+  const th = e.target.closest("[data-theme-set]");
+  if (th) {
+    const val = th.dataset.themeSet;
+    if (val === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", val);
+    document.querySelectorAll("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", b === th));
+    return;
+  }
+  const j = e.target.closest("[data-j]");
+  if (!j) return;
+  S.sheet = null;
+  switch (j.dataset.j) {
+    case "tools": S.screen = "tools"; if (S.variant === "B") S.bOpen.group = true; break;
+    case "collapsed": S.screen = "tools"; S.bOpen.group = false; break;
+    case "pick-scan": S.screen = "tools"; S.sheet = { type: "pick", feature: "scan" }; break;
+    case "models": S.screen = "models"; break;
+    case "edit": openEditor("p3"); return;
+    case "delete": openEditor("p4"); S.confirmDelete = true; render(false); return;
+    case "new": openEditor(null); return;
+    case "kb": S.screen = "kb"; S.kbStatus = null; S.kbText = ""; break;
+  }
+  render(false);
+});
+
+render(false);
+</script>

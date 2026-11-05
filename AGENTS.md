@@ -6,10 +6,12 @@
 - An update installs only if it is signed with the same key as the app already on the device; otherwise it fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Check which key the installed app uses before choosing `installDebug` or a release build:
   `./gradlew :app:assembleRelease && adb install -r app/build/outputs/apk/release/app-release.apk`
 - Always install with `-r`. Never `adb uninstall` without asking: it erases the user's app data and settings.
+- Run `tools/bark/setup.sh` once per checkout (and after changing the model): it copies the Bark model (~700 MB) into the gitignored `app/src/main/assets/bark/`. The model is bundled in the APK (no download host yet), so the APK is ~780 MB.
 
 ## Verify changes
 
 - There are no unit tests; `./gradlew :app:assembleRelease` succeeding is the compile check.
+- Voice typing (Voice key → `ime/VoicePanelView` → `voice/BarkEngine` → `voice/BarkRecognizer`) runs Bark 3.0 Clean on onnxruntime-android: `preprocessor.onnx` (the original HF feature extractor; sherpa-onnx's NeMo frontend differs and cost ~5% WER), an exact 4-bit encoder with int8 activations (`v_exact4_b128_acc4`: ~2% WER vs the original, ~2x faster than the 0% `v_exact4_b128`; MatMulNBits, needs the full ORT AAR), fp32 decoder/joiner, and a Kotlin TDT greedy loop ported from `~/zainbits/bark-onnx/pydecode.py`. Models are memory-mapped from the APK (`.onnx` is `noCompress`), single-file only. Check any new export against the original weights in `~/zainbits/bark-onnx` before bundling.
 - Scan text downloads its PP-OCRv6 model at runtime (`ocrlab/ppocr/OcrModelStore`, pinned revision + SHA-256). Changing the model means updating the revision, hashes and sizes there together.
 - After changing `typing/` (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`), run the engine check. It needs a word list that is not in the repo:
   `curl -sSLO https://norvig.com/ngrams/count_1w.txt && tools/typing/verify_engine.sh count_1w.txt` (don't commit `count_1w.txt`).
@@ -24,6 +26,7 @@
 - The same applies to `translit/LekhaniTransliterator.kt`; Android glue belongs in `HindiTransliterationEngine`.
 - Hot paths (`onDraw`, `onTouchEvent`, input dispatch) must not allocate, do I/O, or block.
 - Put dimensions, colors, and defaults in `constants/`; persisted settings and secrets go through `KeyboardSettings`.
+- AI models: saved profiles (`KeyboardSettings.readAiModels`/`saveAiModel`) are the source of truth. Rewrite uses the active profile, which `activateAgentProfile` copies into the legacy "current" agent fields the keyboard reads; Scan text's AI engine uses `scan_profile_id` via `ai/AiModelClient`. Keep both in sync when changing either.
 - Companion-app features live in `integrations/` behind `KeyboardIntegrations`. They must be optional: when the companion app is missing, signed with another key, or fails, the keyboard behaves exactly as without it. Never call them from hot paths, and do their IPC off the main thread with unstable provider clients.
 - Ferry (the Mac bridge) must be signed with the same release key; its contract is `protocol/BRIDGE.md` in the Ferry repo.
 - Architecture and design background: [README.md](README.md#architecture), [docs/typing-accuracy.md](docs/typing-accuracy.md).

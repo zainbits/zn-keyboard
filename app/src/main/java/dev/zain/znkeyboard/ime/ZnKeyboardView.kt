@@ -26,6 +26,7 @@ import dev.zain.znkeyboard.ShortcutMacro
 import dev.zain.znkeyboard.ShortcutMacros
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.constants.ImeDimensions
+import dev.zain.znkeyboard.constants.VoiceDefaults
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
 import dev.zain.znkeyboard.typing.CharLanguageModel
 import dev.zain.znkeyboard.typing.TypingLearner
@@ -60,11 +61,22 @@ class ZnKeyboardView @JvmOverloads constructor(
         fun onTransliterationSelected(text: String)
         fun onHindiModeToggled()
         fun onOcrPanelRequested()
+        fun onVoicePanelRequested()
     }
 
     var callback: Callback? = null
 
     private val keyPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    // Mic icon geometry in the 24-unit icon viewport, built once (drawn on the hot path).
+    private val micCapsule = RectF(9f, 3f, 15f, 14f)
+    private val micStand = Path().apply {
+        moveTo(6f, 11f)
+        cubicTo(6f, 18.5f, 18f, 18.5f, 18f, 11f)
+        moveTo(12f, 17.2f)
+        lineTo(12f, 21f)
+        moveTo(9f, 21f)
+        lineTo(15f, 21f)
+    }
     private val letterTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 400, false)
     private val labelTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 500, false)
     private val strongLabelTypeface = android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, 700, false)
@@ -873,7 +885,12 @@ class ZnKeyboardView @JvmOverloads constructor(
         if (rewriteLoading) {
             drawRewriteLoadingContent(canvas, key.label, bounds, contentColor, contentAlpha)
         } else key.icon?.let {
-            drawIcon(canvas, it, bounds, contentColor, contentAlpha)
+            val iconColor = if (it == KeyIcon.Mic) {
+                if (shortcutRowState.voiceWarm) VoiceDefaults.WARM_KEY_COLOR else VoiceDefaults.COLD_KEY_COLOR
+            } else {
+                contentColor
+            }
+            drawIcon(canvas, it, bounds, iconColor, contentAlpha)
         } ?: run {
             if (key.subLabel != null) {
                 when (key.subLabelStyle) {
@@ -1179,8 +1196,14 @@ class ZnKeyboardView @JvmOverloads constructor(
             KeyIcon.Search -> drawSearchIcon(canvas)
             KeyIcon.Enter -> drawEnterIcon(canvas)
             KeyIcon.Space -> drawSpaceIcon(canvas)
+            KeyIcon.Mic -> drawMicIcon(canvas)
         }
         canvas.restore()
+    }
+
+    private fun drawMicIcon(canvas: Canvas) {
+        canvas.drawRoundRect(micCapsule, 3f, 3f, iconPaint)
+        canvas.drawPath(micStand, iconPaint)
     }
 
     private fun drawEmojiIcon(canvas: Canvas) {
@@ -1402,6 +1425,7 @@ class ZnKeyboardView @JvmOverloads constructor(
             is KeyIntent.AcceptTransliteration -> callback?.onTransliterationSelected(intent.text)
             KeyIntent.ToggleHindi -> callback?.onHindiModeToggled()
             KeyIntent.OpenOcr -> callback?.onOcrPanelRequested()
+            KeyIntent.OpenVoice -> callback?.onVoicePanelRequested()
             KeyIntent.None -> Unit
             is KeyIntent.Dispatch -> {
                 notifyLearner(intent.action, sample)
@@ -1762,6 +1786,15 @@ class ZnKeyboardView @JvmOverloads constructor(
                 intent = KeyIntent.OpenOcr,
                 weight = weight,
                 role = KeyRole.Function,
+                enabled = enabled,
+            )
+            "voice" -> KeySpec(
+                id = id,
+                label = "Voice",
+                intent = KeyIntent.OpenVoice,
+                weight = weight,
+                role = KeyRole.Function,
+                icon = KeyIcon.Mic,
                 enabled = enabled,
             )
             "ctrl" -> KeySpec(id, "Ctrl", KeyIntent.ToggleCtrl, weight, KeyRole.Function, ctrl, enabled = enabled)
@@ -2200,6 +2233,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         Search,
         Enter,
         Space,
+        Mic,
     }
 
     private enum class ArrowDirection {
@@ -2300,6 +2334,7 @@ class ZnKeyboardView @JvmOverloads constructor(
         data class AcceptTransliteration(val text: String) : KeyIntent()
         data object ToggleHindi : KeyIntent()
         data object OpenOcr : KeyIntent()
+        data object OpenVoice : KeyIntent()
         data object None : KeyIntent()
         data class Dispatch(val action: KeyboardAction) : KeyIntent()
     }
@@ -2328,6 +2363,8 @@ class ZnKeyboardView @JvmOverloads constructor(
         val hindiMode: Boolean = false,
         /** The current field accepts Hindi typing (not a password, URL, email or terminal field). */
         val hindiAvailable: Boolean = false,
+        /** Bark is loaded in memory, so voice typing starts without a load (Voice key turns green). */
+        val voiceWarm: Boolean = false,
     )
 
     private companion object {
