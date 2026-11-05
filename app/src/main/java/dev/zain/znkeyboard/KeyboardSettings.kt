@@ -2,6 +2,7 @@ package dev.zain.znkeyboard
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.RectF
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -93,6 +94,7 @@ object KeyboardSettings {
     private const val KEY_SCAN_ENGINE = "scan_engine"
     private const val KEY_SCAN_PROFILE_ID = "scan_profile_id"
     private const val KEY_SCAN_FALLBACK = "scan_fallback"
+    private const val KEY_SCAN_AREA = "scan_area"
     private const val KEY_AGENT_API_KEY_LEGACY = "agent_api_key"
     private const val KEY_AGENT_API_KEY_CIPHERTEXT = "agent_api_key_ciphertext"
     private const val KEY_AGENT_API_KEY_IV = "agent_api_key_iv"
@@ -1025,6 +1027,27 @@ object KeyboardSettings {
 
     fun saveScanFallback(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putBoolean(KEY_SCAN_FALLBACK, enabled).apply()
+    }
+
+    /** Scan text's crop as fractions of the viewfinder (left, top, right, bottom), or null for the whole frame. */
+    fun readScanArea(context: Context): RectF? {
+        val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_SCAN_AREA, null) ?: return null
+        val values = raw.split(',').mapNotNull { it.toFloatOrNull() }
+        if (values.size != 4) return null
+        val area = RectF(values[0], values[1], values[2], values[3])
+        val valid = area.left >= 0f && area.top >= 0f && area.right <= 1f && area.bottom <= 1f &&
+            area.width() > 0f && area.height() > 0f
+        return area.takeIf { valid }
+    }
+
+    fun saveScanArea(context: Context, area: RectF?) {
+        val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
+        if (area == null) {
+            editor.remove(KEY_SCAN_AREA)
+        } else {
+            editor.putString(KEY_SCAN_AREA, "${area.left},${area.top},${area.right},${area.bottom}")
+        }
+        editor.apply()
     }
 
     /** Scan text's AI model as a saved profile, or null when none is chosen. */

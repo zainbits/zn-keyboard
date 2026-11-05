@@ -88,6 +88,11 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         scaleType = android.widget.ImageView.ScaleType.FIT_XY
         visibility = GONE
     }
+    // Draws over the preview and passes taps and pinches through to it.
+    private val scanArea = ScanAreaOverlayView(context).apply {
+        touchTarget = previewView
+        onAreaChanged = { area -> KeyboardSettings.saveScanArea(context, area) }
+    }
     private val statusText = TextView(context).apply {
         setTextColor(Color.WHITE)
         setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
@@ -177,6 +182,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             }
             addView(previewView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(frozenFrame, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+            addView(scanArea, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
             addView(closeButton, LayoutParams(context.dp(44), context.dp(44), Gravity.TOP or Gravity.START).margins(8))
             addView(torchButton, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(44), Gravity.TOP or Gravity.END).margins(8))
             addView(engineToggle, LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(40), Gravity.TOP or Gravity.CENTER_HORIZONTAL).margins(10))
@@ -212,6 +218,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         aiModel = KeyboardSettings.readScanProfile(context)?.takeIf { it.isReady() && it.imageInput != false }
         engineMode = if (aiModel != null) KeyboardSettings.readScanEngine(context) else ScanEngine.Device
         fallbackToDevice = KeyboardSettings.readScanFallback(context)
+        scanArea.setArea(KeyboardSettings.readScanArea(context))
         updateEngineToggle()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
             permissionButton.visibility = VISIBLE
@@ -354,6 +361,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
         freeze()
         showStatus("Hold still…")
         val token = generation
+        val area = scanArea.areaFraction()
         camera.takePicture(worker, object : ImageCapture.OnImageCapturedCallback() {
             override fun onCaptureStarted() {
                 mainHandler.post { if (token == generation) showStatus("Reading…") }
@@ -362,7 +370,7 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
             override fun onCaptureSuccess(image: ImageProxy) {
                 val model = aiModel.takeIf { engineMode == ScanEngine.Ai }
                 val text = runCatching {
-                    val square = image.use { visibleSquare(it) }
+                    val square = image.use { visibleSquare(it, area) }
                     try {
                         if (model != null) readWithAi(token, model, square) else readOnDevice(square)
                     } finally {
@@ -470,9 +478,10 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
 
         /**
          * The still, cropped to what the viewfinder showed (CameraController's viewport), upright,
-         * and letterboxed onto a white square for the fixed-size PP-OCR detector.
+         * then to the scan [area] (fractions of the viewfinder, null for all of it), and letterboxed
+         * onto a white square for the fixed-size PP-OCR detector.
          */
-        fun visibleSquare(image: ImageProxy): Bitmap {
+        fun visibleSquare(image: ImageProxy, area: android.graphics.RectF?): Bitmap {
             var bitmap = image.toBitmap()
             val crop = image.cropRect
             if (bitmap.width == image.width && bitmap.height == image.height &&
@@ -486,6 +495,13 @@ class OcrCameraPanelView(context: Context) : FrameLayout(context), LifecycleOwne
                     bitmap,
                     Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, Matrix().apply { postRotate(rotation.toFloat()) }, true),
                 )
+            }
+            if (area != null) {
+                val left = (area.left * bitmap.width).roundToInt().coerceIn(0, bitmap.width - 1)
+                val top = (area.top * bitmap.height).roundToInt().coerceIn(0, bitmap.height - 1)
+                val right = (area.right * bitmap.width).roundToInt().coerceIn(left + 1, bitmap.width)
+                val bottom = (area.bottom * bitmap.height).roundToInt().coerceIn(top + 1, bitmap.height)
+                bitmap = replace(bitmap, Bitmap.createBitmap(bitmap, left, top, right - left, bottom - top))
             }
             val longest = max(bitmap.width, bitmap.height)
             val scale = if (longest > MAX_SIDE) MAX_SIDE.toFloat() / longest else 1f
