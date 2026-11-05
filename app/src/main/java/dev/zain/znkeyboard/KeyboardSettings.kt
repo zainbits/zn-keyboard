@@ -61,8 +61,9 @@ object KeyboardSettings {
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
     private const val KEY_SECOND_ROW_BUTTONS = "second_row_buttons"
-    private const val KEY_KEYBOARD_ROW_ORDER = "keyboard_row_order"
-    private const val KEY_SHORTCUT_PAGE_ROW = "shortcut_page_row"
+    // Was "keyboard_row_order" (row B on top). Rows became pages with A first, so old values are ignored.
+    private const val KEY_KEYBOARD_ROW_ORDER = "shortcut_page_order"
+    private const val KEY_SHORTCUT_PAGE_ROW = "shortcut_page_row_v2"
     private const val KEY_SHORTCUT_MACROS = "shortcut_macros"
     private const val KEY_SAVED_TEXT_PANEL_TAB = "saved_text_panel_tab"
     private const val KEY_TEXT_SNIPPETS = "text_snippets"
@@ -1197,7 +1198,7 @@ object KeyboardSettings {
                             .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
-                            .put("shortcutRowOrder", stringArrayJson(readKeyboardRowOrder(context)))
+                            .put("shortcutPageOrder", stringArrayJson(readKeyboardRowOrder(context)))
                             .put("shortcutMacros", ShortcutMacros.toJson(readShortcutMacros(context))),
                     )
                     .put("snippets", textSnippetsJson(readTextSnippets(context)))
@@ -1305,7 +1306,8 @@ object KeyboardSettings {
         val secondRowButtons = keyboard.optStringList("shortcutRowBKeys")
             ?.let(::normalizeSecondRowButtonIds)
             ?: readSecondRowButtonIds(context)
-        val rowOrder = keyboard.optStringList("shortcutRowOrder")
+        // Older backups' "shortcutRowOrder" put row B on top; ignore it so page A stays first.
+        val rowOrder = keyboard.optStringList("shortcutPageOrder")
             ?.let(::normalizeKeyboardRowOrder)
             ?: readKeyboardRowOrder(context)
 
