@@ -22,7 +22,7 @@ import androidx.core.content.ContextCompat
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.constants.VoiceDefaults
 import dev.zain.znkeyboard.voice.BarkEngine
-import dev.zain.znkeyboard.voice.BarkModelAssets
+import dev.zain.znkeyboard.voice.BarkModelSource
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -37,6 +37,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
         fun onVoiceTextCaptured(text: String)
         fun onVoicePanelClosed()
         fun onVoicePermissionRequested()
+        fun onVoiceSetupRequested()
     }
 
     var callback: Callback? = null
@@ -77,6 +78,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
     }
     private val retryButton = pillButton("Try again") { start() }
     private val permissionButton = pillButton("Allow microphone access") { callback?.onVoicePermissionRequested() }
+    private val setupButton = pillButton("Choose model folder") { callback?.onVoiceSetupRequested() }
     private val closeButton = ImePanelChrome.backButton(
         context = context,
         contentDescription = "Back to keyboard",
@@ -99,6 +101,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
             addView(doneButton, LayoutParams(buttonSize, buttonSize, Gravity.CENTER))
             addView(retryButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(permissionButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+            addView(setupButton, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.CENTER))
             addView(hintText, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).margins(12))
         }
         addView(
@@ -126,10 +129,10 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
             show(Mode.Permission)
             return
         }
-        if (!BarkModelAssets.isBundled(context)) {
-            statusText.text = "This build has no speech model"
-            hintText.text = "Run tools/bark/setup.sh, then rebuild the app."
-            show(Mode.Idle)
+        if (!BarkModelSource.isReady(context)) {
+            statusText.text = "Voice typing needs its speech model"
+            hintText.text = "Download it, then pick its folder in Settings."
+            show(Mode.Setup)
             return
         }
         hintText.text = "${VoiceDefaults.MODEL_DISPLAY_NAME} runs on this phone"
@@ -256,7 +259,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
         show(Mode.Retry)
     }
 
-    private enum class Mode { Idle, Permission, Listening, Working, Retry }
+    private enum class Mode { Idle, Permission, Setup, Listening, Working, Retry }
 
     private fun show(mode: Mode) {
         doneButton.visibility = if (mode == Mode.Listening || mode == Mode.Working) VISIBLE else GONE
@@ -265,6 +268,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
         levelRing.visibility = doneButton.visibility
         retryButton.visibility = if (mode == Mode.Retry) VISIBLE else GONE
         permissionButton.visibility = if (mode == Mode.Permission) VISIBLE else GONE
+        setupButton.visibility = if (mode == Mode.Setup) VISIBLE else GONE
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {

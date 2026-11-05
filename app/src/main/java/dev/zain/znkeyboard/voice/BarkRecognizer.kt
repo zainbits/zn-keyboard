@@ -5,69 +5,37 @@ import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
 import dev.zain.znkeyboard.constants.VoiceDefaults
-import java.io.FileInputStream
 import java.nio.FloatBuffer
 import java.nio.IntBuffer
 import java.nio.LongBuffer
-import java.nio.channels.FileChannel
 
 /**
- * Bark 3.0 Clean speech-to-text, bundled in the APK under assets/bark/ (see tools/bark/setup.sh).
+ * Bark 3.0 Clean speech-to-text from the folder the user picked (BarkModelSource).
  *
  * preprocessor.onnx is the original model's own feature extractor (HF Parakeet), so features match
- * the reference exactly; sherpa-onnx's NeMo frontend differs and cost ~5% word errors. The encoder
- * is an exact 4-bit packing of Bark's weights (MatMulNBits), decoder/joiner are fp32.
+ * the reference; sherpa-onnx's NeMo frontend differs and cost ~5% word errors. The encoder packs
+ * Bark's weights exactly in 4 bits (MatMulNBits) with int8 activations; decoder/joiner are fp32.
+ *
+ * One loaded recognizer is ~1 GB of native memory. Not thread-safe: create, use and close it on a
+ * single worker thread (BarkEngine does). Files are memory-mapped, so nothing lands on the Java heap.
  */
-object BarkModelAssets {
-    private const val DIR = "bark"
-    const val PREPROCESSOR = "$DIR/preprocessor.onnx"
-    const val ENCODER = "$DIR/encoder.onnx"
-    const val DECODER = "$DIR/decoder.onnx"
-    const val JOINER = "$DIR/joiner.onnx"
-    const val TOKENS = "$DIR/tokens.txt"
-    private val REQUIRED = listOf("preprocessor.onnx", "encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt")
-
-    /** True when this build carries the model; a build made without running setup.sh has none. */
-    fun isBundled(context: Context): Boolean = runCatching {
-        context.assets.list(DIR)?.toSet()?.containsAll(REQUIRED) == true
-    }.getOrDefault(false)
-
-    /** Size of the model files in bytes, or 0 when absent. ONNX assets are stored uncompressed, so openFd works. */
-    fun bundledBytes(context: Context): Long = runCatching {
-        listOf(PREPROCESSOR, ENCODER, DECODER, JOINER).sumOf { path ->
-            context.assets.openFd(path).use { it.length }
-        }
-    }.getOrDefault(0L)
-}
-
-/**
- * One loaded recognizer (~1 GB of native memory). Not thread-safe: create, use and close it on a
- * single worker thread (BarkEngine does). Models are memory-mapped straight from the APK, so no
- * copy lands on the Java heap.
- */
-internal class BarkRecognizer(context: Context) : AutoCloseable {
+internal class BarkRecognizer(private val context: Context, private val files: BarkModelSource.Files) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val options = OrtSession.SessionOptions().apply {
         setIntraOpNumThreads(VoiceDefaults.RECOGNIZER_THREADS)
         setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
     }
-    private val preprocessor = session(context, BarkModelAssets.PREPROCESSOR)
-    private val encoder = session(context, BarkModelAssets.ENCODER)
-    private val decoder = session(context, BarkModelAssets.DECODER)
-    private val joiner = session(context, BarkModelAssets.JOINER)
+    private val preprocessor = session(BarkModelSource.PREPROCESSOR)
+    private val encoder = session(BarkModelSource.ENCODER)
+    private val decoder = session(BarkModelSource.DECODER)
+    private val joiner = session(BarkModelSource.JOINER)
     private val decoderInputs = decoder.inputNames.toList() // targets, target_length, h, c
     private val joinerInputs = joiner.inputNames.toList() // encoder_outputs, decoder_outputs
-    private val tokens: Array<String> = loadTokens(context)
+    private val tokens: Array<String> = loadTokens()
     private val blank = tokens.size - 1
 
-    private fun session(context: Context, asset: String): OrtSession {
-        val buffer = context.assets.openFd(asset).use { fd ->
-            FileInputStream(fd.fileDescriptor).channel.use { channel ->
-                channel.map(FileChannel.MapMode.READ_ONLY, fd.startOffset, fd.declaredLength)
-            }
-        }
-        return env.createSession(buffer, options)
-    }
+    private fun session(name: String): OrtSession =
+        env.createSession(BarkModelSource.map(context, files.uri(name)), options)
 
     /** Blocking. [samples] are mono floats in -1..1 at 16 kHz. */
     fun transcribe(samples: FloatArray, sampleRate: Int): String {
@@ -155,9 +123,10 @@ internal class BarkRecognizer(context: Context) : AutoCloseable {
         return best
     }
 
-    private fun loadTokens(context: Context): Array<String> {
+    private fun loadTokens(): Array<String> {
         val byId = HashMap<Int, String>()
-        context.assets.open(BarkModelAssets.TOKENS).bufferedReader().useLines { lines ->
+        val stream = context.contentResolver.openInputStream(files.uri(BarkModelSource.TOKENS)) ?: error("Couldn't read tokens.txt")
+        stream.bufferedReader().useLines { lines ->
             lines.forEach { line ->
                 val split = line.lastIndexOf(' ')
                 if (split > 0) line.substring(split + 1).toIntOrNull()?.let { byId[it] = line.substring(0, split) }

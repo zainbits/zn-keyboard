@@ -526,6 +526,16 @@ class ZnKeyboardInputMethodService : InputMethodService(),
         showKeyboardPanel()
     }
 
+    override fun onVoiceSetupRequested() {
+        showKeyboardPanel()
+        startActivity(
+            Intent(this, dev.zain.znkeyboard.SettingsActivity::class.java)
+                .putExtra(dev.zain.znkeyboard.SettingsActivity.EXTRA_DESTINATION, "tools")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+        )
+        Toast.makeText(this, "Pick the speech model folder under Voice typing.", Toast.LENGTH_LONG).show()
+    }
+
     override fun onVoicePermissionRequested() {
         showKeyboardPanel()
         startActivity(

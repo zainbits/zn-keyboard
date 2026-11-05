@@ -35,5 +35,5 @@ Thumbs.db
 
 /codex-oss-application.md
 
-# Bark voice typing: copied by tools/bark/setup.sh, too large for git
+# The Bark model is never bundled: the app loads it from a folder the user picks
 /app/src/main/assets/bark/

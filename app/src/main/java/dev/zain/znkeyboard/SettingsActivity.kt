@@ -139,8 +139,14 @@ import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 class SettingsActivity : ComponentActivity() {
+    companion object {
+        /** Opens a settings tab by id ("typing", "keyboard", "tools", ...), e.g. from the keyboard. */
+        const val EXTRA_DESTINATION = "dev.zain.znkeyboard.extra.DESTINATION"
+    }
+
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
+        val initialDestinationId = intent.getStringExtra(EXTRA_DESTINATION)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.auto(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT),
@@ -168,6 +174,7 @@ class SettingsActivity : ComponentActivity() {
                         "ai_models" -> AiModelsScreen(onBack = { openScreen = "main" })
                         else -> stateHolder.SaveableStateProvider("settings") {
                             SettingsScreen(
+                                initialDestinationId = initialDestinationId,
                                 onOpenShortcuts = { openScreen = "shortcuts" },
                                 onOpenAiModels = { openScreen = "ai_models" },
                             )
@@ -181,7 +188,7 @@ class SettingsActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SettingsScreen(onOpenShortcuts: () -> Unit, onOpenAiModels: () -> Unit) {
+private fun SettingsScreen(initialDestinationId: String?, onOpenShortcuts: () -> Unit, onOpenAiModels: () -> Unit) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var heightScale by remember { mutableFloatStateOf(KeyboardSettings.readHeightScale(context)) }
@@ -201,7 +208,9 @@ private fun SettingsScreen(onOpenShortcuts: () -> Unit, onOpenAiModels: () -> Un
     var backupPasswordDialogMode by remember { mutableStateOf<BackupPasswordDialogMode?>(null) }
     var pendingExportPassword by remember { mutableStateOf<String?>(null) }
     var pendingImportUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedDestinationId by rememberSaveable { mutableStateOf(SettingsDestination.Typing.id) }
+    var selectedDestinationId by rememberSaveable {
+        mutableStateOf(initialDestinationId?.takeIf { id -> SettingsDestination.entries.any { it.id == id } } ?: SettingsDestination.Typing.id)
+    }
     val selectedDestination = SettingsDestination.entries.firstOrNull { it.id == selectedDestinationId }
         ?: SettingsDestination.Typing
     val destinationScrollState = rememberSaveable(selectedDestinationId, saver = ScrollState.Saver) { ScrollState(0) }

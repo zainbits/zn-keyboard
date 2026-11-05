@@ -78,10 +78,10 @@ object BarkEngine {
 
     private fun ensureRecognizer(context: Context): BarkRecognizer? {
         recognizer?.let { return it }
-        if (!BarkModelAssets.isBundled(context)) return null
+        val files = (BarkModelSource.status(context) as? BarkModelSource.Status.Ready)?.files ?: return null
         setState(State.Loading)
         val started = System.currentTimeMillis()
-        val loaded = runCatching { BarkRecognizer(context) }
+        val loaded = runCatching { BarkRecognizer(context, files) }
             .onFailure { Log.w(TAG, "Bark load failed", it) }
             .getOrNull()
         if (loaded != null) Log.i(TAG, "Loaded Bark in ${System.currentTimeMillis() - started} ms")
