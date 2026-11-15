@@ -15,7 +15,7 @@
 - Scan text downloads its PP-OCRv6 model at runtime (`ocrlab/ppocr/OcrModelStore`, pinned revision + SHA-256). Changing the model means updating the revision, hashes and sizes there together.
 - After changing `typing/` (`TouchModel`, `CharLanguageModel`, `TouchDecoder`, `TypingLearner`), run the engine check. It needs a word list that is not in the repo:
   `curl -sSLO https://norvig.com/ngrams/count_1w.txt && tools/typing/verify_engine.sh count_1w.txt` (don't commit `count_1w.txt`).
-- After changing `liquidnav/LiquidNavModel.kt` or `constants/LiquidNavMotion.kt`, run `tools/liquidnav/verify_liquid_nav.sh`. Tune motion visually in `previews/liquid-nav-drop.html`, which mirrors the engine and shader.
+- The settings nav bar comes from the Meniscus library (`io.github.zainbits:meniscus`, repo `zainbits/meniscus`). Change its motion or shader there, not here.
 - After changing `translit/LekhaniTransliterator.kt` or the `assets/translit/` model, run `tools/translit/verify_lekhani.sh` (compares with `tools/translit/golden.tsv`; regenerate that with `tools/translit/make_golden.mjs`, which needs the reference `translit.js` from https://huggingface.co/udgamlabs/Lekhani/resolve/main/translit.js — don't commit it).
 - Keyboard behavior is device-facing; say so when a change still needs testing in a real text field.
 
