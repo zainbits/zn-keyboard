@@ -17,10 +17,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // Temporary: Meniscus 0.1.0 is tested from a local publish before it goes to Maven Central.
-        mavenLocal {
-            content { includeGroup("io.github.zainbits") }
-        }
     }
 }
 
