@@ -68,6 +68,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.meniscus)
     implementation(libs.onnxruntime.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

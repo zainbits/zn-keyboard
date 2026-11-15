@@ -122,21 +122,21 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.PopupProperties
-import dev.zain.znkeyboard.constants.LiquidNavDimensions
 import dev.zain.znkeyboard.constants.SettingsBackupDefaults
 import dev.zain.znkeyboard.constants.SettingsShellDimensions
 import dev.zain.znkeyboard.constants.SettingsUiDimensions
 import dev.zain.znkeyboard.constants.SettingsUiTimings
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
-import dev.zain.znkeyboard.liquidnav.LiquidNavBar
 import dev.zain.znkeyboard.ocrlab.OcrLabActivity
 import dev.zain.znkeyboard.voice.VoiceTypingSection
-import dev.zain.znkeyboard.liquidnav.LiquidNavItem
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+import io.github.zainbits.meniscus.MeniscusNavBar
+import io.github.zainbits.meniscus.MeniscusNavBarDefaults
+import io.github.zainbits.meniscus.MeniscusNavItem
 
 class SettingsActivity : ComponentActivity() {
     companion object {
@@ -352,8 +352,8 @@ private fun SettingsScreen(initialDestinationId: String?, onOpenShortcuts: () ->
                     top = SettingsShellDimensions.TITLE_PILL_TOP_GAP +
                         SettingsShellDimensions.TITLE_PILL_HEIGHT +
                         SettingsShellDimensions.CONTENT_CLEARANCE,
-                    bottom = LiquidNavDimensions.BOTTOM_GAP +
-                        LiquidNavDimensions.BAR_HEIGHT +
+                    bottom = MeniscusNavBarDefaults.BottomGap +
+                        MeniscusNavBarDefaults.Height +
                         SettingsShellDimensions.CONTENT_CLEARANCE,
                 ),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -513,7 +513,7 @@ private fun SettingsScreen(initialDestinationId: String?, onOpenShortcuts: () ->
                 ),
         )
 
-        LiquidNavBar(
+        MeniscusNavBar(
             items = settingsNavItems,
             selectedIndex = selectedDestination.ordinal,
             onSelect = { index ->
@@ -527,9 +527,9 @@ private fun SettingsScreen(initialDestinationId: String?, onOpenShortcuts: () ->
                         .only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal),
                 )
                 .padding(
-                    start = LiquidNavDimensions.SIDE_MARGIN,
-                    end = LiquidNavDimensions.SIDE_MARGIN,
-                    bottom = LiquidNavDimensions.BOTTOM_GAP,
+                    start = MeniscusNavBarDefaults.SideMargin,
+                    end = MeniscusNavBarDefaults.SideMargin,
+                    bottom = MeniscusNavBarDefaults.BottomGap,
                 ),
         )
     }
@@ -573,7 +573,7 @@ private fun SettingsTitlePill(title: String, modifier: Modifier = Modifier) {
     }
 }
 
-private val settingsNavItems = SettingsDestination.entries.map { LiquidNavItem(it.label, it.iconResId) }
+private val settingsNavItems = SettingsDestination.entries.map { MeniscusNavItem(it.label, it.iconResId) }
 
 @Composable
 private fun TextSnippetsSection(

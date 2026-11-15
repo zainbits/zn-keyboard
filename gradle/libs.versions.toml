@@ -11,6 +11,7 @@ glide = "4.16.0"
 lifecycleRuntimeKtx = "2.10.0"
 recyclerview = "1.4.0"
 onnxruntime = "1.31.1"
+meniscus = "0.1.0"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -32,6 +33,7 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
 litert-gpu = { group = "com.google.ai.edge.litert", name = "litert-gpu", version.ref = "litert" }
 mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition", version.ref = "mlkitTextRecognition" }
+meniscus = { group = "io.github.zainbits", name = "meniscus", version.ref = "meniscus" }
 onnxruntime-android = { group = "com.microsoft.onnxruntime", name = "onnxruntime-android", version.ref = "onnxruntime" }
 
 [plugins]
