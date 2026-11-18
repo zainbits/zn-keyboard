@@ -24,7 +24,7 @@ android {
         minSdk = 36
         targetSdk = 36
         versionCode = 14
-        versionName = "1.2.1"
+        versionName = "1.3.0"
 
         // Personal arm64 phones only; keeps LiteRT and ML Kit native libraries from multiplying APK size.
         ndk {
