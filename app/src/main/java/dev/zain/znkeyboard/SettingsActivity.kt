@@ -1540,8 +1540,8 @@ private fun CustomEmojiTagsEditor(
         }
 
         val helperText = when {
-            draftEmoji.isBlank() && draftTags.isBlank() -> "Paste one supported emoji and comma-separated tags."
-            normalizedEmoji == null -> "Paste exactly one supported emoji."
+            draftEmoji.isBlank() && draftTags.isBlank() -> "Paste an emoji or emoji combo and comma-separated tags."
+            normalizedEmoji == null -> "Paste one emoji or a combo of up to ${EmojiCatalog.MAX_COMPOSITE_EMOJIS} supported emojis."
             normalizedTags.isEmpty() -> "Enter at least one tag."
             atLimit -> "Remove an emoji before adding another."
             else -> "Search will match: ${normalizedTags.joinToString(", ")}"

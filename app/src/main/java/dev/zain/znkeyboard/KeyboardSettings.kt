@@ -614,7 +614,7 @@ object KeyboardSettings {
     }
 
     fun normalizeEmojiForCustomTags(emoji: String): String? {
-        return EmojiCatalog.entryForEmoji(emoji.trim())?.emoji
+        return EmojiCatalog.normalizeEmojiOrComposite(emoji)
     }
 
     fun normalizeCustomEmojiTagInput(input: String): List<String> {

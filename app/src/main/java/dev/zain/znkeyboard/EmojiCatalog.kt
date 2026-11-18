@@ -50,6 +50,11 @@ object EmojiCatalog {
     const val RECENT_COLUMN_COUNT = 8
     const val MAX_STORED_RECENT_EMOJIS = MAX_RECENT_ROW_COUNT * RECENT_COLUMN_COUNT
     private const val MAX_SEARCH_RESULTS = 240
+    const val MAX_COMPOSITE_EMOJIS = 8
+    private const val MAX_COMPOSITE_CODE_UNITS = 96
+    private const val MAX_CACHED_COMPOSITES = 512
+    private const val ZWJ = '\u200D'
+    private const val VS16 = "\uFE0F"
 
     val categories: List<EmojiCategory> = EmojiCategory.entries
 
@@ -117,9 +122,69 @@ object EmojiCatalog {
             }
     }
 
-    fun isSupportedEmoji(emoji: String): Boolean = emoji in supportedEmoji
+    private val maxEmojiLength: Int by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        supportedEmoji.maxOf { it.length }
+    }
 
-    fun entryForEmoji(emoji: String): EmojiEntry? = entriesByEmoji[emoji]
+    private val compositeEntries = java.util.concurrent.ConcurrentHashMap<String, EmojiEntry>()
+
+    fun isSupportedEmoji(emoji: String): Boolean = entryForEmoji(emoji) != null
+
+    fun entryForEmoji(emoji: String): EmojiEntry? =
+        entriesByEmoji[emoji] ?: compositeEntryFor(emoji)
+
+    /**
+     * Normalizes pasted text into one catalog emoji or a composite: a sequence of up to
+     * [MAX_COMPOSITE_EMOJIS] catalog emojis (optionally joined by ZWJ) treated as a single unit.
+     * Whitespace is ignored. Returns null when any part is not a supported emoji.
+     */
+    fun normalizeEmojiOrComposite(input: String): String? {
+        val compact = input.filterNot { it.isWhitespace() }
+        if (compact.isEmpty()) return null
+        entriesByEmoji[compact]?.let { return it.emoji }
+        return compositeEntryFor(compact)?.emoji
+    }
+
+    private fun compositeEntryFor(emoji: String): EmojiEntry? {
+        compositeEntries[emoji]?.let { return it }
+        if (emoji.length < 2 || emoji.length > MAX_COMPOSITE_CODE_UNITS) return null
+        val parts = splitIntoEmojis(emoji) ?: return null
+        if (parts.size < 2 || parts.size > MAX_COMPOSITE_EMOJIS) return null
+        val first = entriesByEmoji.getValue(parts.first())
+        val entry = EmojiEntry(
+            emoji = emoji,
+            name = parts.joinToString(" + ") { entriesByEmoji.getValue(it).baseName },
+            category = first.category,
+            subgroup = "custom composite",
+        )
+        if (compositeEntries.size < MAX_CACHED_COMPOSITES) compositeEntries[emoji] = entry
+        return entry
+    }
+
+    // Greedy longest-match split into catalog emojis; a ZWJ between two parts is kept as part of
+    // the sequence. Returns the canonical (catalog) strings of each part, or null if unparseable.
+    private fun splitIntoEmojis(text: String): List<String>? {
+        val parts = mutableListOf<String>()
+        var index = 0
+        while (index < text.length) {
+            if (text[index] == ZWJ && parts.isNotEmpty()) {
+                index++
+                continue
+            }
+            var matched: String? = null
+            var length = minOf(maxEmojiLength, text.length - index)
+            while (length > 0 && matched == null) {
+                val candidate = text.substring(index, index + length)
+                matched = candidate.takeIf { it in supportedEmoji }
+                    ?: candidate.takeIf { it.endsWith(VS16) }
+                        ?.dropLast(1)?.takeIf { it in supportedEmoji }
+                    ?: (candidate + VS16).takeIf { it in supportedEmoji }
+                if (matched == null) length-- else index += length
+            }
+            parts += matched ?: return null
+        }
+        return parts
+    }
 
     fun displayEmoji(entry: EmojiEntry, skinTone: EmojiSkinTone): String {
         if (entry.skinTone != EmojiSkinTone.Default || skinTone == EmojiSkinTone.Default) return entry.emoji
@@ -181,7 +246,10 @@ object EmojiCatalog {
         } else {
             allEntries
                 .asSequence()
-                .filter { it.emoji in customSearchTextByEmoji }
+                .filter { it.emoji in customSearchTextByEmoji } +
+                customSearchTextByEmoji.keys.asSequence()
+                    .filter { it !in entriesByEmoji }
+                    .mapNotNull(::compositeEntryFor)
         }
         val source = if (terms.any { it in skinToneSearchTerms }) {
             entries.asSequence() + allEntries.asSequence().filter { it.skinTone != EmojiSkinTone.Default }
