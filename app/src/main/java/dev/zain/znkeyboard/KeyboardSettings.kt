@@ -10,6 +10,7 @@ import dev.zain.znkeyboard.constants.AgentDefaults
 import dev.zain.znkeyboard.constants.GifDefaults
 import dev.zain.znkeyboard.constants.ImeColors
 import dev.zain.znkeyboard.constants.KeyboardDefaults
+import dev.zain.znkeyboard.constants.VoiceDefaults
 import dev.zain.znkeyboard.ime.ClipboardHistoryStore
 import dev.zain.znkeyboard.translit.HindiTransliterationEngine
 import dev.zain.znkeyboard.typing.AdaptiveTypingEngine
@@ -58,6 +59,7 @@ object KeyboardSettings {
     private const val KEY_HEIGHT_SCALE = "height_scale"
     private const val KEY_BOTTOM_PADDING_DP = "bottom_padding_dp"
     private const val KEY_SUGGESTION_DELAY_MS = "suggestion_delay_ms"
+    private const val KEY_VOICE_KEEP_LOADED_SECONDS = "voice_keep_loaded_seconds"
     private const val KEY_FUNCTION_KEY_BACKGROUNDS_ENABLED = "function_key_backgrounds_enabled"
     private const val KEY_UPPER_ROW_KEYS = "upper_row_keys"
     private const val KEY_AGENT_ROW_KEYS = "agent_row_keys"
@@ -228,6 +230,20 @@ object KeyboardSettings {
     fun normalizeSuggestionDelayMs(delayMs: Int): Int {
         return delayMs.coerceIn(MIN_SUGGESTION_DELAY_MS, MAX_SUGGESTION_DELAY_MS)
     }
+
+    /** Seconds the voice model stays loaded after the panel closes; [VoiceDefaults.KEEP_LOADED_ALWAYS] = until the keyboard closes. */
+    fun readVoiceKeepLoadedSeconds(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return normalizeVoiceKeepLoadedSeconds(prefs.getInt(KEY_VOICE_KEEP_LOADED_SECONDS, VoiceDefaults.DEFAULT_KEEP_LOADED_SECONDS))
+    }
+
+    fun saveVoiceKeepLoadedSeconds(context: Context, seconds: Int) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putInt(KEY_VOICE_KEEP_LOADED_SECONDS, normalizeVoiceKeepLoadedSeconds(seconds)).apply()
+    }
+
+    private fun normalizeVoiceKeepLoadedSeconds(seconds: Int): Int =
+        if (VoiceDefaults.KEEP_LOADED_OPTIONS.any { it.first == seconds }) seconds else VoiceDefaults.DEFAULT_KEEP_LOADED_SECONDS
 
     private fun readFlag(context: Context, key: String, default: Boolean): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(key, default)
@@ -1218,6 +1234,7 @@ object KeyboardSettings {
                             .put("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
                             .put("hindiMode", readHindiModeEnabled(context))
                             .put("suggestionDelayMs", readSuggestionDelayMs(context))
+                            .put("voiceKeepLoadedSeconds", readVoiceKeepLoadedSeconds(context))
                             .put("functionKeyBackgroundsEnabled", readFunctionKeyBackgroundsEnabled(context))
                             .put("shortcutRowAKeys", stringArrayJson(readUpperRowKeyIds(context)))
                             .put("shortcutRowBKeys", stringArrayJson(readSecondRowButtonIds(context)))
@@ -1318,6 +1335,7 @@ object KeyboardSettings {
         val doubleSpacePeriod = keyboard.optBoolean("doubleSpacePeriod", readDoubleSpacePeriodEnabled(context))
         val hindiMode = keyboard.optBoolean("hindiMode", readHindiModeEnabled(context))
         val suggestionDelayMs = keyboard.optInt("suggestionDelayMs", readSuggestionDelayMs(context))
+        val voiceKeepLoadedSeconds = keyboard.optInt("voiceKeepLoadedSeconds", readVoiceKeepLoadedSeconds(context))
         val functionKeyBackgroundsEnabled = keyboard.optBoolean(
             "functionKeyBackgroundsEnabled",
             readFunctionKeyBackgroundsEnabled(context),
@@ -1446,6 +1464,7 @@ object KeyboardSettings {
         saveDoubleSpacePeriodEnabled(context, doubleSpacePeriod)
         saveHindiModeEnabled(context, hindiMode)
         saveSuggestionDelayMs(context, suggestionDelayMs)
+        saveVoiceKeepLoadedSeconds(context, voiceKeepLoadedSeconds)
         saveFunctionKeyBackgroundsEnabled(context, functionKeyBackgroundsEnabled)
         shortcutMacros?.let { saveShortcutMacros(context, it) }
         saveUpperRowKeyIds(context, upperRowKeys)

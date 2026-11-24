@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import dev.zain.znkeyboard.KeyboardSettings
 import dev.zain.znkeyboard.constants.VoiceDefaults
 import java.util.concurrent.Executors
 
@@ -29,6 +30,9 @@ object BarkEngine {
 
     private val release = Runnable { worker.execute { closeRecognizer() } }
 
+    /** Main thread. True once the panel is done with the model, until it is used again. */
+    private var idle = false
+
     /** Main thread. */
     fun addListener(listener: () -> Unit) {
         listeners += listener
@@ -41,24 +45,37 @@ object BarkEngine {
 
     /** Starts loading in the background if needed, and keeps a loaded model from being released. */
     fun warmUp(context: Context) {
+        idle = false
         mainHandler.removeCallbacks(release)
         val app = context.applicationContext
         worker.execute { ensureRecognizer(app) }
     }
 
-    /** Releases the model after [VoiceDefaults.RECOGNIZER_IDLE_RELEASE_MS] unless used again. */
-    fun scheduleRelease() {
+    /**
+     * Main thread. Releases the model after the "Keep model loaded" time from Settings unless used
+     * again; with [VoiceDefaults.KEEP_LOADED_ALWAYS] it stays until [releaseNow].
+     */
+    fun scheduleRelease(context: Context) {
+        idle = true
         mainHandler.removeCallbacks(release)
-        mainHandler.postDelayed(release, VoiceDefaults.RECOGNIZER_IDLE_RELEASE_MS)
+        val seconds = KeyboardSettings.readVoiceKeepLoadedSeconds(context)
+        if (seconds != VoiceDefaults.KEEP_LOADED_ALWAYS) mainHandler.postDelayed(release, seconds * 1000L)
+    }
+
+    /** Main thread. Applies a changed "Keep model loaded" time to an idle model, counting from now. */
+    fun onKeepLoadedChanged(context: Context) {
+        if (idle) scheduleRelease(context)
     }
 
     fun releaseNow() {
+        idle = true
         mainHandler.removeCallbacks(release)
         worker.execute { closeRecognizer() }
     }
 
     /** Transcribes on the worker (loading first if needed); [onResult] runs on the main thread. */
     fun transcribe(context: Context, samples: FloatArray, onResult: (Result<String>) -> Unit) {
+        idle = false
         mainHandler.removeCallbacks(release)
         val app = context.applicationContext
         worker.execute {

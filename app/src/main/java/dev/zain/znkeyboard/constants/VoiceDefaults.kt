@@ -7,8 +7,20 @@ object VoiceDefaults {
     const val MIN_RECORDING_MS = 300
     const val RECOGNIZER_THREADS = 4
 
-    /** Keeps the ~0.8 GB model loaded briefly after the panel closes, for back-to-back dictation. */
-    const val RECOGNIZER_IDLE_RELEASE_MS = 60_000L
+    /**
+     * How long the ~0.8 GB model stays loaded after the voice panel closes, for back-to-back
+     * dictation. Chosen in Settings → Voice typing; [KEEP_LOADED_ALWAYS] keeps it until the keyboard
+     * service is destroyed.
+     */
+    const val KEEP_LOADED_ALWAYS = -1
+    const val DEFAULT_KEEP_LOADED_SECONDS = 60
+    val KEEP_LOADED_OPTIONS: List<Pair<Int, String>> = listOf(
+        0 to "Off",
+        60 to "1 min",
+        300 to "5 min",
+        900 to "15 min",
+        KEEP_LOADED_ALWAYS to "Always",
+    )
 
     /** Level meter: RMS that fills the ring, and how often the UI hears about it. */
     const val FULL_SCALE_RMS = 0.12f
