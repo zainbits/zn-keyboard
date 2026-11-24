@@ -140,13 +140,13 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
         startRecorder()
     }
 
-    /** Stops recording and drops the audio; the model is released after a short idle delay. */
+    /** Stops recording and drops the audio; the model is released after the "Keep model loaded" time. */
     fun stop() {
         generation++
         stopRecorder()
         buffer = null
         mainHandler.removeCallbacks(tick)
-        BarkEngine.scheduleRelease()
+        BarkEngine.scheduleRelease(context)
     }
 
     /** Call when the keyboard service is destroyed. */
@@ -154,7 +154,7 @@ class VoicePanelView(context: Context) : FrameLayout(context) {
         generation++
         stopRecorder()
         mainHandler.removeCallbacksAndMessages(null)
-        BarkEngine.scheduleRelease()
+        BarkEngine.scheduleRelease(context)
     }
 
     // Allocated per recording (up to 7.7 MB at the 120 s cap) and dropped right after.
